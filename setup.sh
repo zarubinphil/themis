@@ -1,42 +1,39 @@
 #!/bin/bash
 # Themis — Setup Script
-# Installs Python dependencies for the Themis legal AI system
+# Run from the project root: bash setup.sh
 
 set -e
-
 echo "=== Themis Setup ==="
 echo ""
 
-# Python dependencies
-echo "[1/3] Installing Python dependencies..."
-pip3 install --quiet \
-  pymupdf \
-  Pillow \
-  markitdown \
-  python-docx
+# ── 1. Python packages ────────────────────────────────────────────────────────
+echo "[1/4] Installing Python packages..."
+pip3 install --quiet pymupdf Pillow markitdown python-docx markitdown-mcp 2>/dev/null || \
+  pip3 install pymupdf Pillow markitdown python-docx
 
-echo "      ✓ pymupdf (PDF manipulation + OCR support)"
-echo "      ✓ Pillow (image processing)"
-echo "      ✓ markitdown (document → Markdown conversion)"
-echo "      ✓ python-docx (DOCX reading)"
+echo "      ✓ pymupdf       (PyMuPDF — PDF rendering, signature overlay)"
+echo "      ✓ Pillow        (image processing)"
+echo "      ✓ markitdown    (Microsoft — DOCX/XLSX/PDF → Markdown, zero tokens)"
+echo "      ✓ python-docx   (DOCX reading)"
+echo "      ✓ markitdown-mcp (optional MCP server for markitdown)"
 
-# Make scripts executable
-echo "[2/3] Making scripts executable..."
-chmod +x scripts/markdown_extract.py
-chmod +x scripts/sign_and_pdf.py
+# ── 2. Scripts executable ─────────────────────────────────────────────────────
+echo ""
+echo "[2/4] Making scripts executable..."
+chmod +x scripts/markdown_extract.py scripts/sign_and_pdf.py
 echo "      ✓ scripts/markdown_extract.py"
 echo "      ✓ scripts/sign_and_pdf.py"
 
-# Create required directories
-echo "[3/3] Creating required directories..."
+# ── 3. Directories ────────────────────────────────────────────────────────────
+echo ""
+echo "[3/4] Creating required directories..."
 mkdir -p cases/_assets cases/_logs knowledge
-echo "      ✓ cases/_assets/   (place подпись.png here)"
-echo "      ✓ cases/_logs/     (session error logs)"
-echo "      ✓ knowledge/       (global practice index)"
+echo "      ✓ cases/_assets/   → place подпись.png here for /finalize"
+echo "      ✓ cases/_logs/     → session error analysis logs"
+echo "      ✓ knowledge/       → global practice index (auto-maintained)"
 
-# Initialize practice index if absent
 if [ ! -f "knowledge/practice_index.md" ]; then
-  cat > knowledge/practice_index.md << 'INDEXEOF'
+  cat > knowledge/practice_index.md << 'EOF'
 # Индекс судебной практики
 
 _Обновлено: — | Записей: 0_
@@ -47,19 +44,54 @@ _Обновлено: — | Записей: 0_
 |-----------|---------|-----------|
 
 ---
-INDEXEOF
-  echo "      ✓ knowledge/practice_index.md (created empty)"
+EOF
+  echo "      ✓ knowledge/practice_index.md (initialized empty)"
 fi
 
+# ── 4. Community skills check ─────────────────────────────────────────────────
+echo ""
+echo "[4/4] Checking community skills..."
+
+CAVEMAN_PATH="$HOME/.claude/skills/caveman"
+HUMANIZER_PATH="$HOME/.claude/skills/humanizer"
+
+if [ -d "$CAVEMAN_PATH" ]; then
+  echo "      ✓ caveman skill found at $CAVEMAN_PATH"
+else
+  echo "      ✗ caveman skill NOT found"
+  echo "        Install: npx skills add caveman"
+  echo "        Source:  https://github.com/eastcoastcode/ecc"
+fi
+
+if [ -d "$HUMANIZER_PATH" ]; then
+  echo "      ✓ humanizer skill found at $HUMANIZER_PATH"
+else
+  echo "      ✗ humanizer skill NOT found"
+  echo "        Install: npx skills add humanizer"
+  echo "        Source:  https://github.com/eastcoastcode/ecc"
+fi
+
+# ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 echo "=== Setup complete ==="
 echo ""
-echo "Next steps:"
-echo "  1. Add your signature PNG: cases/_assets/подпись.png"
-echo "     (PNG, ~400×130px, transparent or white background)"
-echo "  2. Open a new Claude Code session in this directory"
-echo "  3. Run /new-case {client} {case} to start your first case"
+echo "Remaining manual steps:"
 echo ""
-echo "Requirements:"
-echo "  • Microsoft Word (for /finalize PDF export)"
-echo "  • Claude Code with claude-sonnet-4-6 or higher"
+echo "  1. Install community skills (if missing above):"
+echo "     npx skills add caveman"
+echo "     npx skills add humanizer"
+echo ""
+echo "  2. Configure MCP servers in ~/.claude/mcp.json:"
+echo "     - firecrawl-mcp  (npx -y firecrawl-mcp@latest, needs FIRECRAWL_API_KEY)"
+echo "     - scrapegraph    (pip install scrapegraphai, needs API key)"
+echo "     See README.md for full config."
+echo ""
+echo "  3. Microsoft Word must be installed (macOS) for /finalize PDF export."
+echo "     Linux/Windows: use LibreOffice (see README.md for substitution)."
+echo ""
+echo "  4. Add signature for /finalize:"
+echo "     cases/_assets/подпись.png  (~400×130px PNG, transparent background)"
+echo ""
+echo "  5. Open Claude Code in this directory:"
+echo "     claude"
+echo ""
