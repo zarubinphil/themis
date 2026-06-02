@@ -162,12 +162,123 @@ cases/
 
 ---
 
-## Requirements
+## Full Dependency Stack
 
-- **Claude Code** with claude-sonnet-4-6 or higher
-- **Python 3.9+** with: `pymupdf`, `Pillow`, `markitdown`, `python-docx`
-- **Microsoft Word** (macOS) — for `/finalize` PDF export
-- **Firecrawl MCP** (recommended) or ScrapeGraphAI for legal research
+Themis builds on top of several tools. Everything below is required for full functionality.
+
+---
+
+### 1. Claude Code
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+Models used:
+| Agent | Model |
+|-------|-------|
+| doc-drafter (L2/L3), practice-hunter-skeptic | `claude-opus-4-8` |
+| case-mapper, hunters, reviewers | `claude-sonnet-4-6` |
+| readers, archivist (leaf workers) | `claude-haiku-4-5` |
+
+---
+
+### 2. Python Packages
+
+```bash
+pip install pymupdf Pillow markitdown python-docx
+```
+
+| Package | Source | Used for |
+|---------|--------|---------|
+| [pymupdf](https://github.com/pymupdf/PyMuPDF) | pip | Scan-PDF rendering, signature overlay |
+| [Pillow](https://github.com/python-pillow/Pillow) | pip | Signature image processing |
+| [markitdown](https://github.com/microsoft/markitdown) | pip (Microsoft) | DOCX/XLSX/PPTX/PDF/HTML → Markdown, zero tokens |
+| [python-docx](https://github.com/python-openxml/python-docx) | pip | DOCX reading |
+
+---
+
+### 3. Claude Code Community Skills
+
+Two skills control how all 13 agents communicate and write. **Required.**
+
+#### [caveman](https://github.com/eastcoastcode/ecc) — token-efficient communication
+Compresses agent output ~65–75% while keeping full technical accuracy. Used for all inter-agent and user communication.
+
+```bash
+npx skills add caveman
+```
+
+#### humanizer — professional legal language
+Transforms AI output into authentic professional prose. Used when writing court documents, practice reports, and case maps.
+
+```bash
+npx skills add humanizer
+```
+
+> Both skills are part of the **ECC (Engineering Claude Code)** skill pack.
+> If `npx skills add` is unavailable, copy the skill folders manually to `~/.claude/skills/`.
+
+---
+
+### 4. MCP Servers
+
+Configure in `~/.claude/mcp.json`.
+
+#### Firecrawl — primary web search (required for practice hunters)
+
+```json
+{
+  "mcpServers": {
+    "firecrawl-mcp": {
+      "command": "npx",
+      "args": ["-y", "firecrawl-mcp@latest"],
+      "env": { "FIRECRAWL_API_KEY": "YOUR_KEY_HERE" }
+    }
+  }
+}
+```
+
+Get API key: [firecrawl.dev](https://firecrawl.dev)
+
+#### ScrapeGraphAI — fallback search
+
+```bash
+pip install scrapegraphai
+# CLI: sgai validate --json
+```
+
+Get API key: [scrapegraphai.com](https://scrapegraphai.com) → store in `~/.scrapegraphai/config.json`
+
+#### markitdown MCP (optional — adds MCP-based document conversion)
+
+```bash
+pip install markitdown-mcp
+```
+
+Add to `~/.claude/mcp.json`:
+```json
+"markitdown": { "command": "python3", "args": ["-m", "markitdown_mcp"] }
+```
+
+---
+
+### 5. Microsoft Word (macOS)
+
+Required for `/finalize` — exports `.docx` → `.pdf` via AppleScript.
+`Microsoft Word.app` must be installed in `/Applications/`.
+
+**Linux/Windows alternative** — replace AppleScript block in `scripts/sign_and_pdf.py`:
+```python
+subprocess.run(["libreoffice", "--headless", "--convert-to", "pdf", docx_path])
+```
+
+---
+
+### 6. Anthropic Built-in Skill
+
+`anthropic-skills:docx` is used by the doc-drafter to generate `.docx` files.
+Bundled with Claude Code — no separate install.
 
 ---
 
@@ -176,12 +287,21 @@ cases/
 ```bash
 git clone https://github.com/your-username/themis.git my-legal-practice
 cd my-legal-practice
+
+# 1. Python dependencies + directory setup
 bash setup.sh
 
-# Add your signature (optional, for /finalize)
-# Place PNG file: cases/_assets/подпись.png
+# 2. Community skills
+npx skills add caveman
+npx skills add humanizer
 
-# Open Claude Code
+# 3. Configure MCP servers in ~/.claude/mcp.json (see above)
+
+# 4. Signature for /finalize (optional)
+#    Photograph your signature → crop → save as PNG:
+#    cases/_assets/подпись.png  (~400×130px, transparent background)
+
+# 5. Start
 claude
 ```
 
