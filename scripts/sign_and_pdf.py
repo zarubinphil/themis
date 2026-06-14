@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/Library/Frameworks/Python.framework/Versions/3.11/bin/python3
 """
 sign_and_pdf.py — конвертация docx → PDF + наложение подписи.
 

@@ -2,7 +2,7 @@
   "hooks": {
     "Stop": [
       {
-        "command": "mkdir -p /Users/fil/legal-practice/cases/_logs && echo \"Session ended: $(date '+%d.%m.%Y %H:%M')\" >> /Users/fil/legal-practice/cases/_logs/_session_history.txt",
+        "command": "mkdir -p $CLAUDE_PROJECT_DIR/cases/_logs && echo \"Session ended: $(date '+%d.%m.%Y %H:%M')\" >> $CLAUDE_PROJECT_DIR/cases/_logs/_session_history.txt",
         "description": "Log session end timestamp"
       }
     ]
