@@ -99,7 +99,7 @@ _Добавляй по мере развития дела_
 - `00_intake/` — исходники от клиента
 - `01_context/knowledge-map.md` — карта знаний (case-mapper)
 - `01_context/practice.md` — судебная практика (/askacouncil)
-- `01_context/positions.md` — правовая позиция (/council)
+- `01_context/positions.md` — правовая позиция (/position-council)
 
 ## Журнал событий
 | Дата | Событие | Результат |

@@ -1,15 +1,24 @@
+# ── Пользовательские данные дел — НЕ публикуются (приватность клиентов) ──
 cases/*/
+# кроме синтетического примера и реестров-шаблонов:
+!cases/ivanov-ivan/
+!cases/ivanov-ivan/**
 !cases/_index.md
 !cases/_clients.md
 !cases/_relationships.md
-!cases/_logs/_template.md
-!cases/_assets/.gitkeep
+!cases/_logs/
 !cases/_templates/
 
-knowledge/practice_index.md
-
+# ── Рантайм / сборка (не в git) ──
+cockpit/.state.json
+cockpit/.state.tmp
+bin/vision-ocr
+graphify-out/
 __pycache__/
 *.pyc
 .DS_Store
 *.env
 .env.*
+# кеши извлечения и сайдкары
+**/_baselines/
+*.requisites.json
