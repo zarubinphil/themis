@@ -28,9 +28,9 @@
 
 **Примеры:**
 ```
-/draft возражения для doveritel/alimenty-izmenenie-2026
+/draft возражения для ivanov-ivan/razdel-imushchestva-2026
 /draft иск для ivanov-ivan/razdel-imushchestva-2026
-/draft апелляционная жалоба для doveritel/apellyaciya-2-434-2025
+/draft апелляционная жалоба для ivanov-ivan/razdel-imushchestva-2026
 ```
 
 Если маркеры консенсуса не проставлены — скилл остановится и укажет что запустить.
