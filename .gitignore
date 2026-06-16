@@ -1,17 +1,26 @@
 # ── Пользовательские данные дел — НЕ публикуются (приватность клиентов) ──
 cases/*/
-# кроме синтетического примера и реестров-шаблонов:
+# кроме синтетического примера и шаблонов (БЕЗ ПД):
 !cases/ivanov-ivan/
 !cases/ivanov-ivan/**
-!cases/_index.md
-!cases/_clients.md
-!cases/_relationships.md
-!cases/_logs/
 !cases/_templates/
+# ВАЖНО: _index.md/_clients.md/_relationships.md/_logs/ содержат реальные ПД
+# клиентов — НЕ публикуются (live-реестры боевого themis, gitignored).
+# (cases/*/ матчит только папки → _logs/ уже покрыт; файлы под cases/ нужно явно)
+cases/_index.md
+cases/_clients.md
+cases/_relationships.md
+cases/_logs/
+
+# ── База знаний: live practice_index/LAST_UPDATED ссылаются на дела клиентов ──
+knowledge/practice_index.md
+knowledge/LAST_UPDATED.md
 
 # ── Рантайм / сборка (не в git) ──
 cockpit/.state.json
 cockpit/.state.tmp
+audit.log
+scripts/.inbox.lock
 bin/vision-ocr
 graphify-out/
 __pycache__/
