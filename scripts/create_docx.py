@@ -164,6 +164,24 @@ class DocBuilder:
         _set_font(p.add_run(text), 12)
         return p
 
+    def add_quote(self, text):
+        """Блок-цитата (дословная норма/формула): JUSTIFY, отступы 1.25 см
+        слева и справа, без первой строки, 11pt, sb=6, sa=6.
+
+        Эталон CONTENT_DESIGN.md: единственный правильный контейнер для
+        дословного текста нормы закона, судебного акта или формулы (40+ слов).
+        Отступ служит маркером цитаты — кавычки не нужны.
+        """
+        p = self.doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        p.paragraph_format.left_indent       = Cm(1.25)
+        p.paragraph_format.right_indent      = Cm(1.25)
+        p.paragraph_format.first_line_indent = Cm(0)
+        p.paragraph_format.space_before      = Pt(6)
+        p.paragraph_format.space_after       = Pt(6)
+        _set_font(p.add_run(text), 11)
+        return p
+
     def add_proshyu(self):
         """Заголовок ПРОШУ: CENTER, bold, 12pt, sa=6."""
         p = self.doc.add_paragraph()
@@ -213,6 +231,57 @@ class DocBuilder:
         _set_font(p.add_run(date), 12)
         return p
 
+    def add_signature_table(self, role, name, date=None):
+        """
+        Блок подписи 3-колоночной таблицей без границ (ГОСТ Р 7.0.97-2016 п. 5.22).
+
+        [Роль/Должность]   [пробел для подписи]   [И. О. Фамилия]
+        Устойчиво к открытию в LibreOffice и Google Docs (в отличие от подписи
+        пробелами). Дата (если задана) — отдельным параграфом под таблицей, LEFT.
+        """
+        table = self.doc.add_table(rows=1, cols=3)
+
+        tbl = table._tbl
+        tblPr = tbl.find(qn("w:tblPr"))
+        if tblPr is None:
+            tblPr = OxmlElement("w:tblPr")
+            tbl.insert(0, tblPr)
+        tblBorders = OxmlElement("w:tblBorders")
+        for side in ["top", "left", "bottom", "right", "insideH", "insideV"]:
+            el = OxmlElement(f"w:{side}")
+            el.set(qn("w:val"), "none")
+            tblBorders.append(el)
+        tblPr.append(tblBorders)
+
+        tblGrid = OxmlElement("w:tblGrid")
+        for w in ["5000", "2339", "2000"]:
+            col = OxmlElement("w:gridCol"); col.set(qn("w:w"), w)
+            tblGrid.append(col)
+        tbl.insert(1, tblGrid)
+
+        row = table.rows[0]
+        c0 = row.cells[0]
+        c0.paragraphs[0].clear()
+        p0 = c0.paragraphs[0]
+        p0.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        _set_font(p0.add_run(role), 12)
+        c1 = row.cells[1]
+        c1.paragraphs[0].clear()
+        c1.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        c2 = row.cells[2]
+        c2.paragraphs[0].clear()
+        p2 = c2.paragraphs[0]
+        p2.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        _set_font(p2.add_run(name), 12)
+
+        if date:
+            pd = self.doc.add_paragraph()
+            pd.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            pd.paragraph_format.space_before = Pt(6)
+            pd.paragraph_format.space_after  = Pt(6)
+            _set_font(pd.add_run(date), 12)
+        return table
+
     def add_final_empty(self):
         """Последний пустой параграф: JUSTIFY, sb=6, sa=0."""
         p = self.doc.add_paragraph()
@@ -220,6 +289,63 @@ class DocBuilder:
         p.paragraph_format.space_before = Pt(6)
         p.paragraph_format.space_after  = Pt(0)
         return p
+
+    def add_addressee_table(self, blocks):
+        """
+        Адресная шапка досудебного документа (КОМУ / ОТ) — плавающая таблица
+        в правой части листа, без границ. В отличие от add_header_table не
+        создаёт служебных строк суда и дела.
+
+        blocks: list[dict] с ключами:
+            label: «КОМУ:» / «ОТ:»
+            lines: list[(text, bold)]
+        """
+        table = self.doc.add_table(rows=len(blocks), cols=2)
+
+        tbl = table._tbl
+        tblPr = tbl.find(qn("w:tblPr"))
+        if tblPr is None:
+            tblPr = OxmlElement("w:tblPr")
+            tbl.insert(0, tblPr)
+
+        tblBorders = OxmlElement("w:tblBorders")
+        for side in ["top", "left", "bottom", "right", "insideH", "insideV"]:
+            el = OxmlElement(f"w:{side}")
+            el.set(qn("w:val"), "none")
+            tblBorders.append(el)
+        tblPr.append(tblBorders)
+
+        tblGrid = OxmlElement("w:tblGrid")
+        col1 = OxmlElement("w:gridCol"); col1.set(qn("w:w"), "1400")
+        col2 = OxmlElement("w:gridCol"); col2.set(qn("w:w"), "7939")
+        tblGrid.append(col1); tblGrid.append(col2)
+        tbl.insert(1, tblGrid)
+
+        tblpPr = OxmlElement("w:tblpPr")
+        tblpPr.set(qn("w:horzAnchor"), "margin")
+        tblpPr.set(qn("w:vertAnchor"), "text")
+        tblpPr.set(qn("w:tblpY"), "-325")
+        tblPr.insert(0, tblpPr)
+
+        for i, block in enumerate(blocks):
+            row = table.rows[i]
+            lc = row.cells[0]
+            lc.paragraphs[0].clear()
+            lp = lc.paragraphs[0]
+            lp.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            _set_font(lp.add_run(block["label"]), 12, bold=True)
+            rc = row.cells[1]
+            rc.paragraphs[0].clear()
+            first = True
+            for text, bold in block["lines"]:
+                if first:
+                    p = rc.paragraphs[0]
+                    first = False
+                else:
+                    p = rc.add_paragraph()
+                p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                _set_font(p.add_run(text), 12, bold=bold)
+        return table
 
     def add_header_table(self, court_name, court_route, parties, case_number, instance=None):
         """
