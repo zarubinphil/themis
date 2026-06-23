@@ -44,8 +44,9 @@
 
 ## Workflow Документа
 
-1. `case-mapper` (+ читатели `pdf-reader`/`docx-reader`/`image-reader`, верификация `case-reconciler`) → `01_context/knowledge-map.md`.
-2. Охотники: `practice-hunter-classic` / `practice-hunter-skeptic` / `practice-hunter-tactical` → `_practice/hunter_*.md`. L2/L3: `/askacouncil` → `practice.md`.
+0. **Триаж трека (до агентов).** FAST — простой L1/L2: ≤6 материалов, все текст/уже-OCR, узкий узел → `case-mapper` читает сам (БЕЗ роя читателей и `case-reconciler`; готовый OCR не перераспознавать), 1 охотник, синтез `practice.md`/`positions.md` сам. FULL — L3/кассация/много сканов-склеек/спорное толкование → полный рой. Сомнение → FAST.
+1. `case-mapper` (на FULL: + читатели `pdf-reader`/`docx-reader`/`image-reader`, верификация `case-reconciler`) → `01_context/knowledge-map.md`.
+2. Охотники: FAST — 1 (тактик) + синтез сам. FULL — `practice-hunter-classic` / `practice-hunter-skeptic` / `practice-hunter-tactical` → `_practice/hunter_*.md` + `/askacouncil` → `practice.md`.
 3. L2/L3: `/position-council` → `01_context/positions.md`.
 4. `doc-drafter` → `03_drafts/{document}_v1.md` и `.docx`.
 5. `doc-reviewer` → правки.
@@ -54,7 +55,7 @@
 
 ## Агенты
 
-- `case-mapper` (Мейер) — картирование дела, начальник роя читателей.
+- `case-mapper` (Мейер) — картирование дела; на FAST-треке читает сам, рой читателей — только FULL.
 - `case-reconciler` (Шершеневич) — верификация расхождений между читателями.
 - `pdf-reader` (Гольмстен) / `image-reader` (Буринский) / `docx-reader` (Покровский) — чтение исходников.
 - `inbox-triage` (Грузенберг) — входящие файлы из inbox в дело.
