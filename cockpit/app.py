@@ -326,9 +326,15 @@ def _client_name(folder: Path) -> str:
         for ln in cm.read_text(encoding="utf-8", errors="replace").splitlines():
             s = ln.strip()
             if s.startswith("# "):
-                return _initials(s[2:].strip())
+                title = s[2:].strip()
+                # шаблонный H1 «Профиль: Фамилия И.О.» — берём часть после двоеточия
+                if title.lower().startswith("профиль:"):
+                    return title.split(":", 1)[1].strip()
+                return _initials(title)
             if "ФИО:" in s:
-                return _initials(s.split("ФИО:")[1].strip(" *|"))
+                raw = s.split("ФИО:")[1].strip(" *|")
+                # если уже в форме «Фамилия И.О.» — не укорачивать повторно
+                return raw if _re.match(r"[А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.", raw) else _initials(raw)
     return folder.name
 
 
