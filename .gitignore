@@ -31,3 +31,4 @@ __pycache__/
 # кеши извлечения и сайдкары
 **/_baselines/
 *.requisites.json
+.gstack/
