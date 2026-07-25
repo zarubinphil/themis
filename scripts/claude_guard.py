@@ -20,6 +20,58 @@ def block(msg: str) -> None:
     sys.exit(2)
 
 
+def _has_marker(path, pattern: str) -> bool:
+    import os
+    try:
+        with open(path, encoding="utf-8") as f:
+            return bool(re.search(pattern, f.read()))
+    except OSError:
+        return False
+
+
+def _workflow_gate(p: str) -> None:
+    """Порядок шагов протокола — детерминированно.
+
+    Запись артефакта шага N блокируется, пока нет маркера шага N-1 на диске:
+      practice.md   ← требует «## КАРТА ГОТОВА ✓» в knowledge-map.md
+      positions.md  ← требует «## СОВЕТ ЗАВЕРШ» в practice.md
+      03_drafts/*   ← требует оба маркера (кроме _working/ и _baselines/)
+    """
+    norm = p.replace("\\", "/")
+    parts = norm.split("/")
+    if "cases" not in parts:
+        return
+    i = parts.index("cases")
+    # структура cases/{клиент}/{дело}/... ; служебные папки (_templates, _logs) — мимо
+    if len(parts) < i + 4 or parts[i + 1].startswith("_"):
+        return
+    case_root = "/".join(parts[: i + 3])
+    km = case_root + "/01_context/knowledge-map.md"
+    pr = case_root + "/01_context/practice.md"
+    tail = "/".join(parts[i + 3:])
+
+    if tail == "01_context/practice.md" and not _has_marker(km, r"## КАРТА ГОТОВА ✓"):
+        block(
+            "БЛОК ПРОТОКОЛА: practice.md пишется только после Шага 1 — "
+            "в knowledge-map.md нет маркера «## КАРТА ГОТОВА ✓». Запустить case-mapper. "
+            "Статус: python3 scripts/themis_status.py " + case_root
+        )
+    if tail == "01_context/positions.md" and not _has_marker(pr, r"## СОВЕТ ЗАВЕРШ"):
+        block(
+            "БЛОК ПРОТОКОЛА: positions.md пишется только после Шага 2 — "
+            "в practice.md нет маркера «## СОВЕТ ЗАВЕРШЕН». Запустить охоту/совет. "
+            "Статус: python3 scripts/themis_status.py " + case_root
+        )
+    if (tail.startswith("03_drafts/")
+            and "/_working/" not in norm and "/_baselines/" not in norm):
+        if not _has_marker(km, r"## КАРТА ГОТОВА ✓") or not _has_marker(pr, r"## СОВЕТ ЗАВЕРШ"):
+            block(
+                "БЛОК ПРОТОКОЛА: черновик в 03_drafts/ пишется только после Шагов 1-2 — "
+                "нет маркера карты и/или практики. Судебные документы вне конвейера запрещены. "
+                "Статус: python3 scripts/themis_status.py " + case_root
+            )
+
+
 def main() -> None:
     try:
         d = json.load(sys.stdin)
@@ -46,6 +98,7 @@ def main() -> None:
                 "БЛОК: 00_intake/ неприкосновенен — исходники клиента "
                 "не редактировать и не перезаписывать (железное правило)."
             )
+        _workflow_gate(p)
 
     if tool == "Bash":
         cmd = ti.get("command", "")
