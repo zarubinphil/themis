@@ -192,6 +192,51 @@ def transcribe(path):
     return ""
 
 
+LAT_MAX = 0.10   # доля латиницы среди букв страницы; выше — текст-слой битый
+RU_MIN = 0.40    # доля кириллицы по ВСЕМУ документу, чтобы считать его русским
+ALL_BAD = 0.25   # столько битых страниц — битый весь PDF (один прогон чужого OCR)
+
+
+def _lat_share(t):
+    """Доля латиницы среди букв. None — букв слишком мало, судить не по чему."""
+    letters = [c for c in t if c.isalpha()]
+    if len(letters) < 100:
+        return None
+    cyr = sum(1 for c in letters if "Ѐ" <= c <= "ӿ")
+    return (len(letters) - cyr) / len(letters)
+
+
+def text_layer_ok(t, doc_is_ru=True):
+    """Текст-слой русского документа бывает битым: чужой OCR запечен в PDF и дает
+    кашу вида «Рссn)'6л~1кс». Такой слой ХУЖЕ, чем его отсутствие — читается как
+    настоящий текст, но врет в реквизитах. Признак: латиница лезет в кириллицу.
+    Apple Vision по рендеру страницы такой лист берет чисто.
+    ponytail: одна метрика вместо словарного анализа; ложное срабатывание стоит
+    только времени OCR ($0), пропуск мусора стоит ошибки в судебном документе.
+    «Русский ли документ» решается по ВСЕМУ файлу, не по странице: у битой
+    страницы кириллицы может почти не остаться, и постраничная проверка
+    пропускала бы худшие листы как «иноязычные»."""
+    r = _lat_share(t)
+    return True if (r is None or not doc_is_ru) else r <= LAT_MAX
+
+
+def pdf_garbage_pages(path, idx):
+    """Из страниц с текстовым слоем вернуть те, чей слой мусорный (до-OCR-ить).
+    Если битых листов много — весь PDF прогнан через один чужой OCR, чистых
+    страниц в нем не осталось: возвращаем все."""
+    import fitz
+    d = fitz.open(path)
+    texts = {i: d[i].get_text() for i in idx}
+    d.close()
+    letters = [c for t in texts.values() for c in t if c.isalpha()]
+    if not letters:
+        return []
+    cyr = sum(1 for c in letters if "Ѐ" <= c <= "ӿ")
+    doc_is_ru = cyr >= len(letters) * RU_MIN
+    bad = [i for i in idx if not text_layer_ok(texts[i], doc_is_ru)]
+    return list(idx) if len(bad) >= max(2, len(idx) * ALL_BAD) else bad
+
+
 def pdf_mixed_to_md(path, per, sha):
     """Смешанный PDF: текст где есть, Apple Vision OCR где скан. Склейка по порядку
     страниц. OCR-страницы помечены. Возвращает (body, n_ocr_pages, truncated)."""
@@ -300,8 +345,13 @@ def main():
             pages = len(per)
             chars = sum(per)
             text_pages = [i for i, c in enumerate(per[:MAXP]) if c >= TEXT_MIN]
+            # битый текст-слой (чужой OCR запечен в PDF) — считать страницу сканом
+            garbage = pdf_garbage_pages(p, text_pages) if text_pages else []
+            for i in garbage:
+                per[i] = 0
+            text_pages = [i for i, c in enumerate(per[:MAXP]) if c >= TEXT_MIN]
             scan_pages = [i for i, c in enumerate(per[:MAXP]) if c < TEXT_MIN]
-            if not text_pages:
+            if not text_pages and not garbage:
                 # полностью скан — прежний маршрут (рендерит case-mapper, читатели читают .txt)
                 route = "scan"
                 note = f"OCR_REQUIRED — скан без текстового слоя. Страниц: {pages}."
@@ -332,6 +382,10 @@ def main():
                     note = (f"СМЕШАННЫЙ PDF: {len(text_pages)} текст-стр + {ocr_count} скан-стр "
                             f"(до-OCR-ено Apple Vision, $0). Контент полный."
                             + (f" УСЕЧЕНО: всего {pages} стр., обработано {MAXP}." if trunc else ""))
+                    if garbage:
+                        note += (f"\n⚠ БИТЫЙ ТЕКСТ-СЛОЙ на {len(garbage)} стр.: в PDF запечен "
+                                 f"чужой OCR с кашей вместо кириллицы. Эти страницы распознаны "
+                                 f"заново Apple Vision. Текст-слой из PDF по ним НЕ использовать.")
         elif e in AUDIO or e in VIDEO:
             route = "media"
             if os.path.isfile(md_path) and os.path.getsize(md_path) > 0:
