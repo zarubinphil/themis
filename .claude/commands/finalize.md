@@ -19,7 +19,7 @@ argument-hint: "{путь_к_docx} | {клиент}/{дело} [--no-sign]"
 Уже выданный `.docx` доверитель мог править напрямую в Word (прецедент 14.07.2026 — правки молча затерты пересборкой).
 
 1. Есть снимок `03_drafts/_baselines/{имя}.docx` → извлечь оба через `python3 scripts/markdown_extract.py FILE --json-meta`, сравнить тексты.
-2. Направление правки: `unzip -p FILE docProps/core.xml` → `lastModifiedBy` / `revision`. `revision` > 1 и чужой `lastModifiedBy` = правил доверитель.
+2. Направление правки: `officecli get FILE /` → `lastModifiedBy` / `revisionNumber` (фолбэк: `unzip -p FILE docProps/core.xml`). `revision` > 1 и чужой `lastModifiedBy` = правил доверитель. Режим рецензирования → `officecli get FILE /revision` (точный список правок с авторами).
 3. Отличия есть → это правки доверителя → **СТОП**: не пересобирать, не перезаписывать. Предложить redline-разбор («изучи мои правки») или спросить, как поступить.
 4. Отличий нет → продолжать.
 
