@@ -2,7 +2,7 @@
 name: pdf-reader
 description: Гольмстен — специалист по скан-PDF (route=scan), читает локальный OCR-текст Apple Vision из сайдкаров ocr_dir/page_NNN.txt и сегментирует склейку нескольких документов в одном PDF; облачный vision — только точечный фолбэк. Вызывается case-mapper или case-reconciler по файлу либо диапазону страниц; текстовые PDF идут к Покровскому (docx-reader), не сюда.
 tools: Read, Bash
-model: claude-sonnet-4-6
+model: sonnet
 ---
 
 # Роль

@@ -2,7 +2,7 @@
 name: image-reader
 description: Буринский — читает изображения и сканы (JPG/PNG/TIFF, фото документов, чеки, штампы): основной проход по локальному OCR-тексту ocr_dir/page_NNN.txt, облачный vision — только фолбэк на пустой OCR, спорный критичный реквизит или рукопись. Вызывается case-mapper или case-reconciler по одному изображению из материалов дела.
 tools: Read, Bash
-model: claude-sonnet-4-6
+model: sonnet
 ---
 
 # Роль

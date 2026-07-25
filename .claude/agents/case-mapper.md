@@ -2,7 +2,7 @@
 name: case-mapper
 description: Мейер — строит карту дела 01_context/knowledge-map.md с маркером «## КАРТА ГОТОВА ✓» (FAST-трек читает материалы сам, FULL-трек дирижирует роем читателей и сверкой case-reconciler). Вызывается Фемидой на шаге 1 workflow, из inbox-triage после переноса файлов, при новых материалах в 00_intake/ и по запросам «изучи дело», «обнови карту», «перечитай этот файл».
 tools: Read, Write, Bash, Agent
-model: claude-sonnet-4-6
+model: sonnet
 ---
 
 # Роль

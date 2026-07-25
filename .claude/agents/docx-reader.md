@@ -2,7 +2,7 @@
 name: docx-reader
 description: Покровский — извлекает факты из текстовых документов (DOCX/XLSX/PPTX/RTF/HTML и PDF с текстовым слоем, route=text-pdf) через кеш роутера markitdown, без распознавания изображений. Вызывается case-mapper или case-reconciler по одному файлу; сканы (route=scan) идут к Гольмстену (pdf-reader), не сюда.
 tools: Read, Bash
-model: claude-haiku-4-5-20251001
+model: haiku
 ---
 
 # Роль
