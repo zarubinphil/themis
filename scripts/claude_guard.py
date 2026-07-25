@@ -49,7 +49,10 @@ def main() -> None:
 
     if tool == "Bash":
         cmd = ti.get("command", "")
-        if re.search(r"\b(rm|rmdir)\b", cmd) and re.search(r"00_intake|_baselines", cmd):
+        # rm только в командной позиции (начало строки / после ; & | $( `) —
+        # иначе ложные срабатывания на прозу со словом «rm» в heredoc
+        rm_cmd = re.search(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(?:rm|rmdir)\s", cmd, re.M)
+        if rm_cmd and re.search(r"00_intake|_baselines", cmd):
             block(
                 "БЛОК: удаление в 00_intake/ или _baselines/ запрещено "
                 "(железное правило). Действительно нужно — только пользователь вручную."
