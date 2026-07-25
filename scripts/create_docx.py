@@ -452,21 +452,41 @@ class DocBuilder:
         Плюс неизменяемый снимок-черновик в `_baselines/` рядом — база «ДО» для
         самообучения по правкам доверителя (redline). Снимок = последняя выданная
         версия; правки доверителя сравниваются именно с ней.
+
+        Guard (урок 14.07.2026): если выданный файл отличается от baseline —
+        его правил доверитель; перезапись вслепую запрещена
+        (обход: THEMIS_FORCE_OVERWRITE=1).
         """
+        import filecmp
+        import os
+        import shutil
+        from pathlib import Path as _P
+
         self._strip_yo()
+        p = _P(path)
+        # снимок только для реальных документов дел (не тест/tmp), без рекурсии
+        is_case_doc = p.parent.name != "_baselines" and ("cases" in p.parts or "03_drafts" in p.parts)
+        bfile = p.parent / "_baselines" / p.name
+
+        if (is_case_doc and p.exists() and bfile.exists()
+                and not filecmp.cmp(p, bfile, shallow=False)
+                and os.environ.get("THEMIS_FORCE_OVERWRITE") != "1"):
+            print(f"СТОП, НЕ СОХРАНЕНО: {p} отличается от _baselines/ — "
+                  f"вероятны правки доверителя, внесенные напрямую в файл. "
+                  f"Сначала redline-разбор («изучи мои правки»), "
+                  f"либо повторить с THEMIS_FORCE_OVERWRITE=1.")
+            return
+
         self.doc.save(path)
         print(f"Сохранено: {path}")
-        try:
-            import shutil
-            from pathlib import Path as _P
-            p = _P(path)
-            # снимок только для реальных документов дел (не тест/tmp), без рекурсии
-            if p.parent.name != "_baselines" and ("cases" in p.parts or "03_drafts" in p.parts):
-                bdir = p.parent / "_baselines"
-                bdir.mkdir(exist_ok=True)
-                shutil.copy2(path, bdir / p.name)  # перезапись: baseline = свежая версия
-        except OSError:
-            pass
+        if is_case_doc:
+            try:
+                bfile.parent.mkdir(exist_ok=True)
+                shutil.copy2(path, bfile)  # перезапись: baseline = свежая версия
+            except OSError as e:
+                print(f"ВНИМАНИЕ: снимок в _baselines/ не записан ({e}). "
+                      f"База «ДО» для redline-разбора устарела — закройте файл "
+                      f"в других приложениях и повторите save().")
 
 
 if __name__ == "__main__":
