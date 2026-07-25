@@ -329,7 +329,7 @@ r.font.name = "Times New Roman"; r.font.size = Pt(12)
 
 | Параметр | Значение |
 |---|---|
-| Выравнивание | LEFT (нет явного jc) |
+| Выравнивание | **RIGHT** (правило проекта «подпись справа»; в исходном шаблоне было LEFT) |
 | Шрифт | Times New Roman, 12 pt, обычный |
 | Интервал до | 6 pt |
 | Интервал после | 6 pt |
@@ -341,7 +341,7 @@ r.font.name = "Times New Roman"; r.font.size = Pt(12)
 
 ```python
 p = doc.add_paragraph()
-# нет явного alignment → LEFT
+p.alignment = WD_ALIGN_PARAGRAPH.RIGHT  # правило проекта: подпись справа
 p.paragraph_format.space_before = Pt(6)
 p.paragraph_format.space_after  = Pt(6)
 
@@ -455,7 +455,7 @@ tblPr.insert(0, tblpPr)
 | Пункты ПРОШУ | JUSTIFY | Times New Roman | 12 | нет | — | 1.27 cm | 2 | 2 |
 | ПРИЛОЖЕНИЯ: | JUSTIFY | Times New Roman | 12 | да | — | — | **12** | 6 |
 | Пункты ПРИЛОЖЕНИЯ | JUSTIFY | Times New Roman | 12 | нет | — | 1.27 cm | 0 | **12** |
-| Строка подписи | LEFT | Times New Roman | 12 | нет | — | — | 6 | 6 |
+| Строка подписи | RIGHT | Times New Roman | 12 | нет | — | — | 6 | 6 |
 | Пустой разделитель | — | — | — | — | — | — | 0 | 0 |
 | Последний пустой | JUSTIFY | — | — | — | — | — | 6 | 0 |
 | Шапка — метка (ИСТЕЦ:) | RIGHT | Times New Roman | 12 | да | — | — | авто | авто |
@@ -496,7 +496,9 @@ tblPr.insert(0, tblpPr)
 
 5. **Нумерация страниц** — по центру верхнего поля, арабскими цифрами. Первая страница не нумеруется.
    Документы 2+ страниц должны быть пронумерованы (ГОСТ Р 7.0.97-2016 п. 3.2).
-   Использовать `add_page_numbers()` из DocBuilder.
+   Внимание: метода `add_page_numbers()` в DocBuilder (`scripts/create_docx.py`) сейчас НЕТ —
+   не вызывать вслепую (упадет с AttributeError). Проверить наличие метода в скрипте;
+   отсутствует → добавить колонтитул вручную через XML секции или согласовать доработку скрипта.
 
 6. **Строка подписи** — два варианта:
    - `add_signature_table(role, name, date)` — предпочтительно, 3-колоночная таблица без границ.

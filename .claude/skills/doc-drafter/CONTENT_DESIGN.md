@@ -173,6 +173,11 @@ C — Conclusion  Повтор тезиса с подтверждением (в�
 Требование CLAUDE.md: нормы и судебные акты — дословно или не воспроизводить вовсе.
 Блок-цитата — единственный правильный контейнер.
 
+Guard (урок 23.07.2026): цитаты КС РФ и Пленумов ВС — копировать целиком из
+hunter-файлов (`01_context/_practice/hunter_*.md`) или первоисточника; купюра
+допустима только с явной маркировкой `[...]`. Сокращение цитаты по памяти без
+маркировки (как с КС № 35-П) — критическая ошибка, Кони вернет документ.
+
 ```python
 p = doc.add_paragraph()
 p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
@@ -468,5 +473,7 @@ Rule-based > аналогия > политика (мета-анализ, поб�
 ### PDF как финальный формат
 
 Рабочий процесс: DOCX (черновик, клиенту) → PDF (финал для подачи в суд).
-Конвертация: `libreoffice --headless --convert-to pdf:writer_pdf_Export --outdir . doc.docx`
-Добавить флаг `EmbedStandardFonts=true` для встраивания шрифтов.
+Штатный путь в проекте — команда `/finalize {путь_к_docx}` (конвертация через
+Microsoft Word + наложение подписи). Фолбэк без Word:
+`libreoffice --headless --convert-to pdf:writer_pdf_Export --outdir . doc.docx`
+(добавить флаг `EmbedStandardFonts=true` для встраивания шрифтов).
