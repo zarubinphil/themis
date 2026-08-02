@@ -55,6 +55,24 @@ def snils_valid(snils: str) -> bool:
     return (0 if r == 100 else r) == int(ds[9:])
 
 
+def isin_valid(isin: str) -> bool:
+    """ISIN (12 зн., Luhn). Ловит перестановку/потерю цифры при OCR брокерских
+    отчетов: gundam-прогон 02.08.2026 исказил 3 из 3 ISIN на стр. 82 заключения."""
+    isin = isin.strip().upper()
+    if not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{9}\d", isin):
+        return False
+    digits = "".join(str(int(c, 36)) for c in isin)  # A=10..Z=35
+    total = 0
+    for i, ch in enumerate(reversed(digits)):
+        d = int(ch)
+        if i % 2 == 1:  # удваивается каждая вторая, НЕ считая контрольную
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+    return total % 10 == 0
+
+
 def account_valid(account: str, bik: str) -> bool:
     """Расчетный/корреспондентский счет ключуется БИК-ом банка (Положение ЦБ 2-П)."""
     account, bik = re.sub(r"\D", "", account), re.sub(r"\D", "", bik)
@@ -78,6 +96,9 @@ def scan_requisites(req: dict, bik: str | None = None) -> list[str]:
     for v in req.get("snils", []):
         if not snils_valid(v):
             bad.append(f"СНИЛС {v}: контрольное число НЕ сходится")
+    for v in req.get("isin", []):
+        if not isin_valid(v):
+            bad.append(f"ISIN {v}: Luhn НЕ сходится — вероятна ошибка OCR")
     if bik:
         for v in req.get("account", []):
             if not account_valid(v, bik):
@@ -99,6 +120,16 @@ def _selftest():
         not account_valid("40817810808430075620", "044525593"),
         not ogrn_valid("1021600000125"),
         not snils_valid("039-656-252-88"),
+        isin_valid("US4581401001"),        # Intel — стр. 82 заключения
+        isin_valid("US7170811035"),        # Pfizer
+        isin_valid("US7802593050"),        # Shell ADR
+        isin_valid("RU0007661625"),        # Газпром
+        not isin_valid("US7805293050"),    # порча gundam-прогона 02.08.2026
+        not isin_valid("US481401001"),     # gundam потерял цифру
+        # живой улов 02.08.2026: ИНН/ОГРН «КАН АВТО ЭКСПЕРТ-26» из карты дела
+        # doveritel-3/tamozhnya-kan-avto-2026 не существуют (проверено по ЕГРЮЛ)
+        not inn_valid("1657246601"),
+        not ogrn_valid("1161690019502"),
     ]
     failed = len(ok) - sum(ok)
     print(f"selftest: {sum(ok)}/{len(ok)} OK" + (f", {failed} FAIL" if failed else ""))

@@ -371,6 +371,11 @@ _REQ = {
     "case_arb": re.compile(r"\bА\d{2}-\d+/\d{4}\b"),
     "case_soyu": re.compile(r"\b\d+[аА]?-\d+/\d{4}\b"),
     "passport": re.compile(r"паспорт[^\d]{0,15}(\d{4}\s?\d{6})", re.IGNORECASE),
+    "snils": re.compile(r"СНИЛС[:\s№-]{0,4}(\d{3}[- ]\d{3}[- ]\d{3}[- ]?\d{2})"),
+    # 20-значный счет с кодом валюты 810 (рубли) на позициях 6-8
+    "account": re.compile(r"\b\d{5}810\d{12}\b"),
+    "bik": re.compile(r"БИК[:\s]*?(0\d{8})\b", re.IGNORECASE),
+    "isin": re.compile(r"\b[A-Z]{2}[A-Z0-9]{9}\d\b"),
     "date": re.compile(r"\b\d{2}\.\d{2}\.\d{4}\b"),
     # копейки через , или . обязаны войти в захват: раньше «265 000,00 ₽»
     # обрезалось до «00 ₽» (матч рестартовал после запятой) — дефект Д-суммы
@@ -378,6 +383,14 @@ _REQ = {
         r"\b(?:\d{1,3}(?:[\s  ']\d{3})+|\d+)(?:[.,]\d{1,2})?\s*(?:руб|₽)",
         re.IGNORECASE),
 }
+
+
+# первые 2 буквы ISIN — код страны ISO-3166 (+XS еврооблигации): отсеивает
+# VIN мотоциклов (VBKJPJ404NC2) и внутренние номера (MB0001749435) от ISIN
+_ISIN_CC = frozenset(
+    "AD AE AR AT AU BE BG BH BM BR BS CA CH CL CN CO CY CZ DE DK EE EG ES FI FR GB GG "
+    "GI GR HK HR HU ID IE IL IM IN IS IT JE JP KR KY KZ LI LT LU LV MC MT MX MY NL NO "
+    "NZ PA PE PH PL PT QA RO RS RU SA SE SG SI SK TH TR TW UA US UY VG XS ZA".split())
 
 
 def extract_requisites(body):
@@ -388,6 +401,8 @@ def extract_requisites(body):
         for m in rx.finditer(body):
             v = (m.group(1) if m.groups() else m.group(0)).strip()
             v = re.sub(r"\s+", " ", v)
+            if k == "isin" and v[:2] not in _ISIN_CC:
+                continue
             if v and v not in found:
                 found.append(v)
             if len(found) >= 50:
