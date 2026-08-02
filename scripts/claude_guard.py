@@ -5,12 +5,19 @@
 1. Read бинарных документов (.docx/.pdf/.xlsx/.pptx/.doc/.xls) —
    только через scripts/markdown_extract.py (LOCAL-FIRST, кеш, requisites.json).
 2. Write/Edit внутрь 00_intake/ — исходники клиента неприкосновенны.
-3. Bash rm/rmdir по 00_intake/ или _baselines/ — защита первички и базы «ДО».
+3. Bash rm/rmdir, а равно cp/mv/tee/sed -i/редирект по 00_intake/ или _baselines/ —
+   защита первички и базы «ДО»: затирание так же безвозвратно, как удаление.
+4. Read текстового файла проекта свыше 48 КБ целиком — брать срезом или грепом.
+5. Запись артефактов шагов вне порядка протокола (см. _workflow_gate).
+Невалидный JSON на входе — тоже блок: сторож, который молча перестал сторожить, хуже
+отсутствующего. Предупреждает (не блокирует) при работе вне корня проекта.
+Проверка: python3 scripts/claude_guard.py --selftest
 
 Правила-инварианты продублированы текстом в .claude/CLAUDE.md;
 здесь — их жесткое исполнение (advisory-текст модель может пропустить, хук — нет).
 """
 import json
+import os
 import re
 import sys
 
@@ -21,7 +28,6 @@ def block(msg: str) -> None:
 
 
 def _has_marker(path, pattern: str) -> bool:
-    import os
     try:
         with open(path, encoding="utf-8") as f:
             return bool(re.search(pattern, f.read()))
@@ -83,11 +89,26 @@ def _workflow_gate(p: str) -> None:
             )
 
 
+# Порог целикового чтения текстового файла. 48 КБ ≈ 12-15k токенов на один Read;
+# конституция велит крупные корпуса (practice_index.md, логи) брать грепом и срезами.
+BIG_READ_BYTES = 48 * 1024
+
+
 def main() -> None:
+    raw = sys.stdin.read()
+    if not raw.strip():
+        sys.exit(0)  # пустой вход — проверять нечего
     try:
-        d = json.load(sys.stdin)
+        d = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
-        sys.exit(0)  # нет валидного входа — не мешать
+        # fail-closed: битый вход значит, что контракт хука разошёлся с харнессом.
+        # Раньше здесь стоял exit 0 — сторож молча переставал сторожить, и узнать
+        # об этом было неоткуда (так же незаметно умирал весь settings.json).
+        block(
+            "БЛОК (сторож Фемиды): PreToolUse-хук получил невалидный JSON и не может "
+            "проверить железные правила. Молча пропускать нельзя. Починить "
+            "scripts/claude_guard.py или временно снять хук из .claude/settings.json."
+        )
 
     tool = d.get("tool_name", "")
     ti = d.get("tool_input") or {}
@@ -101,6 +122,22 @@ def main() -> None:
                 "(роутер выдаст кеш-путь, срезы и requisites.json). "
                 "Read напрямую для .docx/.pdf/.xlsx/.pptx запрещен."
             )
+        # Гейт держим на файлах проекта: внешние материалы (справки, чужие репозитории)
+        # аудитор обязан читать целиком, и запрещать ему это — не экономия, а слепота.
+        if (re.search(r"\.(md|txt|jsonl|log|csv)$", p, re.I)
+                and "/themis/" in p.replace("\\", "/")
+                and not ti.get("offset") and not ti.get("limit")):
+            try:
+                size = os.path.getsize(p)
+            except OSError:
+                size = 0
+            if size > BIG_READ_BYTES:
+                block(
+                    f"БЛОК (бюджет входа): {os.path.basename(p)} — {size // 1024} КБ, "
+                    f"порог {BIG_READ_BYTES // 1024} КБ. Целиком читать запрещено: "
+                    "взять срез (offset/limit), грепнуть нужное (Grep/rg) либо отдать "
+                    "субагенту с точным заданием."
+                )
 
     if tool in ("Write", "Edit", "NotebookEdit"):
         p = ti.get("file_path", "") or ti.get("notebook_path", "")
@@ -113,17 +150,92 @@ def main() -> None:
 
     if tool == "Bash":
         cmd = ti.get("command", "")
+        protected = re.search(r"00_intake|_baselines", cmd)
         # rm только в командной позиции (начало строки / после ; & | $( `) —
         # иначе ложные срабатывания на прозу со словом «rm» в heredoc
         rm_cmd = re.search(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(?:rm|rmdir)\s", cmd, re.M)
-        if rm_cmd and re.search(r"00_intake|_baselines", cmd):
+        if rm_cmd and protected:
             block(
                 "БЛОК: удаление в 00_intake/ или _baselines/ запрещено "
                 "(железное правило). Действительно нужно — только пользователь вручную."
             )
+        # Затирание не менее разрушительно, чем удаление: `> файл`, cp, mv, tee,
+        # truncate, dd, sed -i переписывают первичку и базу «ДО» так же безвозвратно.
+        write_cmd = re.search(
+            r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(?:cp|mv|tee|truncate|dd|install)\s"
+            r"|>\s*\S*(?:00_intake|_baselines)"
+            r"|sed\s+(?:-\w+\s+)*-i\b",
+            cmd, re.M)
+        if write_cmd and protected:
+            block(
+                "БЛОК: перезапись в 00_intake/ или _baselines/ запрещена — исходники "
+                "клиента и база «ДО» для разбора правок неприкосновенны. Класть новое "
+                "можно только новым именем через Write, менять существующее нельзя."
+            )
+
+    # Работа вне корня проекта — прецедент 25.07.2026: сессия шла мимо cases/,
+    # правила проекта не грузились, счёт 49,5 млн токенов. Предупреждаем, не блокируем.
+    cwd = d.get("cwd") or ""
+    if cwd and "themis" not in cwd:
+        print(f"⚠ Фемида: cwd={cwd} вне корня проекта — правила проекта могут не действовать.",
+              file=sys.stderr)
 
     sys.exit(0)
 
 
+def selftest() -> int:
+    """Проверка без сети: каждое правило на паре «должно блокировать / должно пускать»."""
+    import subprocess
+    import tempfile
+
+    me = [sys.executable, __file__]
+    tmp = tempfile.mkdtemp() + "/themis"  # гейт большого Read действует внутри проекта
+    os.makedirs(tmp, exist_ok=True)
+    big = tmp + "/big.md"
+    with open(big, "w", encoding="utf-8") as f:
+        f.write("x" * (BIG_READ_BYTES + 10))
+    small = tmp + "/small.md"
+    with open(small, "w", encoding="utf-8") as f:
+        f.write("ok")
+
+    def run(payload, raw=None):
+        data = raw if raw is not None else json.dumps(payload, ensure_ascii=False)
+        return subprocess.run(me, input=data, capture_output=True, text=True).returncode
+
+    cases = [
+        ("битый JSON блокируется", run(None, raw="{не json"), 2),
+        ("пустой вход пропускается", run(None, raw="  "), 0),
+        ("Read .docx блокируется",
+         run({"tool_name": "Read", "tool_input": {"file_path": "/a/b.docx"}}), 2),
+        ("Read .md целиком свыше порога блокируется",
+         run({"tool_name": "Read", "tool_input": {"file_path": big}}), 2),
+        ("Read .md срезом пропускается",
+         run({"tool_name": "Read", "tool_input": {"file_path": big, "offset": 1, "limit": 50}}), 0),
+        ("Read маленького .md пропускается",
+         run({"tool_name": "Read", "tool_input": {"file_path": small}}), 0),
+        ("Write в 00_intake блокируется",
+         run({"tool_name": "Write", "tool_input": {"file_path": "/c/cases/x/y/00_intake/z.md"}}), 2),
+        ("rm по _baselines блокируется",
+         run({"tool_name": "Bash", "tool_input": {"command": "rm -rf x/_baselines"}}), 2),
+        ("cp поверх 00_intake блокируется",
+         run({"tool_name": "Bash", "tool_input": {"command": "cp a.pdf cases/k/d/00_intake/a.pdf"}}), 2),
+        ("редирект в _baselines блокируется",
+         run({"tool_name": "Bash", "tool_input": {"command": "echo hi > d/_baselines/f.docx"}}), 2),
+        ("sed -i по 00_intake блокируется",
+         run({"tool_name": "Bash", "tool_input": {"command": "sed -i '' s/a/b/ 00_intake/f.md"}}), 2),
+        ("обычный cp пропускается",
+         run({"tool_name": "Bash", "tool_input": {"command": "cp a.md b.md"}}), 0),
+        ("слово rm в прозе пропускается",
+         run({"tool_name": "Bash", "tool_input": {"command": "echo 'norm 00_intake'"}}), 0),
+    ]
+    bad = [name for name, got, want in cases if got != want]
+    for name, got, want in cases:
+        print(f"  {'✓' if got == want else '✗'} {name}" + ("" if got == want else f" (ждали {want}, вышло {got})"))
+    print(f"selftest {'пройден' if not bad else 'ПРОВАЛЕН'}: {len(cases) - len(bad)}/{len(cases)}")
+    return 1 if bad else 0
+
+
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        sys.exit(selftest())
     main()

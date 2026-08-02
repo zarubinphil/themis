@@ -115,7 +115,11 @@ def main() -> int:
     if (case / "03_drafts").is_dir():
         candidates += sorted((case / "03_drafts").rglob("*.md"))
     candidates += [case / "_case.md", ctx / "review_log.md"]
-    approved_in = next((f for f in candidates if has_marker(f, r"ГОТОВ К ПОДАЧЕ")), None)
+    # Подстрока «ГОТОВ К ПОДАЧЕ» входит в отрицательный вердикт «НЕ ГОТОВ К ПОДАЧЕ»
+    # и в «документ пока НЕ готов к подаче» — машина принимала отказ Кони за приёмку
+    # и пускала протокол на шаг вперёд. Отрицание отсекаем явно.
+    approved_in = next((f for f in candidates
+                        if has_marker(f, r"(?<!НЕ )(?<!не )ГОТОВ К ПОДАЧЕ")), None)
     approved = approved_in is not None
 
     def mark(ok: bool) -> str:

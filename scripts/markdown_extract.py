@@ -211,47 +211,10 @@ def render_scan(path, outdir, dpi=DPI, maxp=MAXP):
     return names, n
 
 
-# Unlimited-OCR — основной движок (решение владельца 02.08.2026): разбирает весь
-# документ одним проходом и сохраняет структуру таблиц, включая переход таблицы
-# со страницы на страницу. Apple Vision остаётся в дополнение: он даёт
-# постраничные page_NNN.txt для адресации «стр. 82» и страхует, когда основной
-# движок недоступен. Оба нужны, один другого не заменяет.
-UNLIMITED_MAX_PAGES = int(os.environ.get("THEMIS_OCR_MAX_PAGES", "40"))
-
-
-def unlimited_pass(ocr_dir, total_pages):
-    """Сквозной разбор → ocr_dir/document.md. Возвращает строку для note.
-
-    Никогда не молчит: недоступен движок или упал — так и пишет, чтобы читатель
-    знал, что структуры таблиц у него нет, и не принял постраничный текст за неё.
-    """
-    import subprocess
-    tool = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ocr_unlimited.py")
-    try:
-        chk = subprocess.run([sys.executable, tool, "--selftest"],
-                             capture_output=True, text=True, timeout=30)
-        if chk.returncode != 0:
-            return ("\n⚠ Unlimited-OCR (основной движок) не установлен — структуры таблиц НЕТ, "
-                    "есть только постраничный текст Apple Vision. Сложные таблицы читать по PNG.")
-    except (OSError, subprocess.SubprocessError):
-        return "\n⚠ Unlimited-OCR не запускается — работаем на одном Apple Vision."
-
-    if total_pages > UNLIMITED_MAX_PAGES:
-        return (f"\n⚠ Unlimited-OCR пропущен: {total_pages} стр. > порога {UNLIMITED_MAX_PAGES} "
-                f"(THEMIS_OCR_MAX_PAGES). Запустить вручную по нужному диапазону: "
-                f"python3 scripts/ocr_unlimited.py {ocr_dir} --pages ПЕРВАЯ ПОСЛЕДНЯЯ")
-
-    r = subprocess.run([sys.executable, tool, ocr_dir], capture_output=True, text=True)
-    try:
-        res = json.loads((r.stdout or "{}").strip().splitlines()[-1])
-    except (ValueError, IndexError):
-        res = {"ok": False, "reason": (r.stderr or "")[-200:]}
-    if not res.get("ok"):
-        return (f"\n⚠ Unlimited-OCR не отдал результат ({res.get('reason', 'причина не названа')}). "
-                f"Структуры таблиц нет — только постраничный Apple Vision.")
-    return (f"\nUnlimited-OCR (основной, локально, $0): {res['pages']} стр. одним проходом за "
-            f"{res['seconds']}с ({res['sec_per_page']}с/стр) → {os.path.basename(res['md_path'])}. "
-            f"ЭТО основной текст со структурой таблиц; page_NNN.txt — постраничная адресация.")
+# Структурный OCR даёт сам `bin/vision-doc` (см. _vision_doc выше): текст + таблицы
+# с ячейками, постранично. Пилот Unlimited-OCR отклонён 02.08.2026 — единственный
+# MLX-порт не исполнялся ни разу и выдумывал содержимое (knowledge/lessons-log.md).
+# Вызов оставался в коде мёртвым и печатал предупреждение в каждый прогон.
 
 
 def ocr_pages(outdir, png_names):
@@ -548,7 +511,6 @@ def main():
                                      f"за порогом MAXP={man['beyond_maxp']} — эти страницы НЕ извлечены.")
                         if oe:
                             note += f"\n⚠ {oe} стр. пустых после предобработки — возможно рукопись/слабый скан → фолбэк на человека или облачный vision."
-                        note += unlimited_pass(a.render_dir, n)
             elif not scan_pages:
                 route = "text-pdf"  # чистый текст — markitdown (лучшая разметка)
             else:
