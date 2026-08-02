@@ -282,11 +282,33 @@ def main() -> int:
     ap.add_argument("--scan", metavar="CASE", help="просканировать артефакты дела")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--find", metavar="НАЗВАНИЕ", help="найти организацию по названию")
+    ap.add_argument("--md", action="store_true",
+                    help="выдать готовый блок для карты дела с пометкой источника")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
 
     if a.selftest:
         selftest()
+        return 0
+
+    if a.md:
+        # Готовый блок в knowledge-map.md / _client.md. Пометка источника
+        # обязательна: сведения официальные, но взяты машиной, и юрист должен
+        # видеть, что это не из документа дела, а из ЕГРЮЛ на дату запроса.
+        import datetime
+        today = datetime.date.today().strftime("%d.%m.%Y")
+        for i in a.inn:
+            r = check(i)
+            print(f"\n**{r.get('egrul_name') or 'ИНН ' + i}**")
+            print(f"- ИНН: {i} — контрольная сумма {r['checksum']}")
+            for label, k in (("Полное наименование", "egrul_name_full"), ("ОГРН", "egrul_ogrn"),
+                             ("КПП", "egrul_kpp"), ("Статус", "egrul_state"),
+                             ("Дата ликвидации", "egrul_liquidation_date"),
+                             ("Адрес", "egrul_address"), ("Руководитель", "egrul_manager"),
+                             ("Должность", "egrul_manager_post")):
+                if r.get(k):
+                    print(f"- {label}: {r[k]}")
+            print(f"- _Источник: ЕГРЮЛ через DaData (официальный сервис), запрошено {today}._")
         return 0
 
     if a.find:

@@ -43,7 +43,10 @@ DPI = 300               # рендер сканов для OCR (мелкий ю�
 # на стр. 82-83, то есть ЗА порогом. С переходом на структурный vision-doc
 # (1,33 с/стр) 119 страниц стоят 2,6 минуты — держать низкий потолок незачем.
 MAXP = int(os.environ.get("THEMIS_MAX_PAGES", "500"))
-OCR_WORKERS = 4         # параллельный OCR (subprocess освобождает GIL)
+# Замер 02.08.2026 на M3 (4P+4E): 4w — 0,60 с/стр, 6w — 0,55, 8w — 0,52,
+# 12w и 16w — те же 0,52-0,53. Плато на 8: упираемся в Neural Engine, а не в
+# число процессов. 119-страничный скан = 62 с.
+OCR_WORKERS = int(os.environ.get("THEMIS_OCR_WORKERS", "8"))
 # Apple Vision OCR — локально, $0, русский точно. НЕ облачный vision, НЕ ollama/llava.
 # Путь: env THEMIS_VISION_OCR → repo bin/vision-ocr (собирается install.sh) → fallback.
 OCR_BIN = os.environ.get("THEMIS_VISION_OCR") or os.path.join(
