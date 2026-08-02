@@ -9,28 +9,53 @@
 сверка вскрыла, что 13.06.2019 у Определения № 81-КГ19-2 — дата публикации
 на портале, а не дата судебного акта.
 
-Использование:
-    python3 scripts/verify_act.py 81-КГ19-2 5-КГ22-82-К2
-    python3 scripts/verify_act.py --json 41-КГ16-17
-    python3 scripts/verify_act.py --url https://... 56-КГ23-6-К9
+ЧТО БЫЛО СЛОМАНО (аудит 02.08.2026). Прежняя версия подставляла в шаблон URL
+пустую дату (`t.format(d="")`), получала адрес вида `...-ot--n-81-kg19-2/`,
+всегда ловила 404 и выдавала «НЕ НАЙДЕН» одинаково реальному акту и
+выдуманному. За всю историю проекта машинно проверено 2 акта из 250 — оба
+руками через `--url`. Барьер против выдуманной практики не существовал.
 
-Выход: таблица «акт → статус → дата в тексте → предмет → источник».
-Статусы: ПОДТВЕРЖДЕН · НЕ НАЙДЕН · РАСХОЖДЕНИЕ (номер есть, дата спорна).
+ПРИНЦИП ПОСЛЕ ПОЧИНКИ (решение совета, Н1). Пара «номер + дата» от охотника —
+это КАНДИДАТ, а не факт. Фактом становится то, что подтвердила страница
+публикатора. Модель, выдумавшая акт, выдумает и дату к нему, поэтому проверять
+надо обе величины разом: несовпадение даты при существующем номере — сигнал,
+что модель ошиблась в реквизите.
+
+Статусы (несуществование акта и недоступность канала — РАЗНЫЕ вещи):
+    ПОДТВЕРЖДЕН     — номер и заявленная дата найдены в тексте акта
+    РАСХОЖДЕНИЕ     — номер есть, дата в тексте другая (сверить: дата акта или публикации)
+    НЕ ПОДТВЕРЖДЕН  — страница не найдена. НЕ основание утверждать, что акта нет
+    КАНАЛ НЕДОСТУПЕН — сеть или публикатор не отвечают. Проверка НЕ выполнена
+
+Использование:
+    python3 scripts/verify_act.py 81-КГ19-2@26.03.2019 5-КГ22-82-К2@04.10.2022
+    python3 scripts/verify_act.py --json 41-КГ16-17@17.05.2016
+    python3 scripts/verify_act.py --url https://... 56-КГ23-6-К9
+    python3 scripts/verify_act.py --emit 01_context/_practice/verified.json 81-КГ19-2@26.03.2019
+    python3 scripts/verify_act.py --demo        # самопроверка разбора и сборки URL
 
 ponytail: кеш на диске, без БД — актов десятки, не миллионы.
 """
 import argparse
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FETCH = os.path.join(ROOT, "scripts", "fetch_url.sh")
 CACHE = os.path.expanduser("~/.cache/legal_acts")
 
-# Шаблоны публикаторов. Порядок = приоритет доверия.
+PARSER_VERSION = "2026.08.02"
+MIN_PAGE_BYTES = 2000  # меньше — это страница ошибки, кешировать её нельзя
+
+# Шаблоны публикаторов. {d} — дата акта в формате ДДММГГГГ, {slug} — номер латиницей.
+# Порядок = приоритет доверия. Оба реально отдают 200 (проверено 02.08.2026):
+#   .../opredelenie-verkhovnogo-suda-rf-ot-17052016-n-41-kg16-17/
+#   .../opredelenie-sudebnoi-kollegii-...-ot-04102022-n-5-kg22-82-k2/
 SOURCES = [
     ("legalacts.ru", "https://legalacts.ru/sud/opredelenie-verkhovnogo-suda-rf-ot-{d}-n-{slug}/"),
     ("legalacts.ru", "https://legalacts.ru/sud/opredelenie-sudebnoi-kollegii-po-grazhdanskim-"
@@ -61,15 +86,44 @@ def slugify(num: str) -> str:
     return num.translate(table).lower()
 
 
-def fetch(url: str, dest: str) -> bool:
-    if os.path.exists(dest) and os.path.getsize(dest) > 2000:
-        return True
+def parse_arg(raw: str) -> tuple[str, str | None]:
+    """`81-КГ19-2@26.03.2019` -> ('81-КГ19-2', '26.03.2019'). Дата необязательна."""
+    if "@" in raw:
+        num, date = raw.split("@", 1)
+        return num.strip(), date.strip()
+    return raw.strip(), None
+
+
+def url_date(date: str) -> str | None:
+    """26.03.2019 -> 26032019. Кривая дата — None, а не молчаливый мусор."""
+    m = DOT_DATE_RE.fullmatch(date or "")
+    return f"{m.group(1)}{m.group(2)}{m.group(3)}" if m else None
+
+
+def fetch(url: str, dest: str) -> str:
+    """Возвращает 'cached' | 'ok' | 'small' | 'unreachable'.
+
+    Страницы меньше MIN_PAGE_BYTES не кешируются: это заглушки 404, из-за
+    которых прежняя версия накопила шесть файлов по 302 байта и считала их
+    результатом проверки.
+    """
+    if os.path.exists(dest) and os.path.getsize(dest) > MIN_PAGE_BYTES:
+        return "cached"
     os.makedirs(os.path.dirname(dest), exist_ok=True)
+    tmp = dest + ".tmp"
     try:
-        subprocess.run(["bash", FETCH, url, dest], capture_output=True, timeout=60)
+        r = subprocess.run(["bash", FETCH, url, tmp], capture_output=True, timeout=60)
     except subprocess.TimeoutExpired:
-        return False
-    return os.path.exists(dest) and os.path.getsize(dest) > 2000
+        return "unreachable"
+    if not os.path.exists(tmp):
+        return "unreachable"
+    size = os.path.getsize(tmp)
+    if size <= MIN_PAGE_BYTES:
+        os.remove(tmp)
+        # fetch_url.sh отдаёт !=0, когда не смог достать страницу вообще
+        return "unreachable" if r.returncode != 0 else "small"
+    os.replace(tmp, dest)
+    return "ok"
 
 
 def strip_tags(html: str) -> str:
@@ -78,11 +132,32 @@ def strip_tags(html: str) -> str:
     return re.sub(r"\s+", " ", txt)
 
 
-def analyze(text: str, num: str) -> dict:
-    """Ищет номер, даты, состав, предмет. Возвращает вердикт."""
+def find_act_date(text: str, num: str) -> str | None:
+    """Дата САМОГО АКТА — та, что стоит после «от» перед номером.
+
+    «...определение от 26.03.2019 № 81-КГ19-2 13.06.2019 | Судебные решения...»
+    Первая дата — акта, вторая — публикации на портале. Различить их можно
+    только по позиции: дата акта идёт в связке «от <дата> № <номер>».
+    """
+    for m in re.finditer(re.escape(num), text):
+        window = text[max(0, m.start() - 200):m.start()]
+        found = None
+        for d in re.finditer(r"от\s+(\d{2})\.(\d{2})\.(\d{4})", window):
+            found = ".".join(d.groups())
+        for d in re.finditer(r"от\s+(\d{1,2})\s+(" + "|".join(MONTHS) + r")\s+(\d{4})", window):
+            day, mon, y = d.groups()
+            found = f"{int(day):02d}.{MONTHS.index(mon) + 1:02d}.{y}"
+        if found:
+            return found
+    return None
+
+
+def analyze(text: str, num: str, claimed_date: str | None = None) -> dict:
+    """Ищет номер, даты, состав, предмет. Сверяет заявленную дату с текстом."""
     hits = text.count(num)
     if not hits:
-        return {"status": "НЕ НАЙДЕН", "hits": 0, "dates": [], "collegium": "", "subject": ""}
+        return {"status": "НЕ ПОДТВЕРЖДЕН", "hits": 0, "dates": [],
+                "collegium": "", "subject": "", "date_match": None}
 
     # Даты собираем вокруг КАЖДОГО вхождения номера: первое обычно приходится
     # на заголовок страницы, где даты рядом нет (проверено на eg-online.ru).
@@ -104,73 +179,158 @@ def analyze(text: str, num: str) -> dict:
             subj = v
             break
 
-    status = "ПОДТВЕРЖДЕН" if dates else "РАСХОЖДЕНИЕ"
-    if len(dates) > 1:
-        status = "РАСХОЖДЕНИЕ"
-    return {"status": status, "hits": hits, "dates": dates,
-            "collegium": col.group(1) if col else "", "subject": subj}
+    act_date = find_act_date(text, num)
+
+    # Заявленная охотником дата — кандидат. Решает страница.
+    # Простого «дата есть где-то на странице» НЕДОСТАТОЧНО: рядом с номером
+    # почти всегда стоит и дата публикации на портале. Именно на этом
+    # споткнулись два рецензента совета по № 81-КГ19-2 (26.03.2019 — акт,
+    # 13.06.2019 — публикация). Сверяем только с датой, идущей после «от».
+    date_match = None
+    if claimed_date:
+        if act_date:
+            date_match = claimed_date == act_date
+            status = "ПОДТВЕРЖДЕН" if date_match else "РАСХОЖДЕНИЕ"
+        else:
+            date_match = claimed_date in dates
+            status = "РАСХОЖДЕНИЕ"  # дату акта не опознали — на ручную сверку
+    else:
+        status = "ПОДТВЕРЖДЕН" if act_date and len(dates) == 1 else "РАСХОЖДЕНИЕ"
+
+    return {"status": status, "hits": hits, "dates": dates, "act_date": act_date,
+            "collegium": col.group(1) if col else "", "subject": subj,
+            "date_match": date_match}
 
 
-def verify(num: str, url: str | None = None) -> dict:
-    dest = os.path.join(CACHE, slugify(num) + ".html")
-    urls = [url] if url else [t.format(d="", slug=slugify(num)) for _, t in SOURCES]
+def snapshot(path: str, text: str) -> dict:
+    """Слепок источника: без него conformance-прогон невоспроизводим (Н13)."""
+    raw = open(path, "rb").read()
+    return {
+        "raw_sha256": hashlib.sha256(raw).hexdigest(),
+        "normalized_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "parser_version": PARSER_VERSION,
+        "bytes": len(raw),
+    }
+
+
+def verify(num: str, claimed_date: str | None = None, url: str | None = None) -> dict:
+    """Проверяет акт. Пустой результат = 'не подтверждён', НЕ 'не существует'."""
+    base = {"act": num, "claimed_date": claimed_date, "hits": 0, "dates": [],
+            "collegium": "", "subject": "", "date_match": None, "url": "",
+            "snapshot": None}
+
+    if url:
+        urls = [url]
+    elif claimed_date:
+        d = url_date(claimed_date)
+        if not d:
+            return {**base, "status": "НЕ ПОДТВЕРЖДЕН",
+                    "note": f"дата «{claimed_date}» не в формате ДД.ММ.ГГГГ"}
+        urls = [t.format(d=d, slug=slugify(num)) for _, t in SOURCES]
+    else:
+        return {**base, "status": "НЕ ПОДТВЕРЖДЕН",
+                "note": "нужна дата акта (номер@ДД.ММ.ГГГГ) либо прямой --url"}
+
+    unreachable = 0
     for u in urls:
-        if not u:
+        dest = os.path.join(CACHE, f"{slugify(num)}_{url_date(claimed_date or '') or 'direct'}.html")
+        state = fetch(u, dest)
+        if state == "unreachable":
+            unreachable += 1
             continue
-        if fetch(u, dest):
-            text = strip_tags(open(dest, encoding="utf-8", errors="ignore").read())
-            res = analyze(text, num)
-            res["url"] = u
-            res["act"] = num
-            if res["status"] != "НЕ НАЙДЕН":
-                return res
-    return {"act": num, "status": "НЕ НАЙДЕН", "hits": 0, "dates": [],
-            "collegium": "", "subject": "", "url": urls[0] if urls else ""}
+        if state == "small":
+            continue
+        text = strip_tags(open(dest, encoding="utf-8", errors="ignore").read())
+        res = analyze(text, num, claimed_date)
+        if res["status"] != "НЕ ПОДТВЕРЖДЕН":
+            return {**base, **res, "url": u, "snapshot": snapshot(dest, text)}
+
+    if unreachable == len(urls):
+        return {**base, "status": "КАНАЛ НЕДОСТУПЕН", "url": urls[0],
+                "note": "публикатор не ответил — проверка НЕ выполнена"}
+    return {**base, "status": "НЕ ПОДТВЕРЖДЕН", "url": urls[0],
+            "note": "страница не найдена по номеру и дате"}
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Верификация реквизитов судебных актов")
-    ap.add_argument("acts", nargs="+", help="номера, напр. 81-КГ19-2")
+    ap.add_argument("acts", nargs="+", help="номер@ДД.ММ.ГГГГ, напр. 81-КГ19-2@26.03.2019")
     ap.add_argument("--url", help="прямой URL (для одного акта)")
     ap.add_argument("--json", action="store_true", help="выводить JSON")
+    ap.add_argument("--emit", metavar="FILE", help="дописать результаты в ledger (JSON)")
     a = ap.parse_args()
 
-    out = [verify(n, a.url if len(a.acts) == 1 else None) for n in a.acts]
+    pairs = [parse_arg(x) for x in a.acts]
+    out = [verify(n, d, a.url if len(pairs) == 1 else None) for n, d in pairs]
+
+    if a.emit:
+        os.makedirs(os.path.dirname(os.path.abspath(a.emit)), exist_ok=True)
+        prev = {}
+        if os.path.exists(a.emit):
+            try:
+                prev = {r["act"]: r for r in json.load(open(a.emit, encoding="utf-8"))}
+            except (json.JSONDecodeError, KeyError, TypeError):
+                prev = {}
+        prev.update({r["act"]: r for r in out})
+        with open(a.emit, "w", encoding="utf-8") as f:
+            json.dump(list(prev.values()), f, ensure_ascii=False, indent=2)
+        print(f"ledger обновлен: {a.emit} ({len(prev)} актов)", file=sys.stderr)
 
     if a.json:
         print(json.dumps(out, ensure_ascii=False, indent=2))
         return 0
 
-    print(f"{'АКТ':<18}{'СТАТУС':<14}{'ДАТЫ В ТЕКСТЕ':<26}{'ПРЕДМЕТ':<28}ВХОЖД.")
-    print("-" * 96)
+    print(f"{'АКТ':<18}{'ЗАЯВЛЕНО':<13}{'СТАТУС':<18}{'ДАТЫ В ТЕКСТЕ':<26}{'ПРЕДМЕТ':<26}ВХОЖД.")
+    print("-" * 112)
     for r in out:
-        print(f"{r['act']:<18}{r['status']:<14}{', '.join(r['dates'])[:24]:<26}"
-              f"{r['subject'][:26]:<28}{r['hits']}")
-    print("-" * 96)
-    print("ПОДТВЕРЖДЕН — номер и дата найдены в тексте акта.")
-    print("РАСХОЖДЕНИЕ — номер есть, дат несколько: сверить, какая дата акта, "
-          "а какая дата публикации.")
-    print("НЕ НАЙДЕН — в открытых публикаторах не обнаружен, в документ не включать.")
+        print(f"{r['act']:<18}{(r.get('claimed_date') or '—'):<13}{r['status']:<18}"
+              f"{', '.join(r['dates'])[:24]:<26}{r['subject'][:24]:<26}{r['hits']}")
+        if r.get("note"):
+            print(f"{'':<18}└─ {r['note']}")
+    print("-" * 112)
+    print("ПОДТВЕРЖДЕН      — номер и заявленная дата найдены в тексте акта.")
+    print("РАСХОЖДЕНИЕ      — номер есть, дата другая: сверить, где дата акта, где публикации.")
+    print("НЕ ПОДТВЕРЖДЕН   — страница не найдена. НЕ означает, что акта не существует:")
+    print("                   до подачи акт подтверждает владелец лично (HUMAN_ATTESTED).")
+    print("КАНАЛ НЕДОСТУПЕН — публикатор не ответил. Проверка НЕ выполнена, повторить.")
     return 0
 
 
 def demo() -> None:
-    """Самопроверка разбора без сети: главный риск — путаница даты акта
-    и даты публикации, ровно она стоила совету двух рецензентов."""
+    """Самопроверка без сети. Покрывает и разбор, и сборку URL — прежняя версия
+    падала именно на URL, а demo его не трогал и потому проходил."""
+    # 1. Дата акта против даты публикации — ровно та ловушка, что стоила совету двух рецензентов.
     sample = ("Главная Документы Судебные решения О разделе совместно нажитого имущества "
               "Верховный Суд РФ определение от 26.03.2019 № 81-КГ19-2 13.06.2019 | "
               "Судебные решения Судебная коллегия по гражданским делам в составе: "
               "председательствующего Юрьева И.М., судей Назаренко Т.Н.")
-    r = analyze(sample, "81-КГ19-2")
-    assert r["hits"] == 1, r
-    assert "26.03.2019" in r["dates"], r
-    assert r["status"] == "РАСХОЖДЕНИЕ", "две даты рядом обязаны дать РАСХОЖДЕНИЕ"
-    assert r["subject"] == "раздел имущества супругов", r
-    assert r["collegium"].startswith("Юрьева"), r
+    r = analyze(sample, "81-КГ19-2", "26.03.2019")
+    assert r["hits"] == 1 and r["date_match"] is True, r
+    assert r["act_date"] == "26.03.2019", f"дата акта берётся после «от»: {r}"
+    assert r["status"] == "ПОДТВЕРЖДЕН", "заявленная дата совпала с датой акта"
+    assert r["subject"] == "раздел имущества супругов" and r["collegium"].startswith("Юрьева"), r
 
-    empty = analyze("текст без нужного номера", "5-КГ21-101-К2")
-    assert empty["status"] == "НЕ НАЙДЕН", empty
-    print("demo: разбор корректен, дата акта и дата публикации различаются")
+    # 2. Модель назвала дату публикации вместо даты акта — обязано быть РАСХОЖДЕНИЕ.
+    r2 = analyze(sample, "81-КГ19-2", "13.06.2019")
+    assert r2["status"] == "РАСХОЖДЕНИЕ" and r2["date_match"] is False, r2
+    assert "13.06.2019" in r2["dates"], "дата публикации на странице есть — но она не дата акта"
+
+    # 3. Номера нет в тексте.
+    assert analyze("текст без нужного номера", "5-КГ21-101-К2")["status"] == "НЕ ПОДТВЕРЖДЕН"
+
+    # 4. СБОРКА URL — то, что было сломано: дата обязана попасть в адрес.
+    u = SOURCES[0][1].format(d=url_date("17.05.2016"), slug=slugify("41-КГ16-17"))
+    assert u == ("https://legalacts.ru/sud/"
+                 "opredelenie-verkhovnogo-suda-rf-ot-17052016-n-41-kg16-17/"), u
+    assert "ot--n-" not in u, "пустая дата в URL — тот самый дефект"
+    assert url_date("кривая дата") is None, "кривую дату не подставлять молча"
+
+    # 5. Разбор аргумента «номер@дата».
+    assert parse_arg("81-КГ19-2@26.03.2019") == ("81-КГ19-2", "26.03.2019")
+    assert parse_arg("81-КГ19-2") == ("81-КГ19-2", None)
+
+    print("demo: разбор, сверка даты и сборка URL корректны")
 
 
 if __name__ == "__main__":
