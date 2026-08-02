@@ -38,12 +38,21 @@ TEXT_MIN = 40            # символов текста на странице �
 CACHE = os.path.expanduser("~/.cache/legal_extract")
 SMALL_INLINE = 8000     # подсказка: до стольки символов дешевле --inline, чем срез
 DPI = 300               # рендер сканов для OCR (мелкий юр-шрифт читается лучше, чем на 200)
-MAXP = 80               # потолок страниц на рендер/OCR; усечение помечается явно
+# Потолок страниц. Был 80 — и резал ровно то, ради чего документ и читают:
+# в заключении эксперта по делу Раковца (119 стр.) таблицы остатков счетов стоят
+# на стр. 82-83, то есть ЗА порогом. С переходом на структурный vision-doc
+# (1,33 с/стр) 119 страниц стоят 2,6 минуты — держать низкий потолок незачем.
+MAXP = int(os.environ.get("THEMIS_MAX_PAGES", "500"))
 OCR_WORKERS = 4         # параллельный OCR (subprocess освобождает GIL)
 # Apple Vision OCR — локально, $0, русский точно. НЕ облачный vision, НЕ ollama/llava.
 # Путь: env THEMIS_VISION_OCR → repo bin/vision-ocr (собирается install.sh) → fallback.
 OCR_BIN = os.environ.get("THEMIS_VISION_OCR") or os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "vision-ocr")
+# Структурный движок (macOS 26+): даёт таблицы с ячейками. Основной путь для сканов;
+# при его отсутствии роутер молча НЕ деградирует — падает на строковый vision-ocr и
+# помечает, что структуры таблиц в артефактах нет.
+DOC_BIN = os.environ.get("THEMIS_VISION_DOC") or os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "vision-doc")
 # Сигнал отсутствия движка: отличить «движок не собран» от «скан реально пустой».
 # Инвариант CLAUDE.md: движок OCR недоступен → СТОП, не деградировать молча на облако.
 OCR_ENGINE_MISSING = (
@@ -99,9 +108,56 @@ def _enhance(png_path):
         return None
 
 
+def _vision_doc(png_path):
+    """Структурный OCR (macOS 26+): текст + ТАБЛИЦЫ с ячейками, одним проходом.
+
+    Прежний путь (`VNRecognizeTextRequest`) отдаёт только строки, поэтому таблица
+    рассыпалась: заголовки отдельными строками, потом номера колонок. На стр. 82
+    заключения эксперта по делу Раковца, где по таблице считались остатки счетов,
+    это делало доказательство нечитаемым. `RecognizeDocumentsRequest` даёт сетку
+    ячеек нативно, за 1,33 с/стр и $0.
+
+    Пишет рядом `page_NNN.md` (параграфы + таблицы GFM). Возвращает плоский текст
+    для `page_NNN.txt` — постраничная адресация, на которую опираются читатели.
+    Движка нет (старая macOS / не собран) → None, вызывающий уходит на строковый OCR.
+    """
+    import subprocess
+    if not os.access(DOC_BIN, os.X_OK):
+        return None
+    try:
+        r = subprocess.run([DOC_BIN, png_path, "--json"], capture_output=True,
+                           text=True, timeout=120)
+        d = json.loads(r.stdout)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+    md = list(d.get("paragraphs", []))
+    for i, t in enumerate(d.get("tables", []), 1):
+        rows = t.get("rows") or []
+        if not rows:
+            continue
+        w = max(len(x) for x in rows)
+        def line(cells):
+            cs = [str(c).replace("|", "\\|") for c in cells] + [""] * (w - len(cells))
+            return "| " + " | ".join(cs) + " |"
+        md += ["", f"<!-- таблица {i}: {len(rows)} строк -->", line(rows[0]),
+               "|" + " --- |" * w] + [line(r) for r in rows[1:]]
+    if md:
+        with open(os.path.splitext(png_path)[0] + ".md", "w", encoding="utf-8") as f:
+            f.write("\n".join(md))
+
+    flat = list(d.get("paragraphs", []))
+    for t in d.get("tables", []):
+        flat += ["\t".join(str(c) for c in row) for row in (t.get("rows") or [])]
+    return "\n".join(flat)
+
+
 def _ocr_one(png_path):
     """OCR с адаптивным ретраем: пустой результат → предобработка и повтор.
     Хорошие сканы не трогаем (ретрай только при пустоте)."""
+    t = _vision_doc(png_path)
+    if t is not None and len(t.strip()) >= 10:
+        return t
     t = _vision(png_path)
     if len(t.strip()) >= 10:
         return t
