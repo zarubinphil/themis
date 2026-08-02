@@ -309,6 +309,11 @@ def pdf_mixed_to_md(path, per, sha):
         d[i].get_pixmap(dpi=DPI).save(pp)
         png_paths.append(pp)
     ocr_texts = dict(zip(scan_idx, _ocr_many(png_paths))) if png_paths else {}
+    # сайдкары page_NNN.txt ОБЯЗАТЕЛЬНЫ и здесь: без них манифест полноты слеп,
+    # а render_scan теряет идемпотентность (дыры png-без-txt, найдено 30 шт. 02.08.2026)
+    for i in scan_idx:
+        with open(os.path.join(odir, f"page_{i + 1:03d}.txt"), "w", encoding="utf-8") as f:
+            f.write(ocr_texts.get(i, ""))
     parts = []
     for i in pages:
         if per[i] >= TEXT_MIN:
@@ -318,7 +323,43 @@ def pdf_mixed_to_md(path, per, sha):
             parts.append(f"[стр. {i + 1} — скан, Apple Vision OCR]\n{t}" if t
                          else f"[стр. {i + 1} — скан, OCR пуст: проверить визуально]")
     d.close()
+    write_manifest(odir, len(per), text_pages=[i for i in pages if per[i] >= TEXT_MIN])
     return "\n\n".join(parts), len(scan_idx), truncated
+
+
+def write_manifest(odir, total_pages, text_pages=(), maxp=MAXP):
+    """Манифест полноты: страниц в источнике = отрендерено = артефактов.
+
+    Каждая страница — в ТЕРМИНАЛЬНОМ статусе: text (текст-слой) / ocr /
+    ocr_empty (распознан, но пусто — фолбэк человеку) / beyond_maxp (за порогом,
+    НЕ извлечена — раньше резалась молча) / missing (png есть, txt нет — сбой).
+    complete=true только когда нет missing и нет beyond_maxp. Аудит кеша:
+    scripts/extract_manifest.py."""
+    st = {}
+    tp = {i + 1 for i in text_pages}  # 0-based → 1-based
+    for p in range(1, total_pages + 1):
+        if p in tp:
+            st[p] = "text"
+        elif p > maxp:
+            st[p] = "beyond_maxp"
+        else:
+            txt = os.path.join(odir, f"page_{p:03d}.txt")
+            if os.path.isfile(txt):
+                body = open(txt, encoding="utf-8").read().strip()
+                st[p] = "ocr" if len(body) >= 10 else "ocr_empty"
+            else:
+                st[p] = "missing"
+    man = {
+        "total_pages": total_pages,
+        "pages": {str(k): v for k, v in st.items()},
+        "missing": [p for p, v in st.items() if v == "missing"],
+        "beyond_maxp": [p for p, v in st.items() if v == "beyond_maxp"],
+        "ocr_empty": [p for p, v in st.items() if v == "ocr_empty"],
+    }
+    man["complete"] = not man["missing"] and not man["beyond_maxp"]
+    with open(os.path.join(odir, "manifest.json"), "w", encoding="utf-8") as f:
+        json.dump(man, f, ensure_ascii=False, indent=1)
+    return man
 
 
 # ── Авто-реквизиты: вытащить ключевые юр-данные regex-ом на первом проходе ──
@@ -331,7 +372,11 @@ _REQ = {
     "case_soyu": re.compile(r"\b\d+[аА]?-\d+/\d{4}\b"),
     "passport": re.compile(r"паспорт[^\d]{0,15}(\d{4}\s?\d{6})", re.IGNORECASE),
     "date": re.compile(r"\b\d{2}\.\d{2}\.\d{4}\b"),
-    "sum_rub": re.compile(r"\b\d[\d\s ]{2,}(?:руб|₽|рублей)", re.IGNORECASE),
+    # копейки через , или . обязаны войти в захват: раньше «265 000,00 ₽»
+    # обрезалось до «00 ₽» (матч рестартовал после запятой) — дефект Д-суммы
+    "sum_rub": re.compile(
+        r"\b(?:\d{1,3}(?:[\s  ']\d{3})+|\d+)(?:[.,]\d{1,2})?\s*(?:руб|₽)",
+        re.IGNORECASE),
 }
 
 
@@ -391,6 +436,8 @@ def main():
                     note += OCR_ENGINE_MISSING
                 else:
                     res = ocr_image(p, a.render_dir)
+                    if res:
+                        write_manifest(a.render_dir, 1)
                     if res and res[1] >= 10:
                         note += f"\nApple Vision OCR (локально, $0): {a.render_dir}/page_001.txt — читать ТЕКСТ, облачный vision только фолбэк на спорное."
                     else:
@@ -420,7 +467,11 @@ def main():
                     else:
                         od, oe = ocr_pages(a.render_dir, imgs)
                         ocr_count = od
+                        man = write_manifest(a.render_dir, n)
                         note += f"\nApple Vision OCR (локально, $0): {od} стр → page_NNN.txt ({oe} пустых). Постраничная адресация — читать ТЕКСТ (.txt)."
+                        if not man["complete"]:
+                            note += (f"\n⚠ МАНИФЕСТ НЕПОЛОН: missing={man['missing']}, "
+                                     f"за порогом MAXP={man['beyond_maxp']} — эти страницы НЕ извлечены.")
                         if oe:
                             note += f"\n⚠ {oe} стр. пустых после предобработки — возможно рукопись/слабый скан → фолбэк на человека или облачный vision."
                         note += unlimited_pass(a.render_dir, n)
