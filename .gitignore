@@ -48,3 +48,10 @@ scripts/gen_*.py
 scripts/_merge_prilozhenia.py
 # Виртуальные окружения и кеши — не в репо.
 .cache/
+
+# ── Локальный корпус права: регенерируется update_legal_corpus.py, 24 МБ ──
+# Тексты общедоступны (п. 6 ст. 1259 ГК РФ), но это данные, а не исходники.
+knowledge/kodeksy/
+knowledge/plenumy/
+knowledge/_corpus_archive/
+.cache/practice/
