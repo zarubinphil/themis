@@ -156,13 +156,102 @@ class DocBuilder:
         return p
 
     def add_bullet(self, text):
-        """Маркированный список: List Bullet, li=1.5cm, sb=2, sa=2."""
+        """Маркированный список: List Bullet, JUSTIFY (как тело), li=1.5cm, sb=2, sa=2."""
         p = self.doc.add_paragraph(style="List Bullet")
+        p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p.paragraph_format.space_before = Pt(2)
         p.paragraph_format.space_after  = Pt(2)
         p.paragraph_format.left_indent  = Cm(1.50)
         _set_font(p.add_run(text), 12)
         return p
+
+    def add_table(self, headers, rows, widths=None, font_size=12,
+                  aligns=None, borders=True):
+        """
+        Расчетная таблица (баланс, конвертация, сопоставление позиций сторон).
+
+        Единственный штатный способ подать расчет таблицей. Маркированный список
+        вместо таблицы — потеря структуры расчета (урок 02.08.2026, дело
+        example-case, замечание К2 doc-reviewer).
+
+        headers: list[str] — шапка, всегда bold.
+        rows:    list[list] — ячейка либо str, либо (text, bold) для итоговых строк.
+        widths:  list[int] | None — доли ширины колонок (нормируются на ширину
+                 полосы набора: страница минус поля); None — колонки равные.
+        font_size: 12 по эталону; 11 допустим для широких числовых таблиц
+                 (набор размеров документа 14/13/12/11 не расширяется).
+        aligns:  list из 'l'|'c'|'r' по колонкам; None — первая 'l', прочие 'r'.
+        borders: True — тонкие границы 0.5 pt по всем ячейкам; False — без границ.
+        """
+        n_cols = len(headers)
+        if aligns is None:
+            aligns = ["l"] + ["r"] * (n_cols - 1)
+        amap = {
+            "l": WD_ALIGN_PARAGRAPH.LEFT,
+            "c": WD_ALIGN_PARAGRAPH.CENTER,
+            "r": WD_ALIGN_PARAGRAPH.RIGHT,
+        }
+
+        table = self.doc.add_table(rows=1 + len(rows), cols=n_cols)
+        tbl = table._tbl
+        tblPr = tbl.find(qn("w:tblPr"))
+        if tblPr is None:
+            tblPr = OxmlElement("w:tblPr")
+            tbl.insert(0, tblPr)
+
+        tblBorders = OxmlElement("w:tblBorders")
+        for side in ["top", "left", "bottom", "right", "insideH", "insideV"]:
+            el = OxmlElement(f"w:{side}")
+            if borders:
+                el.set(qn("w:val"), "single")
+                el.set(qn("w:sz"), "4")          # 0.5 pt
+                el.set(qn("w:space"), "0")
+                el.set(qn("w:color"), "auto")
+            else:
+                el.set(qn("w:val"), "none")
+            tblBorders.append(el)
+        tblPr.append(tblBorders)
+
+        # Ширина полосы набора в twips (учитывает поля секции, в т.ч. 35 мм для L3)
+        section = self.doc.sections[0]
+        avail = int(section.page_width - section.left_margin - section.right_margin) // 635
+        if widths is None:
+            widths = [1] * n_cols
+        total = sum(widths)
+        cols_tw = [max(600, int(avail * w / total)) for w in widths]
+
+        tblW = OxmlElement("w:tblW")
+        tblW.set(qn("w:w"), str(sum(cols_tw)))
+        tblW.set(qn("w:type"), "dxa")
+        tblPr.append(tblW)
+        tblLayout = OxmlElement("w:tblLayout")
+        tblLayout.set(qn("w:type"), "fixed")
+        tblPr.append(tblLayout)
+
+        tblGrid = OxmlElement("w:tblGrid")
+        for w in cols_tw:
+            col = OxmlElement("w:gridCol")
+            col.set(qn("w:w"), str(w))
+            tblGrid.append(col)
+        tbl.insert(1, tblGrid)
+
+        def _fill(cell, value, col_idx, bold_default=False):
+            cell.paragraphs[0].clear()
+            p = cell.paragraphs[0]
+            p.alignment = amap[aligns[col_idx]]
+            p.paragraph_format.space_before      = Pt(2)
+            p.paragraph_format.space_after       = Pt(2)
+            p.paragraph_format.first_line_indent = Cm(0)
+            text, bold = (value if isinstance(value, tuple) else (value, bold_default))
+            _set_font(p.add_run(text), font_size, bold=bold)
+
+        for j, head in enumerate(headers):
+            _fill(table.rows[0].cells[j], head, j, bold_default=True)
+        for i, row in enumerate(rows):
+            for j, value in enumerate(row):
+                _fill(table.rows[1 + i].cells[j], value, j)
+
+        return table
 
     def add_quote(self, text):
         """Блок-цитата (дословная норма/формула): JUSTIFY, отступы 1.25 см
@@ -376,10 +465,13 @@ class DocBuilder:
             tblBorders.append(el)
         tblPr.append(tblBorders)
 
-        # Ширины колонок
+        # Ширины колонок: доли полосы набора (38/62), чтобы шапка не вылезала
+        # за поле при левом поле 35 мм у документов L3
+        section = self.doc.sections[0]
+        avail = int(section.page_width - section.left_margin - section.right_margin) // 635
         tblGrid = OxmlElement("w:tblGrid")
-        col1 = OxmlElement("w:gridCol"); col1.set(qn("w:w"), "3539")
-        col2 = OxmlElement("w:gridCol"); col2.set(qn("w:w"), "5800")
+        col1 = OxmlElement("w:gridCol"); col1.set(qn("w:w"), str(int(avail * 0.38)))
+        col2 = OxmlElement("w:gridCol"); col2.set(qn("w:w"), str(avail - int(avail * 0.38)))
         tblGrid.append(col1); tblGrid.append(col2)
         tbl.insert(1, tblGrid)
 
@@ -439,6 +531,36 @@ class DocBuilder:
             _set_font(p2.add_run(instance), 12)
 
         return table
+
+    def add_page_numbers(self, hide_on_first=True):
+        """
+        Номера страниц: арабские цифры, центр верхнего поля, первая страница
+        без номера (ГОСТ Р 7.0.97-2016). Обязательно для документов 2+ страниц.
+        Правый нижний угол остается свободным под штампы суда.
+        """
+        from copy import deepcopy
+
+        section = self.doc.sections[0]
+        section.different_first_page_header_footer = hide_on_first
+        header = section.header
+        header.is_linked_to_previous = False
+        p = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        probe = p.add_run("")
+        _set_font(probe, 12)
+        rPr = probe._r.find(qn("w:rPr"))
+
+        fld = OxmlElement("w:fldSimple")
+        fld.set(qn("w:instr"), " PAGE ")
+        r = OxmlElement("w:r")
+        if rPr is not None:
+            r.append(deepcopy(rPr))
+        text_el = OxmlElement("w:t")
+        text_el.text = "2"
+        r.append(text_el)
+        fld.append(r)
+        p._p.append(fld)
+        return p
 
     def _strip_yo(self):
         """Заменяет ё→е, Ё→Е во всех текстовых узлах (правило проекта «нет ё»)."""
