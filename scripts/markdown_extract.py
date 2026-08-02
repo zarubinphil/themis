@@ -127,16 +127,28 @@ def _ocr_many(png_paths):
 
 
 def render_scan(path, outdir, dpi=DPI, maxp=MAXP):
-    """Отрисовать страницы PDF в PNG (для внешнего рендера scan-маршрута)."""
+    """Отрисовать страницы PDF в PNG (для внешнего рендера scan-маршрута).
+
+    Идемпотентна: страница с готовым `page_NNN.txt` не перерисовывается и не
+    отдаётся на повторный OCR. Раньше каждый вызов гнал заново 300 DPI и Vision
+    по всем ≤80 страницам — при том что проверка уже была написана в
+    `render_tail.py:35-36` и просто не перенесена сюда (дефект Д11 аудита).
+    """
     import fitz
     os.makedirs(outdir, exist_ok=True)
     d = fitz.open(path)
     n = d.page_count
-    names = []
+    names, skipped = [], 0
     for i in range(min(maxp, n)):
-        d[i].get_pixmap(dpi=dpi).save(os.path.join(outdir, f"page_{i + 1:03d}.png"))
+        png = os.path.join(outdir, f"page_{i + 1:03d}.png")
+        if os.path.exists(os.path.splitext(png)[0] + ".txt"):
+            skipped += 1
+            continue
+        d[i].get_pixmap(dpi=dpi).save(png)
         names.append(f"page_{i + 1:03d}.png")
     d.close()
+    if skipped:
+        print(f"note: {skipped} стр. уже распознаны — пропущены", file=sys.stderr)
     return names, n
 
 
@@ -415,6 +427,23 @@ def main():
     except Exception as ex:
         print("ERROR при извлечении:", ex)
         sys.exit(2)
+
+    # На scan-маршруте body=None (текст лежит по страницам в ocr_dir/page_NNN.txt),
+    # и раньше реквизиты не извлекались вовсе — модель вычитывала ИНН, суммы и
+    # номера дел глазами по сканам, то есть самым дорогим способом (дефект Д11).
+    # Собираем текст из готовых сайдкаров: регулярки те же, стоимость нулевая.
+    if not body and route == "scan" and a.render_dir and os.path.isdir(a.render_dir):
+        pages_txt = sorted(f for f in os.listdir(a.render_dir) if f.endswith(".txt"))
+        ocr_body = "\n".join(
+            open(os.path.join(a.render_dir, f), encoding="utf-8", errors="ignore").read()
+            for f in pages_txt
+        ).strip()
+        if ocr_body and not os.path.isfile(req_path):
+            try:
+                open(req_path, "w", encoding="utf-8").write(
+                    json.dumps(extract_requisites(ocr_body), ensure_ascii=False))
+            except OSError:
+                pass
 
     # авто-реквизиты в сайдкар (только для текстовых маршрутов)
     requisites = None

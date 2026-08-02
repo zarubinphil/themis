@@ -88,7 +88,11 @@ def main() -> int:
     s2_full = has_marker(pr, r"## СОВЕТ ЗАВЕРШ")
     s2_fast = has_marker(pr, r"## FAST-СИНТЕЗ ФЕМИДЫ")
     s2 = s2_full or s2_fast
-    pr_fresh = s2 and age_days(pr) <= 30
+    # Порог — от даты попадания практики В НАШУ БАЗУ (mtime practice.md), а не
+    # от даты вынесения актов. Решение владельца 02.08.2026: судебная практика
+    # так быстро не меняется, 30 дней было необоснованно жёстко. Год.
+    PRACTICE_TTL_DAYS = 365
+    pr_fresh = s2 and age_days(pr) <= PRACTICE_TTL_DAYS
     s3 = has_marker(pos, r"СОГЛАСОВАНО СОВЕТОМ")
     s3_skip = has_marker(case_md, r"position-council пропущен")
 
@@ -119,7 +123,7 @@ def main() -> int:
 
     print(f"# Статус протокола — {case.name} (уровень: {level})")
     print(f"Шаг 1 Карта:     {mark(s1)}  knowledge-map.md {'с маркером' if s1 else '— нет маркера КАРТА ГОТОВА'}")
-    fresh_note = "" if not s2 else (" (свежая, ≤30 дн.)" if pr_fresh else f" (устарела: {age_days(pr)} дн. — проверить актуальность)")
+    fresh_note = "" if not s2 else (f" (свежая, ≤{PRACTICE_TTL_DAYS} дн.)" if pr_fresh else f" (в базе {age_days(pr)} дн., порог {PRACTICE_TTL_DAYS} — проверить актуальность)")
     track = " [FULL, совет]" if s2_full else (" [FAST, синтез Фемиды]" if s2_fast else "")
     print(f"Шаг 2 Практика:  {mark(s2)}  practice.md "
           f"{'с маркером' + track + fresh_note if s2 else '— нет маркера (нужен СОВЕТ ЗАВЕРШЕН либо FAST-СИНТЕЗ ФЕМИДЫ)'}")
@@ -147,7 +151,7 @@ def main() -> int:
     elif not s2:
         nxt = "Шаг 2 — охота за практикой (FAST: 1 охотник; FULL: 3 + /askacouncil)"
     elif not pr_fresh:
-        nxt = (f"Шаг 2 — практике {age_days(pr)} дн. (порог 30): подтвердить актуальность "
+        nxt = (f"Шаг 2 — практика в базе {age_days(pr)} дн. (порог {PRACTICE_TTL_DAYS}): подтвердить актуальность "
                f"или обновить охоту")
     elif not (s3 or s3_skip or s3_not_needed):
         nxt = "Шаг 3 — /position-council (или зафиксировать пропуск в _case.md)"
