@@ -624,10 +624,20 @@ def build_plenum_markdown(href: str, label: str) -> tuple[str, str] | None:
     if tm:
         law_date, num, red_date, subj = tm.groups()
     else:
-        # Не разобрали (напр. совместное ВС+ВАС постановление старого формата) —
-        # честно "?", а не выдуманная дата; заголовок все равно берем настоящий,
-        # текст пункта все равно на диске и грепается.
-        law_date, num, red_date, subj = "?", None, None, (h1_title or label or "?")
+        # Не разобрали основным шаблоном — обычно совместное постановление
+        # Пленума ВС РФ и Пленума ВАС РФ старого образца ("Пленума ВС РФ N 10,
+        # Пленума ВАС РФ N 22 от ... (ред. от ...) Название"): другой порядок
+        # номер/дата и два номера сразу. Дата и первый номер вытаскиваются
+        # отдельным проходом — без этого cite.py не найдет пункт по дате.
+        # Не нашли и так — честное "?", а не выдуманная дата.
+        src = h1_title or label or ""
+        dm = re.search(r"от\s+(\d{2}\.\d{2}\.\d{4})", src)
+        nm = re.search(r"N\s*(\S+)", src)
+        redm = re.search(r"\(ред\.\s+от\s+(\d{2}\.\d{2}\.\d{4})\)", src)
+        law_date = dm.group(1) if dm else "?"
+        num = nm.group(1).rstrip(",") if nm else None
+        red_date = redm.group(1) if redm else (law_date if dm else None)
+        subj = src or "?"
     punkty = split_into_punkty(body)
     lines = [f"# Постановление Пленума Верховного Суда РФ от {law_date}"
              + (f" N {num}" if num else "") + f"\n\n{subj.strip()}\n"]
