@@ -28,10 +28,49 @@ def age_days(f: Path) -> int:
         return 10**6
 
 
+def check_frontmatter() -> list[str]:
+    """Сломанный YAML во frontmatter = агент молча не попадает в реестр.
+
+    Прецедент 02.08.2026: у doc-drafter поле description начиналось с двойной
+    кавычки без обрамления одинарными — конвейер встал на шаге 4 после трех
+    завершенных шагов и полутора миллионов токенов работы. Проверка стоит
+    три строки и выполняется перед каждым шагом.
+    """
+    try:
+        import yaml
+    except ImportError:
+        return []
+    root = Path(__file__).resolve().parent.parent / ".claude"
+    bad = []
+    for f in sorted(root.glob("agents/*.md")) + sorted(root.glob("skills/**/SKILL.md")):
+        try:
+            text = f.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
+        if not m:
+            continue
+        try:
+            data = yaml.safe_load(m.group(1))
+            if not isinstance(data, dict) or "name" not in data:
+                bad.append(f"{f.name}: во frontmatter нет поля name")
+        except yaml.YAMLError as e:
+            bad.append(f"{f.name}: YAML сломан ({str(e).splitlines()[0][:60]})")
+    return bad
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         print("usage: themis_status.py cases/{клиент}/{дело}", file=sys.stderr)
         return 1
+
+    broken = check_frontmatter()
+    if broken:
+        print("⛔ СЛОМАН FRONTMATTER — эти агенты и скиллы НЕ попадут в реестр:")
+        for b in broken:
+            print(f"   {b}")
+        print("   Чинить до работы: значение с кавычками либо двоеточием "
+              "обернуть в одинарные кавычки.\n")
     case = Path(sys.argv[1]).resolve()
     if not case.is_dir():
         print(f"СТОП: {case} не существует. Сначала /new-case.", file=sys.stderr)

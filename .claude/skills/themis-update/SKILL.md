@@ -1,6 +1,6 @@
 ---
 name: themis-update
-description: Обновляет Themis с GitHub — только логику, данные (cases/, knowledge/) не трогает; git-статус до/после, откат при сбое. Триггеры: «обнови Themis», «проверь обновления», /themis-update.
+description: 'Обновляет Themis с GitHub — только логику, данные (cases/, knowledge/) не трогает; git-статус до/после, откат при сбое. Триггеры: «обнови Themis», «проверь обновления», /themis-update.'
 ---
 
 # Обновление Themis

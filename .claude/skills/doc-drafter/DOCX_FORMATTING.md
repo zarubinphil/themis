@@ -21,9 +21,8 @@
 | Дословная норма / цитата 40+ слов | `add_quote` |
 | Просительная часть | `add_proshyu` + `add_request_item` (номер «1. » вручную) |
 | Приложения | `add_appendices` + `add_appendix_item` |
-| Подпись | `add_signature_table(role, name, date)` — предпочтительно (ГОСТ Р 7.0.97 п. 5.22, устойчиво к LibreOffice/GDocs); `add_signature` — legacy |
-| Разделители | `add_empty`; последним в документе — `add_final_empty` |
-| Сохранение | `save(path)` — авто: стрип «ё», baseline в `_baselines/`, guard правок доверителя |
+| Подпись | `add_signature_table(role, name, date)` — предпочтительно (ГОСТ, устойчиво к LibreOffice/GDocs); `add_signature` — legacy |
+| Разделители; сохранение | `add_empty`, последним — `add_final_empty`; `save(path)` — авто: стрип «ё», baseline, guard правок |
 
 Нумерации страниц в DocBuilder НЕТ (`add_page_numbers` отсутствует — не вызывать, AttributeError). Документ 2+ страниц по ГОСТ Р 7.0.97 нумеруется: арабские цифры, центр верхнего поля, первая — без номера; колонтитул вручную через XML секции либо согласовать доработку скрипта. Нижний колонтитул — LEFT; правый нижний угол всех страниц свободен (штампы суда).
 
