@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+
+<!--
+  Ежемесячная сверка корпуса действующего права (кодексы + Пленумы ВС РФ).
+  1 числа каждого месяца в 12:00: --check дешево сверяет дату редакции,
+  --update тянет заново только то, что реально изменилось.
+
+  Установка (один раз):
+    cp ~/Проекты/themis/scripts/legal.corpus.update.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/legal.corpus.update.plist
+
+  Остановка:
+    launchctl unload ~/Library/LaunchAgents/legal.corpus.update.plist
+
+  Статус:
+    launchctl list | grep legal.corpus
+
+  Ручной прогон (без ожидания 1 числа):
+    ~/Проекты/themis/scripts/legal-corpus-monthly.sh
+-->
+
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>legal.corpus.update</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/fil/Проекты/themis/scripts/legal-corpus-monthly.sh</string>
+    </array>
+
+    <!-- 1 числа каждого месяца в 12:00 -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Day</key>
+        <integer>1</integer>
+        <key>Hour</key>
+        <integer>12</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/fil/Проекты/themis</string>
+
+    <key>StandardOutPath</key>
+    <string>/Users/fil/Проекты/themis/audit.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/fil/Проекты/themis/audit.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
