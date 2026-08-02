@@ -42,7 +42,7 @@ CODEX_SLUGS = {
 }
 
 ARTICLE_QUERY_RE = re.compile(
-    r"стать?[яию]?\.?\s*([\d.]+(?:-\d+)?)\s+([А-Яа-яЁё]+)(?:\s+РФ)?", re.I)
+    r"ст(?:атья|атьи|атью)?\.?\s*([\d.]+(?:-\d+)?)\s+([А-Яа-яЁё]+)(?:\s+РФ)?", re.I)
 CHAPTER_QUERY_RE = re.compile(
     r"глав[а-яё]*\s+([\d.]+)\s+([А-Яа-яЁё]+)(?:\s+РФ)?", re.I)
 PLENUM_QUERY_RE = re.compile(
@@ -159,8 +159,7 @@ def find_plenum_punkt(punkt: str, date_str: str, num: str | None) -> dict:
         text = read(path)
         if text is None:
             continue
-        head = text.split("\n", 5)
-        title_line = next((l for l in head if l.startswith("# Постановление")), "")
+        title_line = next((l for l in text.split("\n") if l.startswith("# Постановление")), "")
         if date_str not in title_line:
             continue
         if num and f"N {num}" not in title_line:

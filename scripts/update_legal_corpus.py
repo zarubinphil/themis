@@ -618,12 +618,16 @@ def build_plenum_markdown(href: str, label: str) -> tuple[str, str] | None:
     # <h1> страницы всегда несет "от ДД.ММ.ГГГГ N X (ред. от ДД.ММ.ГГГГ) Название"
     # целиком (проверено на живом документе) — надежнее текста ссылки каталога.
     h1m = re.search(r"<h1>([^<]+)</h1>", html_text)
-    tm = (PLENUM_TITLE_RE.search(h1m.group(1)) if h1m else None) \
+    h1_title = html.unescape(h1m.group(1)) if h1m else None
+    tm = (PLENUM_TITLE_RE.search(h1_title) if h1_title else None) \
         or PLENUM_TITLE_RE.search(label) or PLENUM_TITLE_RE.search(body[:300])
     if tm:
         law_date, num, red_date, subj = tm.groups()
     else:
-        law_date, num, red_date, subj = "?", None, None, label
+        # Не разобрали (напр. совместное ВС+ВАС постановление старого формата) —
+        # честно "?", а не выдуманная дата; заголовок все равно берем настоящий,
+        # текст пункта все равно на диске и грепается.
+        law_date, num, red_date, subj = "?", None, None, (h1_title or label or "?")
     punkty = split_into_punkty(body)
     lines = [f"# Постановление Пленума Верховного Суда РФ от {law_date}"
              + (f" N {num}" if num else "") + f"\n\n{subj.strip()}\n"]
