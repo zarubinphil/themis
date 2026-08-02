@@ -32,3 +32,19 @@ __pycache__/
 **/_baselines/
 *.requisites.json
 .gstack/
+
+# ── ЖЁСТКИЙ ЗАПРЕТ: ПД доверителей в публичном репо ──
+# cases/*/ гасит только ПАПКИ. Одиночные файлы прямо в cases/ ускользали (инцидент 02.08.2026).
+cases/*
+!cases/_templates/
+!cases/_templates/**
+!cases/ivanov-ivan/
+!cases/ivanov-ivan/**
+!cases/.gitkeep
+# Генераторы документов содержат ПД строковыми литералами — только локально.
+cases/_archive_generators/
+scripts/_build_*.py
+scripts/gen_*.py
+scripts/_merge_prilozhenia.py
+# Виртуальные окружения и кеши — не в репо.
+.cache/
