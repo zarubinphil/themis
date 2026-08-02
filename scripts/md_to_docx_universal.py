@@ -106,7 +106,7 @@ def md_to_docx(md_path, out_path):
     section.page_width = Cm(21)
     section.page_height = Cm(29.7)
     section.top_margin = Cm(2)
-    section.bottom_margin = Cm(2)
+    section.bottom_margin = Cm(3)   # 30 мм: зона штампа суда, DOCX_FORMATTING.md
     section.left_margin = Cm(3)
     section.right_margin = Cm(1.5)
 

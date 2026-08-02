@@ -537,8 +537,12 @@ class DocBuilder:
         Номера страниц: арабские цифры, центр верхнего поля, первая страница
         без номера (ГОСТ Р 7.0.97-2016). Обязательно для документов 2+ страниц.
         Правый нижний угол остается свободным под штампы суда.
+
+        Вручную звать не обязательно: `save()` вызывает сам, если не вызвали.
         """
         from copy import deepcopy
+
+        self._paginated = True
 
         section = self.doc.sections[0]
         section.different_first_page_header_footer = hide_on_first
@@ -649,6 +653,12 @@ class DocBuilder:
                   f"Сначала redline-разбор («изучи мои правки»), "
                   f"либо повторить с THEMIS_FORCE_OVERWRITE=1.")
             return
+
+        # Нумерация обязательна по ГОСТ Р 7.0.97 для документов 2+ страниц
+        # (DOCX_FORMATTING.md:28). Требовать ее памятью составителя ненадежно:
+        # на 02.08.2026 живого вызова не осталось ни на одном маршруте.
+        if not getattr(self, "_paginated", False):
+            self.add_page_numbers()
 
         blockers = self._humanizer_gate()
         if blockers and os.environ.get("THEMIS_SKIP_HUMANIZER") != "1":
