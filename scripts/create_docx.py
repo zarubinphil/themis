@@ -568,8 +568,59 @@ class DocBuilder:
             if t.text and ("ё" in t.text or "Ё" in t.text):
                 t.text = t.text.replace("ё", "е").replace("Ё", "Е")
 
+    # Категории scan_legal.sh, при которых документ не выпускается. Мягкие
+    # (хеджирование, номинализации, ритм) только предупреждают — их снимает
+    # сам скилл, а формальным блокером они дают ложные срабатывания.
+    HUMANIZER_BLOCKERS = (
+        "HARD BANS",
+        "L18 плейсхолдер",
+        "L18 артефакт копипасты",
+        "L18 невидимые символы",
+        "L18 латиница в кириллице",
+    )
+
+    def _document_text(self):
+        """Весь видимый текст документа: параграфы плюс ячейки таблиц."""
+        parts = [p.text for p in self.doc.paragraphs]
+        for t in self.doc.tables:
+            for row in t.rows:
+                parts.extend(c.text for c in row.cells)
+        return "\n".join(x for x in parts if x.strip())
+
+    def _humanizer_gate(self):
+        """Прогнать текст через scan_legal.sh. Вернуть список сработавших
+        блокирующих категорий; пустой список — документ чист.
+
+        Скрипт недоступен — гейт не срабатывает, но об этом печатается
+        предупреждение: молчаливое отключение проверки хуже ее отсутствия.
+        """
+        import subprocess
+        from pathlib import Path as _P
+
+        scan = _P.home() / ".claude/skills/humanizer-legal/scripts/scan_legal.sh"
+        if not scan.exists():
+            print(f"ВНИМАНИЕ: {scan} не найден — проверка humanizer-legal не выполнена.")
+            return []
+        try:
+            out = subprocess.run(
+                ["bash", str(scan), "-"], input=self._document_text(),
+                capture_output=True, text=True, timeout=60).stdout
+        except (OSError, subprocess.SubprocessError) as e:
+            print(f"ВНИМАНИЕ: humanizer-legal не отработал ({e}) — проверка не выполнена.")
+            return []
+
+        hits = []
+        for line in out.splitlines():
+            parts = line.strip().split(None, 1)
+            if len(parts) == 2 and parts[0].isdigit() and int(parts[0]) > 0:
+                if parts[1] in self.HUMANIZER_BLOCKERS:
+                    hits.append(f"{parts[1]} ({parts[0]})")
+        return hits
+
     def save(self, path):
-        """Сохранить документ. Перед записью — авто-стрип буквы ё.
+        """Сохранить документ. Перед записью — авто-стрип буквы ё и гейт
+        humanizer-legal: документ со следами автогенерации или незаполненным
+        плейсхолдером в суд не выпускается.
 
         Плюс неизменяемый снимок-черновик в `_baselines/` рядом — база «ДО» для
         самообучения по правкам доверителя (redline). Снимок = последняя выданная
@@ -597,6 +648,14 @@ class DocBuilder:
                   f"вероятны правки доверителя, внесенные напрямую в файл. "
                   f"Сначала redline-разбор («изучи мои правки»), "
                   f"либо повторить с THEMIS_FORCE_OVERWRITE=1.")
+            return
+
+        blockers = self._humanizer_gate()
+        if blockers and os.environ.get("THEMIS_SKIP_HUMANIZER") != "1":
+            print(f"СТОП, НЕ СОХРАНЕНО: документ не прошел humanizer-legal.\n"
+                  f"  Сработали блокирующие категории: {', '.join(blockers)}.\n"
+                  f"  Прогнать скилл humanizer-legal по тексту, затем повторить save().\n"
+                  f"  Полный отчет: ~/.claude/skills/humanizer-legal/scripts/scan_legal.sh ФАЙЛ.md")
             return
 
         self.doc.save(path)
