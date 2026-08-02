@@ -29,12 +29,22 @@ def _has_marker(path, pattern: str) -> bool:
         return False
 
 
+# Практика считается закрытой ДВУМЯ путями, и они не равны по силе:
+#   «## СОВЕТ ЗАВЕРШЕН»      — FULL: охотники + /askacouncil
+#   «## FAST-СИНТЕЗ ФЕМИДЫ»  — FAST: синтез Фемидой без совета
+# До 02.08.2026 у FAST не было своего маркера: скилл разрешал писать practice.md
+# без маркера, а хук за это давал exit 2 — агент шёл искать обход и находил его
+# (дела doveritel-8, doveritel-9, doveritel-2 попали в 03_drafts мимо конвейера).
+# Запрет без легального пути производит обходы, а не дисциплину.
+PRACTICE_MARKER = r"## (СОВЕТ ЗАВЕРШ|FAST-СИНТЕЗ ФЕМИДЫ)"
+
+
 def _workflow_gate(p: str) -> None:
     """Порядок шагов протокола — детерминированно.
 
     Запись артефакта шага N блокируется, пока нет маркера шага N-1 на диске:
       practice.md   ← требует «## КАРТА ГОТОВА ✓» в knowledge-map.md
-      positions.md  ← требует «## СОВЕТ ЗАВЕРШ» в practice.md
+      positions.md  ← требует маркер практики (СОВЕТ ЗАВЕРШЕН либо FAST-СИНТЕЗ)
       03_drafts/*   ← требует оба маркера (кроме _working/ и _baselines/)
     """
     norm = p.replace("\\", "/")
@@ -56,15 +66,16 @@ def _workflow_gate(p: str) -> None:
             "в knowledge-map.md нет маркера «## КАРТА ГОТОВА ✓». Запустить case-mapper. "
             "Статус: python3 scripts/themis_status.py " + case_root
         )
-    if tail == "01_context/positions.md" and not _has_marker(pr, r"## СОВЕТ ЗАВЕРШ"):
+    if tail == "01_context/positions.md" and not _has_marker(pr, PRACTICE_MARKER):
         block(
             "БЛОК ПРОТОКОЛА: positions.md пишется только после Шага 2 — "
-            "в practice.md нет маркера «## СОВЕТ ЗАВЕРШЕН». Запустить охоту/совет. "
+            "в practice.md нет ни «## СОВЕТ ЗАВЕРШЕН», ни «## FAST-СИНТЕЗ ФЕМИДЫ». "
+            "Запустить охоту/совет либо поставить честный FAST-маркер. "
             "Статус: python3 scripts/themis_status.py " + case_root
         )
     if (tail.startswith("03_drafts/")
             and "/_working/" not in norm and "/_baselines/" not in norm):
-        if not _has_marker(km, r"## КАРТА ГОТОВА ✓") or not _has_marker(pr, r"## СОВЕТ ЗАВЕРШ"):
+        if not _has_marker(km, r"## КАРТА ГОТОВА ✓") or not _has_marker(pr, PRACTICE_MARKER):
             block(
                 "БЛОК ПРОТОКОЛА: черновик в 03_drafts/ пишется только после Шагов 1-2 — "
                 "нет маркера карты и/или практики. Судебные документы вне конвейера запрещены. "
