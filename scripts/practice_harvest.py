@@ -29,7 +29,13 @@ PATTERNS = {
     "Пленум/Обзор ВС": re.compile(
         r"Пленума?\s+(?:ВС|Верховного\s+Суда)[^\n№]{0,40}от\s+(\d{2}\.\d{2}\.\d{4})\s*№\s*(\d+)"),
     "Определение ВС": re.compile(r"\b(\d{1,3}-(?:КГ|КАД|КАС|АД|ЭС|УД)\d{2}-\d+(?:-[А-Яа-я\d]+)?)\b"),
-    "Постановление КС": re.compile(r"№\s*(\d+)-П\b"),
+    # КС РФ — ТОЛЬКО с датой. Ключ без даты сплавлял в одну запись разные акты:
+    # № 6-П соответствовал пяти датам, № 35-П — трём, № 9-П, 16-П и 18-П — двум
+    # (замер 03.08.2026, 4 склейки на 21 ключ). Номера у КС повторяются каждый год,
+    # поэтому «Постановление КС РФ № 35-П» — не реквизит, а омоним.
+    "Постановление КС": re.compile(
+        r"(?:Постановлени\w+\s+)?(?:КС|Конституционного\s+Суда)[^\n№]{0,40}"
+        r"от\s+(\d{2}\.\d{2}\.\d{4})\s*№\s*(\d+(?:-\d+)?)-П\b"),
     "Арбитраж": re.compile(r"\b(А\d{2}-\d+/\d{4})\b"),
     "СОЮ": re.compile(r"\b(\d{1,2}-\d{2,6}/\d{4})\b"),
 }
@@ -42,7 +48,7 @@ def act_key(kind: str, m: re.Match) -> str:
     if kind == "Пленум/Обзор ВС":
         return f"Постановление Пленума ВС РФ от {m.group(1)} № {m.group(2)}"
     if kind == "Постановление КС":
-        return f"Постановление КС РФ № {m.group(1)}-П"
+        return f"Постановление КС РФ от {m.group(1)} № {m.group(2)}-П"
     return m.group(1)
 
 
@@ -100,10 +106,30 @@ def already_in_index(index_path: str) -> str:
         return ""
 
 
-def candidates(cases_dir: str, index_path: str) -> list[tuple[str, dict]]:
+# Номер дела первой инстанции — персональные данные, а не практика. По нему
+# открывается карточка на портале суда: стороны, предмет, движение. Номер, который
+# встретился РОВНО В ОДНОМ деле, почти всегда номер собственного производства
+# доверителя, попавший в hunter-файл из материалов: замер 03.08.2026 дал 36 таких
+# из 151 кандидата формата СОЮ, и все они шли в общую базу знаний.
+# Прецедент практики цитируется другими делами — реальный прецедент встречается
+# минимум дважды. Пороговое правило действует только для номеров производств
+# (СОЮ и арбитраж); у Пленума, КС и определений ВС реквизит сам по себе публичен.
+PERSONAL_KINDS = frozenset({"СОЮ", "Арбитраж"})
+MIN_CASES_FOR_PERSONAL = 2
+
+
+def personal_data_risk(kind: str, rec: dict) -> bool:
+    """Кандидат — вероятный номер производства доверителя, а не прецедент."""
+    return kind in PERSONAL_KINDS and len(rec.get("cases", ())) < MIN_CASES_FOR_PERSONAL
+
+
+def candidates(cases_dir: str, index_path: str,
+               allow_personal: bool = False) -> list[tuple[str, dict]]:
     idx = already_in_index(index_path)
     out = []
     for key, rec in harvest(cases_dir).items():
+        if not allow_personal and personal_data_risk(rec.get("kind", ""), rec):
+            continue
         probe = re.sub(r"^Постановление (Пленума ВС РФ|КС РФ) ", "", key)
         # Подстрочная проверка «поглощала» кандидатов: 81-КГ19-2 находился внутри
         # 81-КГ19-20, А65-1234/2024 — внутри А65-12345/2024, и акт молча терялся.
@@ -205,6 +231,8 @@ def to_markdown(items: list[tuple[str, dict]]) -> str:
              "",
              f"Собрано механически из дел, {len(items)} актов не найдено в базе.",
              "Проверить применимость и внести через archivist. Реквизиты — сверить `verify_act.py`.",
+             f"Номера производств, встреченные меньше чем в {MIN_CASES_FOR_PERSONAL} делах, "
+             "в выгрузку не попадают: это номера дел доверителей, а не прецеденты.",
              "Пути дел и цитаты-контекст намеренно не выводятся: имя папки — фамилия "
              "доверителя. Нужен контекст — грепнуть реквизит по `cases/` локально.",
              ""]
@@ -286,6 +314,9 @@ def main() -> int:
                     help="привести счётчики шапки и оглавления к тому, что на диске")
     ap.add_argument("--md", metavar="FILE", help="выгрузить кандидатов в markdown")
     ap.add_argument("--top", type=int, default=40, help="сколько кандидатов показать")
+    ap.add_argument("--allow-personal", action="store_true",
+                    help="не отсекать номера производств, встреченные в одном деле "
+                         "(это персональные данные доверителей — только для разбора глазами)")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
@@ -302,12 +333,18 @@ def main() -> int:
             print(f"⚠ {p}")
         return 1 if problems else 0
 
-    items = candidates(a.cases, a.index)
+    items = candidates(a.cases, a.index, allow_personal=a.allow_personal)
+    held = len(candidates(a.cases, a.index, allow_personal=True)) - len(items)
     if a.md:
         open(a.md, "w", encoding="utf-8").write(to_markdown(items))
         print(f"кандидатов {len(items)} → {a.md}")
         return 1 if items else 0
-    print(f"актов в делах, которых нет в базе: {len(items)}\n")
+    print(f"актов в делах, которых нет в базе: {len(items)}")
+    if held:
+        print(f"придержано как персональные данные: {held} номеров производств, "
+              f"встреченных меньше чем в {MIN_CASES_FOR_PERSONAL} делах "
+              "(показать: --allow-personal, в общую базу не вносить)")
+    print()
     print(f"{'акт':<44}{'дел':>5}{'упом.':>7}  тип")
     for key, rec in items[:a.top]:
         print(f"{key[:43]:<44}{len(rec['cases']):>5}{rec['count']:>7}  {rec.get('kind', '')}")
