@@ -163,6 +163,19 @@ def frontmatter_list(text: str, field: str) -> list[str]:
     return [ln[4:].strip().strip('"') for ln in m.group(1).splitlines()]
 
 
+def _found_label(heading_line: str, kind: str) -> str:
+    """Ярлык по НАЙДЕННОМУ заголовку: «Глава 25.3» → «глава 25.3»."""
+    m = re.search(r"(?i)(?:глава|п\.)\s*(\d+(?:\.\d+)*)", heading_line or "")
+    return f"{kind} {m.group(1)}" if m else kind
+
+
+def _repealed(heading_line: str, section: str) -> bool:
+    """Норма утратила силу. Проверка была только на пути статей, хотя пункт Пленума
+    утрачивает силу ровно так же (п. 15 Пленума от 05.03.2004 № 1 — с 17.12.2024)."""
+    head = (heading_line or "") + " " + (section or "")[:400]
+    return bool(re.search(r"(?i)утратил[аи]?\s+силу|признан[аоы]?\s+утратившим", head))
+
+
 def find_article(num: str, codex_word: str) -> dict:
     slug = CODEX_SLUGS.get(codex_word.lower())
     result = {"query": f"ст. {num} {codex_word.upper()}", "found": False}
@@ -223,7 +236,10 @@ def find_chapter(num: str, codex_word: str) -> dict:
     if text is None:
         result["error"] = f"файл {path} не найден — корпус не выгружен"
         return result
-    heading_re = re.compile(rf"^##\s+Глава\s+{re.escape(num)}\b.*$", re.M)
+    # \b между цифрой и точкой СРАБАТЫВАЕТ, поэтому «глава 25» матчилась заголовком
+    # «Глава 25.3» и выдавала госпошлину вместо налога на прибыль. Номер обязан
+    # кончаться: следом не цифра и не точка.
+    heading_re = re.compile(rf"^##\s+Глава\s+{re.escape(num)}(?!\d)(?!\.\d).*$", re.M)
     m = heading_re.search(text)
     if not m:
         result["error"] = f"глава {num} не найдена в {path}"
@@ -251,7 +267,9 @@ def find_chapter(num: str, codex_word: str) -> dict:
         "integrity": integrity_ok(text),
         "source": frontmatter_field(text, "источник"),
         "text": section,
-        "cite_tag": f"[глава {num} {codex_word.upper()} РФ]",
+        # Тег строится из найденного заголовка: раньше он эхом отдавал ЗАПРОШЕННЫЙ
+        # номер, и под чужим текстом стояла синтаксически безупречная ложная ссылка.
+        "cite_tag": f"[{_found_label(heading_line, 'глава')} {codex_word.upper()} РФ]",
     })
     return result
 
@@ -289,13 +307,19 @@ def find_plenum_punkt(punkt: str, date_str: str, num: str | None) -> dict:
                             "(№): " + "; ".join(os.path.basename(p) for p, _, _ in candidates))
         return result
     path, text, title_line = candidates[0]
-    heading_re = re.compile(rf"^###\s+п\.\s+{re.escape(punkt)}\b", re.M)
+    # То же самое для пунктов Пленумов: «п. 15» матчился заголовком «п. 15.1».
+    # Замер совета: подмена задевала 15 пунктов в корпусе.
+    heading_re = re.compile(rf"^###\s+п\.\s+{re.escape(punkt)}(?!\d)(?!\.\d)", re.M)
     m = heading_re.search(text)
     if not m:
         result["error"] = f"пункт {punkt} не найден в {path} ({title_line.strip('# ')})"
         return result
     heading_line = text[m.start():text.index("\n", m.start())]
     section = extract_section(text, heading_line)
+    if _repealed(heading_line, section):
+        result["error"] = (f"пункт {punkt} названного Постановления помечен утратившим "
+                           "силу — цитировать нельзя, искать действующую позицию")
+        return result
     result.update({
         "found": True, "file": os.path.relpath(path, ROOT),
         "title": title_line.lstrip("# ").strip(),
@@ -304,7 +328,8 @@ def find_plenum_punkt(punkt: str, date_str: str, num: str | None) -> dict:
         "integrity": integrity_ok(text),
         "source": frontmatter_field(text, "источник"),
         "text": section,
-        "cite_tag": f"[{title_line.lstrip('# ').strip()}, п. {punkt}]",
+        "cite_tag": f"[{title_line.lstrip('# ').strip()}, "
+                    f"{_found_label(heading_line, 'п.')}]",
     })
     return result
 
@@ -366,6 +391,16 @@ def selftest() -> int:
                "заключается на срок, не превышающий пяти лет.\n\n### Статья 152.1. Изображение\n\n"
                "Обнародование изображения допускается с согласия гражданина.\n")
     codex("gk-rf", fresh, body_ok)
+    # 25.3 стоит ПЕРЕД 25 намеренно: так подмена видна. При снятой границе поиск
+    # «глава 25» находит первое совпадение — то есть 25.3 — и выдаёт чужую главу.
+    codex("zk-rf", fresh,
+          "## Глава 25.3. Государственная пошлина\n\n### Статья 333.16. Пошлина\n\n"
+          "Государственная пошлина — сбор, взимаемый с лиц при их обращении в "
+          "государственные органы за совершением юридически значимых действий.\n\n"
+          "## Глава 25. Налог на прибыль\n\n### Статья 246. Налогоплательщики\n\n"
+          "Налогоплательщиками налога на прибыль организаций признаются российские "
+          "организации и иностранные организации, осуществляющие деятельность через "
+          "постоянные представительства.\n")
     codex("gpk-rf", "?", "### Статья 131. Форма иска\n\nИск подается в письменной форме.\n")
     codex("sk-rf", "29.12.1995", "### Статья 34. Совместная собственность\n\nИмущество общее.\n")
     # заголовок-склейка утративших силу статей рядом с живой статьёй
@@ -377,6 +412,9 @@ def selftest() -> int:
     open(os.path.join(KODEKSY_DIR, "kas-rf.md"), "w", encoding="utf-8").write(
         '---\nдата_редакции: "' + fresh + '"\nисточник: "тест"\nsha256: "deadbeef"\n---\n'
         "### Статья 1. Предмет\n\nТекст.\n")
+    open(os.path.join(PLENUMY_DIR, "2020-01-01-7.md"), "w", encoding="utf-8").write(
+        "# Постановление Пленума ВС РФ от 01.01.2020 N 7\n\n"
+        "### п. 9\n\nУтратил силу.\n\n### п. 15.1\n\nИзвещение СМС-сообщением.\n")
     open(os.path.join(PLENUMY_DIR, "2012-06-19-13.md"), "w", encoding="utf-8").write(
         "# Постановление Пленума ВС РФ от 19.06.2012 N 13\n\n### п. 21\n\nСуд апелляционной инстанции.\n")
 
@@ -422,6 +460,29 @@ def selftest() -> int:
         ("часть четвёртая: своя дата", r_p4.get("redaction_date") == "05.06.2026"),
         ("часть четвёртая: свой источник", r_p4.get("source") == "src-part-4"),
         ("часть определена по заголовку", r_p4.get("часть") == "Часть четвертая"),
+        # Граница номера: \b между цифрой и точкой срабатывает, и «п. 15» матчился
+        # заголовком «п. 15.1» — в документ уходила ЧУЖАЯ норма под верным тегом.
+        ("пункт 15 не подменяется пунктом 15.1", not resolve(
+            "п. 15 Пленума ВС РФ от 01.01.2020 № 7")["found"]),
+        ("пункт 15.1 находится сам по себе", resolve(
+            "п. 15.1 Пленума ВС РФ от 01.01.2020 № 7")["found"]),
+        # В фикстуре есть ОБЕ главы: 25 и 25.3. Раньше запрос главы 25 попадал в 25.3.
+        ("глава 25 находит именно главу 25",
+         "Налог на прибыль" in (resolve("глава 25 ЗК").get("text") or "")),
+        ("глава 25 не подменяется главой 25.3",
+         "Государственная пошлина" not in (resolve("глава 25 ЗК").get("text") or "")),
+        ("глава 25.3 находится сама по себе", resolve("глава 25.3 ЗК")["found"]),
+        # Ярлык берётся из НАЙДЕННОГО заголовка: раньше тег эхом отдавал запрошенный
+        # номер, и под чужим текстом стояла безупречная по виду ложная ссылка.
+        ("ярлык читается из заголовка", _found_label("## Глава 25.3. Пошлина", "глава")
+         == "глава 25.3"),
+        ("ярлык не тащит хвостовую точку", "." not in
+         _found_label("## Глава 25. Налог", "глава").split()[-1]),
+        ("ярлык пункта из заголовка", _found_label("### п. 15.1", "п.") == "п. 15.1"),
+        ("тег строится по найденному", resolve("глава 25.3 ЗК")["cite_tag"]
+         == "[глава 25.3 ЗК РФ]"),
+        ("утративший силу пункт не цитируется", not resolve(
+            "п. 9 Пленума ВС РФ от 01.01.2020 № 7")["found"]),
         ("длинный текст режется", clip("x" * 50_000, False)[1] is True),
         ("короткий текст не режется", clip("x" * 100, False) == ("x" * 100, False)),
         ("--full не режет", clip("x" * 50_000, True)[1] is False),
