@@ -197,23 +197,77 @@ def _cache_put(key, value):
         print(f"ВНИМАНИЕ: кеш не записан ({e})", file=sys.stderr)
 
 
+# Карта полей формы ПО РАЗДЕЛАМ. Прочитана из самих форм поиска 04.08.2026
+# (`curl https://sudact.ru/{раздел}/doc/` → имена input и select), не предположена.
+# Наблюдение о том, что набор полей у разделов РАЗНЫЙ, взято у mynka999/sudact-mcp-server
+# (MIT); реализация своя.
+#
+# ПОЧЕМУ ЭТО ВАЖНО. Сайт молча ИГНОРИРУЕТ неизвестный параметр: ответ приходит
+# 200, выдача есть, счётчик есть — и выглядит это как отфильтрованный результат.
+# Практические последствия, которые были у нас:
+#   • arbitral не знает поля `area` (у него `region`) — партиционирование по
+#     регионам там не фильтровало НИЧЕГО, а отчёт об охвате считался как обычно;
+#   • magistrate, vsrf и arbitral не знают `workflow_stage` — каскад дробления по
+#     инстанциям выполнял три лишних запроса с одинаковой выдачей;
+#   • vsrf не знает ни `area`, ни `court` — партиционирование по регионам там
+#     бессмысленно в принципе.
+# Отправленный, но не поддержанный фильтр теперь называется в отчёте (filters_ignored),
+# а не растворяется в «мы всё отфильтровали».
+SECTION_FIELDS = {
+    "regular": {"txt", "case_doc", "lawchunkinfo", "date_from", "date_to",
+                "workflow_stage", "area", "court", "judge"},
+    "magistrate": {"txt", "case_doc", "lawchunkinfo", "date_from", "date_to",
+                   "area", "court", "judge"},
+    "vsrf": {"txt", "case_doc", "lawchunkinfo", "date_from", "date_to", "judge"},
+    "arbitral": {"txt", "case_doc", "lawchunkinfo", "date_from", "date_to",
+                 "region", "court", "judge"},
+}
+# Регион у арбитража называется иначе. Одно и то же понятие, разное имя поля.
+REGION_FIELD = {"arbitral": "region"}
+
+# Потолок страниц выдачи. Наблюдение mynka999/sudact-mcp-server: page > 50
+# зацикливает выдачу — сайт отдаёт ту же страницу, и наивный обход крутится вечно.
+# Проверено 04.08.2026: страницы 50 и 55 одного запроса дают одинаковый набор URL.
+MAX_PAGES = 50
+
+
+def section_fields(section: str) -> set:
+    return SECTION_FIELDS.get(section, SECTION_FIELDS["regular"])
+
+
+def region_field(section: str) -> str:
+    return REGION_FIELD.get(section, "area")
+
+
 def build_query(section, text="", instance="", area="", court="", judge="",
-                law="", case_doc="", date_from="", date_to="", page=1):
-    """Строка параметров поиска. Имена полей у раздела свои: regular-txt, vsrf-txt и т.д."""
+                law="", case_doc="", date_from="", date_to="", page=1,
+                ignored=None):
+    """Строка параметров поиска. Имена полей у раздела свои: regular-txt, vsrf-txt и т.д.
+
+    Поля, которых у раздела НЕТ, не отправляются вовсе, а их имена складываются в
+    `ignored` — вызывающий обязан сказать вслух, что фильтр не применён.
+    """
     p = section
-    q = {
-        f"{p}-txt": text,
-        f"{p}-case_doc": case_doc,
-        f"{p}-lawchunkinfo": law,
-        f"{p}-date_from": date_from,
-        f"{p}-date_to": date_to,
-        f"{p}-workflow_stage": _resolve("workflow_stage", instance, section),
-        f"{p}-area": _resolve("area", area, section),
-        f"{p}-court": court,
-        f"{p}-judge": judge,
+    known = section_fields(section)
+    wanted = {
+        "txt": text,
+        "case_doc": case_doc,
+        "lawchunkinfo": law,
+        "date_from": date_from,
+        "date_to": date_to,
+        "workflow_stage": _resolve("workflow_stage", instance, section),
+        region_field(section): _resolve("area", area, section),
+        "court": court,
+        "judge": judge,
     }
+    q = {}
+    for name, value in wanted.items():
+        if name in known:
+            q[f"{p}-{name}"] = value
+        elif value and ignored is not None:
+            ignored.add(name)
     if page > 1:
-        q["page"] = str(page)
+        q["page"] = str(min(page, MAX_PAGES))
     return urllib.parse.urlencode(q)
 
 
@@ -326,8 +380,17 @@ def search(text, section="regular", limit=20, max_wait=25.0, **kw):
         out, total, seen = [], "", set()
         pages = (limit + PAGE_SIZE - 1) // PAGE_SIZE
         for i in range(pages):
+            page = start_page + i
+            if page > MAX_PAGES:
+                # За 50-й страницей выдача зацикливается: сайт отдаёт ту же
+                # страницу, и наивный обход крутится вечно, наращивая дубли.
+                print(f"ВНИМАНИЕ: достигнут потолок {MAX_PAGES} страниц выдачи — "
+                      "дальше источник повторяет ту же страницу. Сузить запрос "
+                      "(регион, инстанция, даты) либо использовать --partition.",
+                      file=sys.stderr)
+                break
             got, tot = _search_page(text, section, limit, max_wait,
-                                    page=start_page + i, **kw)
+                                    page=page, **kw)
             total = total or tot
             fresh = [r for r in got if r["url"] not in seen]
             seen.update(r["url"] for r in fresh)
@@ -338,9 +401,18 @@ def search(text, section="regular", limit=20, max_wait=25.0, **kw):
     return _search_page(text, section, limit, max_wait, page=start_page, **kw)
 
 
+# Фильтры, отправленные последним запросом, но не поддержанные разделом. Сайт их
+# молча игнорирует и отвечает 200 — без этой записи «отфильтровано» и «не
+# отфильтровано» для вызывающего неразличимы.
+LAST_IGNORED: set = set()
+
+
 def _search_page(text, section="regular", limit=20, max_wait=25.0, **kw):
     """Одна страница выдачи."""
-    qs = build_query(section, text=text, **kw)
+    ignored: set = set()
+    qs = build_query(section, text=text, ignored=ignored, **kw)
+    if ignored:
+        LAST_IGNORED.update(ignored)
     ckey = f"search:{section}:{qs}:{limit}"
     cached = _cache_get(ckey)
     if cached:
@@ -491,6 +563,13 @@ def partitioned_search(text, section="regular", per_region=30, max_regions=0,
     части» оставались пустыми, и механизм честности сообщал о полном покрытии там, где
     реально видел проценты. Замер 03.08.2026: счётчик 3 743, отдано 24.
     """
+    # Раздел может не знать самого понятия «регион»: у vsrf такого фильтра нет
+    # вовсе. Партиционирование там не сужает выдачу, а лишь повторяет один и тот
+    # же запрос 85 раз — и отчёт об охвате при этом считался как настоящий.
+    if region_field(section) not in section_fields(section):
+        return [], {"error": f"раздел «{section}» не поддерживает фильтр по региону "
+                             f"(поля формы: {', '.join(sorted(section_fields(section)))}) "
+                             "— партиционирование по регионам здесь невозможно"}
     regions = sorted((_load_dicts(section).get("area") or {}))
     if not regions:
         return [], {"error": f"у раздела «{section}» нет справочника регионов"}
@@ -500,6 +579,11 @@ def partitioned_search(text, section="regular", per_region=30, max_regions=0,
     # дубле аргумента).
     user_instance = kw.pop("instance", "") or ""
     if user_instance:
+        cascade = False
+    # Каскад по инстанциям работает только там, где инстанция вообще фильтруется.
+    # У magistrate, vsrf и arbitral поля workflow_stage нет: три подзапроса
+    # возвращали одну и ту же выдачу и «добирали» ноль, тратя три обращения на регион.
+    if "workflow_stage" not in section_fields(section):
         cascade = False
 
     seen, out, thin, done = set(), [], [], 0
@@ -546,6 +630,7 @@ def partitioned_search(text, section="regular", per_region=30, max_regions=0,
         "регионов всего": len(regions),
         "регионов пропущено лимитом обхода": skipped,
         "части с неполным охватом": thin,
+        "фильтры без поддержки разделом": sorted(LAST_IGNORED),
     }
     # Неполный охват — это ошибка прогона, а не примечание к нему. Раньше отчёт
     # печатал «⚠ ОХВАТ НЕПОЛОН» и возвращал 0: автоматика (охотник, скрипт, хук)
@@ -557,15 +642,75 @@ def partitioned_search(text, section="regular", per_region=30, max_regions=0,
         why.append(f"регионов не обойдено: {skipped}")
     if declared_total and coverage < COVERAGE_OK_PERCENT:
         why.append(f"охват {round(coverage, 2)}% ниже порога {COVERAGE_OK_PERCENT}%")
+    if LAST_IGNORED:
+        why.append("раздел не поддерживает фильтры: " + ", ".join(sorted(LAST_IGNORED))
+                   + " — они НЕ применялись, выдача шире заявленной")
     if why:
         report["error"] = "охват неполон: " + "; ".join(why)
     return out, report
+
+
+# Поле «суд» — обычный текстовый input без datalist и без autocomplete (проверено
+# по самой форме 04.08.2026: на странице ровно два select, и суд не из них).
+# Значит подсказок сайт не даёт и фильтр срабатывает только на ТОЧНОЕ каноническое
+# название: «Мосгорсуд» и «Московский городской» не находят ничего, и отличить это
+# от «практики нет» невозможно. Канон лежит в самой выдаче — в поле b-justice
+# формата «Московский городской суд (Город Москва) - Гражданское».
+# Наблюдение о необходимости добывать канон из выдачи взято у
+# mynka999/sudact-mcp-server (MIT); реализация своя.
+COURT_LINE_RE = re.compile(r"^(.*?)\s*\((.*?)\)\s*-\s*(.*)$")
+
+
+def parse_court_line(line: str) -> dict:
+    """«Московский городской суд (Город Москва) - Гражданское» → части."""
+    m = COURT_LINE_RE.match((line or "").strip())
+    if not m:
+        return {"court": (line or "").strip(), "area": "", "category": ""}
+    return {"court": " ".join(m.group(1).split()),
+            "area": " ".join(m.group(2).split()),
+            "category": " ".join(m.group(3).split())}
+
+
+def court_names_from(results: list) -> list[str]:
+    """Канонические названия судов из выдачи, без повторов и в порядке встречи."""
+    out = []
+    for r in results:
+        name = parse_court_line(r.get("court", ""))["court"]
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
+def match_court(query: str, names: list[str]) -> list[str]:
+    """Названия, подходящие под запрос юриста. Пусто — точного канона не нашли."""
+    q = " ".join((query or "").lower().split())
+    if not q:
+        return []
+    exact = [n for n in names if n.lower() == q]
+    if exact:
+        return exact
+    words = [w for w in re.split(r"[\s,]+", q) if len(w) > 3]
+    return [n for n in names if all(w in n.lower() for w in words)] if words else []
+
+
+def find_court_name(query: str, section: str = "regular", probe: str = "",
+                    limit: int = 100) -> list[str]:
+    """Найти каноническое название суда, опросив выдачу. Сеть — один запрос."""
+    results, _ = search(probe or query, section=section, limit=limit)
+    return match_court(query, court_names_from(results))
 
 
 def _error_page(head_html: str) -> bool:
     """Тот же детектор страницы-заглушки, что в get_document, — вынесен для проверки."""
     head = " ".join(re.findall(r"(?is)<(?:title|h1)[^>]*>(.*?)</(?:title|h1)>", head_html)[:3])
     return bool(re.search(r"(?i)\b[45]\d\d\b|не найдена|произошла ошибка|captcha|доступ огранич", head))
+
+
+def _ignored_of(section, **kw) -> set:
+    """Какие фильтры раздел не поддержал. Обёртка для проверок."""
+    got: set = set()
+    build_query(section, text="иск", ignored=got, **kw)
+    return got
 
 
 def selftest():
@@ -708,6 +853,19 @@ def selftest():
         globals()["search"] = near_full
         _, near = partitioned_search("иск", per_region=100)
 
+        # Шестой случай: раздел без фильтра инстанции. Каскад по инстанциям там
+        # выполнял три лишних запроса на регион с одинаковой выдачей — источник
+        # молча игнорировал workflow_stage и отвечал 200.
+        mag_calls = []
+
+        def mag_fake(text, section="regular", limit=20, max_wait=25.0, **kw):
+            mag_calls.append((kw.get("area"), kw.get("instance")))
+            return ([{"url": f"m-{kw.get('area')}-{i}"} for i in range(2)],
+                    "Найдено 9 000 документов")
+
+        globals()["search"] = mag_fake
+        partitioned_search("иск", section="magistrate", per_region=20)
+
         globals()["search"], _load_dicts = real_search, real_dicts2
 
         checks += [
@@ -769,6 +927,75 @@ def selftest():
              and "частей с неполным охватом" in near["error"]),
             # Аварийный выключатель: флаг риска — согласие ЗА молчание проекта,
             # а не право снять явный запрет владельца.
+            # Поле «суд» — текстовый input без подсказок: фильтр берёт только
+            # точное каноническое название, а канон лежит в выдаче (b-justice).
+            ("строка суда разбирается на части",
+             parse_court_line("Московский городской суд (Город Москва) - Гражданское")
+             == {"court": "Московский городской суд", "area": "Город Москва",
+                 "category": "Гражданское"}),
+            ("двойные пробелы в названии схлопываются",
+             parse_court_line("Аксайский  районный суд (Ростовская область) - Гражданское")
+             ["court"] == "Аксайский районный суд"),
+            ("строка без скобок не теряется",
+             parse_court_line("Верховный Суд РФ")["court"] == "Верховный Суд РФ"),
+            ("канонические названия собираются без повторов",
+             court_names_from([{"court": "Московский городской суд (Город Москва) - Гражданское"},
+                               {"court": "Московский городской суд (Город Москва) - Административное"},
+                               {"court": "Аксайский районный суд (Ростовская область) - Гражданское"}])
+             == ["Московский городской суд", "Аксайский районный суд"]),
+            ("точное название находится",
+             match_court("Московский городской суд",
+                         ["Московский городской суд", "Московский районный суд"])
+             == ["Московский городской суд"]),
+            # Точное совпадение обязано БИТЬ подстроку: иначе «Московский городской
+            # суд» вернёт заодно все суды, чьё название начинается так же, и юрист
+            # подставит в фильтр не тот из них.
+            ("точное совпадение бьёт подстроку",
+             match_court("Московский городской суд",
+                         ["Московский городской суд",
+                          "Московский городской суд апелляционной инстанции"])
+             == ["Московский городской суд"]),
+            ("без точного совпадения выдаются все кандидаты",
+             len(match_court("московский городской",
+                             ["Московский городской суд",
+                              "Московский городской суд апелляционной инстанции"])) == 2),
+            ("неполное название сводится к кандидатам",
+             match_court("московский городской",
+                         ["Московский городской суд", "Аксайский районный суд"])
+             == ["Московский городской суд"]),
+            ("сокращение канона не даёт — и это честный пустой ответ",
+             match_court("Мосгорсуд", ["Московский городской суд"]) == []),
+            # Карта полей формы: прочитана из самих форм разделов 04.08.2026.
+            ("у арбитража регион зовётся region", region_field("arbitral") == "region"),
+            ("у СОЮ регион зовётся area", region_field("regular") == "area"),
+            ("ВС РФ не знает фильтра по региону",
+             "area" not in section_fields("vsrf") and "region" not in section_fields("vsrf")),
+            ("мировые судьи не знают инстанции",
+             "workflow_stage" not in section_fields("magistrate")),
+            ("арбитраж не знает инстанции",
+             "workflow_stage" not in section_fields("arbitral")),
+            ("раздел без фильтра инстанции не дробится по инстанциям",
+             mag_calls and not any(c[1] for c in mag_calls)),
+            ("раздел без фильтра инстанции всё равно обходится по регионам",
+             len({c[0] for c in mag_calls}) == 2),
+            ("СОЮ знает инстанцию", "workflow_stage" in section_fields("regular")),
+            # Неподдержанное поле НЕ отправляется и называется вызывающему.
+            ("неподдержанный фильтр не уходит в запрос",
+             "vsrf-area" not in build_query("vsrf", text="иск", area="1077")),
+            ("неподдержанный фильтр назван",
+             _ignored_of("vsrf", area="1077") == {"area"}),
+            ("поддержанный фильтр не считается игнорированным",
+             _ignored_of("regular", area="1077") == set()),
+            ("пустое значение неподдержанного поля тревоги не даёт",
+             _ignored_of("vsrf", area="") == set()),
+            ("партиционирование ВС РФ отклоняется с причиной",
+             "не поддерживает фильтр по региону"
+             in (partitioned_search("иск", section="vsrf")[1].get("error") or "")),
+            # Потолок страниц: за 50-й выдача зацикливается.
+            ("страница за потолком срезается",
+             "page=50" in build_query("regular", text="иск", page=99)),
+            ("страница в пределах потолка не трогается",
+             "page=7" in build_query("regular", text="иск", page=7)),
             ("флаг риска не перебивает явное выключение",
              apply_risk_flag("0", True) == "ОТКАЗ"),
             ("флаг риска включает поиск при молчании переменной",
@@ -810,6 +1037,9 @@ def main():
                          "верхушку, партиционирование даёт честную выборку")
     ap.add_argument("--per-region", type=int, default=20, help="актов с региона (с --partition)")
     ap.add_argument("--max-regions", type=int, default=0, help="ограничить обход (0 — все 85)")
+    ap.add_argument("--find-court", metavar="НАЗВАНИЕ",
+                    help="найти каноническое название суда для --court "
+                         "(автокомплита у источника нет, фильтр требует точного)")
     ap.add_argument("--i-accept-robots-risk", action="store_true",
                     help="включить поиск, запрещенный robots.txt источника (решение владельца)")
     args = ap.parse_args()
@@ -829,6 +1059,19 @@ def main():
 
     if args.selftest:
         return selftest()
+
+    if args.find_court:
+        names = find_court_name(args.find_court, section=args.section,
+                                probe=args.query or "суд", limit=args.limit or 100)
+        if not names:
+            print(f"каноническое название для «{args.find_court}» в выдаче не найдено. "
+                  "Фильтр --court принимает ТОЛЬКО точное название: подберите запрос "
+                  "пошире (--limit 100) либо задайте регион через --area.",
+                  file=sys.stderr)
+            return 1
+        for n in names:
+            print(n)
+        return 0
 
     if args.doc:
         d = get_document(args.doc)
@@ -853,6 +1096,11 @@ def main():
             if rep.get("error"):
                 out["error"] = rep["error"]
             print(json.dumps(out, ensure_ascii=False, indent=2))
+            return partition_exit_code(rep)
+        if rep.get("актов") is None or rep.get("регионов всего") is None:
+            # Раздел отказал до обхода — печатать сводку «0 из 0» не о чем.
+            print(f"\n❌ {rep.get('error', 'партиционирование не выполнено')}",
+                  file=sys.stderr)
             return partition_exit_code(rep)
         print(f"\nСобрано актов: {rep.get('актов', 0)} из заявленных источником "
               f"{rep.get('заявлено источником', 0):,}".replace(",", " ")

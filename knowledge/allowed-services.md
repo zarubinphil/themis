@@ -31,7 +31,8 @@
 | document_guard.py | формат `.docx` и согласованность с `.md` | `python3 scripts/document_guard.py ДОК.docx --md ДОК.md [--l3]` |
 | registry_check.py | сверка `_index.md` / `_clients.md` / `_client.md` с диском | `python3 scripts/registry_check.py [--fix]` |
 | gosposhlina.py | госпошлина по ст. 333.19/333.21 НК из корпуса, с датой редакции | `python3 scripts/gosposhlina.py --cena N` либо `--neimushchestvennyy --status fiz\|org` |
-| practice_search.py --partition | честная выборка практики: обход выдачи по 85 регионам с каскадом по инстанциям | техника портирована из `mynka999/sudact-mcp-server` (MIT), см. шапку раздела в скрипте |
+| practice_search.py --partition | честная выборка практики: обход выдачи по 85 регионам с каскадом по инстанциям; неполный охват = код 5, а не примечание | наблюдения портированы из `mynka999/sudact-mcp-server` (MIT), реализация своя — см. шапки разделов в скрипте |
+| practice_search.py --find-court | каноническое название суда для фильтра `--court` | у источника нет ни автокомплита, ни справочника судов: фильтр срабатывает только на точное название, канон добывается из поля `b-justice` выдачи |
 | practice_harvest.py | практика из дел, которой нет в базе; аудит базы | `python3 scripts/practice_harvest.py [--audit]` |
 | sroki.py | процессуальные сроки (ГПК/ГК) и УИД дела по ISO 7064 | `python3 scripts/sroki.py --ot ДД.ММ.ГГГГ --mesyacev 1` либо `--uid …` |
 
