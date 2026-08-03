@@ -285,6 +285,14 @@ def search_allowed() -> bool:
     return SUDACT_SEARCH_ALLOWED
 
 
+RC_COVERAGE_INCOMPLETE = 5  # отдельный код: «прогон состоялся, но выборка неполна»
+
+
+def partition_exit_code(report: dict) -> int:
+    """Код возврата --partition. Неполный охват = ненулевой код, всегда."""
+    return RC_COVERAGE_INCOMPLETE if report.get("error") else 0
+
+
 def apply_risk_flag(env_value: str | None, flag: bool) -> str | None:
     """Каким станет THEMIS_SUDACT_SEARCH после флага --i-accept-robots-risk.
 
@@ -679,6 +687,27 @@ def selftest():
         globals()["search"] = always_capped
         _, limited = partitioned_search("иск", per_region=20, max_regions=1)
 
+        # Четвёртый случай: каждая часть отдала всё заявленное, но части пересекаются
+        # — после снятия дублей уникальных актов вдвое меньше заявленного. Ни одна
+        # часть не «тонкая», а выборка всё равно неполна: ловится только порогом доли.
+        def overlapping(text, section="regular", limit=20, max_wait=25.0, **kw):
+            return ([{"url": f"same{i}"} for i in range(3)], "Найдено 3 документа")
+
+        globals()["search"] = overlapping
+        _, overlap = partitioned_search("иск", per_region=20)
+
+        # Пятый случай: доля высокая (95%), но одна часть заведомо недобрана.
+        # Порог доли такое пропускает — ловится только перечнем тонких частей.
+        def near_full(text, section="regular", limit=20, max_wait=25.0, **kw):
+            if kw.get("area") == "москва" and not kw.get("instance"):
+                return ([{"url": f"n{i}"} for i in range(95)], "Найдено 100 документов")
+            if kw.get("area") == "москва":
+                return ([], "Ничего не найдено")
+            return ([{"url": f"t{i}"} for i in range(3)], "Найдено 3 документа")
+
+        globals()["search"] = near_full
+        _, near = partitioned_search("иск", per_region=100)
+
         globals()["search"], _load_dicts = real_search, real_dicts2
 
         checks += [
@@ -727,6 +756,17 @@ def selftest():
              "не обойдено" in (limited.get("error") or "")),
             ("порог охвата назван в тексте ошибки",
              "охват" in (hard.get("error") or "")),
+            ("низкая доля ловится даже без тонких частей",
+             not overlap["части с неполным охватом"]
+             and bool(overlap.get("error"))
+             and "ниже порога" in overlap["error"]),
+            ("неполный охват даёт ненулевой код возврата",
+             partition_exit_code(rep) != 0 and partition_exit_code(near) != 0),
+            ("полный охват даёт нулевой код возврата", partition_exit_code(full) == 0),
+            ("тонкая часть ловится даже при высокой доле",
+             near["охват процентов"] >= COVERAGE_OK_PERCENT
+             and bool(near.get("error"))
+             and "частей с неполным охватом" in near["error"]),
             # Аварийный выключатель: флаг риска — согласие ЗА молчание проекта,
             # а не право снять явный запрет владельца.
             ("флаг риска не перебивает явное выключение",
@@ -813,7 +853,7 @@ def main():
             if rep.get("error"):
                 out["error"] = rep["error"]
             print(json.dumps(out, ensure_ascii=False, indent=2))
-            return 0 if not rep.get("error") else 5
+            return partition_exit_code(rep)
         print(f"\nСобрано актов: {rep.get('актов', 0)} из заявленных источником "
               f"{rep.get('заявлено источником', 0):,}".replace(",", " ")
               + f" — охват {rep.get('охват процентов', 0)}% "
@@ -830,8 +870,7 @@ def main():
             print(f"\n{i}. {r['title']}\n   {r['court']}\n   {r['url']}")
         if rep.get("error"):
             print(f"\n❌ {rep['error']}", file=sys.stderr)
-            return 5
-        return 0
+        return partition_exit_code(rep)
 
     results, total = search(
         args.query, section=args.section, limit=args.limit, instance=args.instance,
