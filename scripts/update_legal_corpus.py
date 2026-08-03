@@ -140,25 +140,74 @@ SUDACT_PLENUM_CATALOG = "https://sudact.ru/law/authority/plenum-vs-rf/"
 CACHE_MAX_AGE = 86400  # сутки: внутри одного прогона повторы дешевы, между прогонами — нет
 
 
+HTTP_MARKER = "\n__HTTP__"          # curl -w дописывает код и тип в конец тела
+# Ответ считается страницей корпуса, только если это HTML. JSON капчи, XML ошибки
+# и «application/octet-stream» от сбойного прокси прежде уходили в парсер как текст
+# закона: он ничего не находил, статья молча оставалась старой, а прогон
+# рапортовал «чист».
+OK_CONTENT_TYPES = ("text/html", "application/xhtml")
+
+
+def split_http_tail(raw: bytes) -> tuple[bytes, str, str]:
+    """(тело, код, content-type). Маркера нет — старое поведение, код пустой."""
+    marker = HTTP_MARKER.encode()
+    if marker not in raw:
+        return raw, "", ""
+    body, _, tail = raw.rpartition(marker)
+    parts = tail.decode("ascii", "replace").strip().split("|", 1)
+    return body, parts[0].strip(), (parts[1].strip() if len(parts) > 1 else "")
+
+
+def http_response_bad(code: str, ctype: str) -> str:
+    """Пусто — ответ годен. Иначе причина отказа человеческими словами."""
+    if code and code.isdigit() and int(code) >= 400:
+        return f"HTTP {code}"
+    if ctype and not any(ctype.lower().startswith(t) for t in OK_CONTENT_TYPES):
+        return f"тип ответа «{ctype}» — это не страница документа"
+    return ""
+
+
 def http_get(url: str, cache_key: str) -> bytes | None:
+    """Страница источника. None — не получили; причина уходит в FAILURES.
+
+    ЧТО БЫЛО СЛОМАНО (аудит 03.08.2026). Успехом считалось `returncode == 0 and
+    len(stdout) > 200`. HTTP-код и content-type не читались вовсе, поэтому
+    страница 404 в 12 КБ, капча и заглушка провайдера кешировались на сутки как
+    текст закона. Мутация «curl → несуществующая команда» оставляла --demo
+    зелёным: мёртвый канал давал строку на stderr, в FAILURES не попадал,
+    report_failures() возвращал 0, а legal-corpus-monthly.sh писал в лог
+    «обновлено 0, ошибок 0» и завершался нулём.
+    """
     cache_path = os.path.join(CACHE_DIR, cache_key)
     if (CACHE_MAX_AGE > 0 and os.path.exists(cache_path)
             and os.path.getsize(cache_path) > 200
             and time.time() - os.path.getmtime(cache_path) < CACHE_MAX_AGE):
         return open(cache_path, "rb").read()
     data = None
+    why = "канал не ответил"
     for attempt in range(3):
         try:
             r = subprocess.run(
-                ["curl", "-sL", "--max-time", str(TIMEOUT), "-A", UA, url],
+                ["curl", "-sL", "--max-time", str(TIMEOUT), "-A", UA,
+                 "-w", f"{HTTP_MARKER}%{{http_code}}|%{{content_type}}", url],
                 capture_output=True, timeout=TIMEOUT + 5)
-        except subprocess.TimeoutExpired:
-            r = None
-        if r is not None and r.returncode == 0 and len(r.stdout) > 200:
-            data = r.stdout
-            break
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+            r, why = None, f"curl не выполнился ({type(e).__name__})"
+        if r is not None and r.returncode == 0:
+            body, code, ctype = split_http_tail(r.stdout)
+            bad = http_response_bad(code, ctype)
+            if bad:
+                why = bad
+            elif len(body) > 200:
+                data = body
+                break
+            else:
+                why = f"ответ короче 200 байт ({len(body)})"
+        elif r is not None:
+            why = f"curl вернул {r.returncode}"
         if attempt == 2:
-            print(f"  ! не удалось получить {url}", file=sys.stderr)
+            print(f"  ! не удалось получить {url}: {why}", file=sys.stderr)
+            FAILURES.append(f"{url}: {why} — источник не прочитан, данные НЕ обновлены")
             return None
         time.sleep(1.5 * (attempt + 1))
     time.sleep(REQUEST_DELAY)
@@ -600,6 +649,14 @@ def split_into_punkty(text: str) -> list[tuple[str, str]]:
     Пленум нумерует резолютивную часть простыми '1.', '2.', ... на новой
     строке — проверено на живом тексте (Постановление N 19 от 27.09.2012).
     Преамбула (до 'постановляет') нумерации не имеет и в разбивку не попадает.
+
+    ПОТЕРЯ ТЕКСТА, найденная аудитом 03.08.2026. Цикл шёл `range(1, len(parts), 2)`
+    и не забирал `parts[0]` — всё, что стоит МЕЖДУ «постановляет:» и первым
+    нумерованным пунктом. Там же оказывался весь текст постановлений, где слова
+    «постановляет» нет вовсе (`head` пуст, `rest` — документ целиком). Независимый
+    пересчёт 325 кешированных страниц: потеряно 230 552 из 8 997 326 знаков (2,56 %),
+    худшие файлы — 74,0 % и 72,6 %. Потерянный кусок — не служебный: там преамбула
+    с предметом постановления и правовым основанием, ради которых Пленум и цитируют.
     """
     m = re.search(r"постановля(?:ет|ют)\s*:", text, re.I)
     head = text[: m.end()] if m else ""
@@ -608,6 +665,8 @@ def split_into_punkty(text: str) -> list[tuple[str, str]]:
     if len(parts) < 3:
         return [(None, text)]
     out = [(None, head)] if head.strip() else []
+    if parts[0].strip():
+        out.append((None, parts[0].strip()))
     for i in range(1, len(parts), 2):
         out.append((parts[i], parts[i + 1].strip()))
     return out
@@ -827,7 +886,72 @@ def demo() -> None:
     nums = [p[0] for p in punkty if p[0]]
     assert nums == ["1", "2"], punkty
 
-    print("demo: извлечение статьи, метаданные, фильтр главы, разбивка пунктов — корректны")
+    # НИ ОДИН ЗНАК НЕ ТЕРЯЕТСЯ. Прежний цикл начинался с parts[1], и текст между
+    # «постановляет:» и первым пунктом исчезал молча — 2,56 % корпуса, до 74 %
+    # в худших файлах. Сверяем побуквенно, а не «пункты нашлись».
+    # Считаем БУКВЫ: номер пункта и точка после него — разметка, они
+    # переизлучаются заголовком «### п. N». Пропажа букв — это пропажа текста.
+    def _letters(src: str) -> int:
+        return len(re.sub(r"[^\w]|\d", "", src, flags=re.UNICODE))
+
+    def _kept(src: str) -> int:
+        return sum(_letters(body) for _, body in split_into_punkty(src))
+
+    def _all(src: str) -> int:
+        return _letters(src)
+
+    between = ("Пленум Верховного Суда постановляет:\n\n"
+               "В связи с вопросами судов о применении законодательства "
+               "и в целях единства практики дать следующие разъяснения.\n\n"
+               "1.  Обратить внимание судов на положения статьи 37.\n\n"
+               "2.  В части 1 статьи 37 общественно опасное посягательство.\n")
+    assert _kept(between) == _all(between), (
+        f"текст между «постановляет» и пунктом 1 теряется: "
+        f"{_all(between) - _kept(between)} знаков")
+    assert any("единства практики" in b for _, b in split_into_punkty(between))
+
+    # Постановление без слова «постановляет» — head пуст, и раньше пропадала
+    # ВСЯ преамбула целиком (те самые файлы с потерей 74 %).
+    no_verb = ("В целях обеспечения единообразного применения судами "
+               "законодательства о возмещении издержек Пленум разъясняет.\n\n"
+               "1.  Принципом распределения судебных расходов выступает возмещение.\n\n"
+               "2.  Перечень судебных издержек не является исчерпывающим.\n")
+    assert _kept(no_verb) == _all(no_verb), (
+        f"преамбула без слова «постановляет» теряется: "
+        f"{_all(no_verb) - _kept(no_verb)} знаков")
+
+    # HTTP-код и content-type. Без них страница 404 в 12 КБ и капча ложились в
+    # кеш на сутки как текст закона, а прогон рапортовал «чист».
+    body = "<html>тело</html>".encode("utf-8")
+    assert split_http_tail(body + b"\n__HTTP__404|text/html") == (body, "404", "text/html")
+    assert split_http_tail(body) == (body, "", "")
+    assert http_response_bad("404", "text/html") == "HTTP 404"
+    assert http_response_bad("500", "text/html").startswith("HTTP 500")
+    assert http_response_bad("200", "text/html; charset=utf-8") == ""
+    assert http_response_bad("200", "application/json") != "", "капча приходит JSON'ом"
+    assert http_response_bad("200", "application/octet-stream") != ""
+    assert http_response_bad("", "") == "", "ответ без маркера не ломать"
+
+    # Мёртвый канал обязан попадать в FAILURES, а не только на stderr: иначе
+    # report_failures() вернёт 0 и месячный прогон завершится «успешно».
+    before = len(FAILURES)
+    real_run, real_cache = subprocess.run, CACHE_MAX_AGE
+    try:
+        globals()["CACHE_MAX_AGE"] = 0
+
+        def dead(*a, **kw):
+            raise FileNotFoundError("curl: команды нет")
+
+        subprocess.run = dead
+        assert http_get("https://example.invalid/x", "demo_dead.html") is None
+    finally:
+        subprocess.run, globals()["CACHE_MAX_AGE"] = real_run, real_cache
+    assert len(FAILURES) == before + 1, "мёртвый канал не попал в FAILURES"
+    assert report_failures() != 0, "изъян есть — код возврата обязан быть ненулевым"
+    del FAILURES[before:]
+
+    print("demo: извлечение статьи, метаданные, фильтр главы, разбивка пунктов, "
+          "проверка ответа и учёт провалов — корректны")
 
 
 def report_failures() -> int:

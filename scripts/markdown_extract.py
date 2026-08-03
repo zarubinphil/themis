@@ -311,13 +311,31 @@ RU_MIN = 0.40    # доля кириллицы по ВСЕМУ документ�
 ALL_BAD = 0.25   # столько битых страниц — битый весь PDF (один прогон чужого OCR)
 
 
+# Кириллица РУССКОГО алфавита, а не весь блок U+0400-U+04FF. Прежнее условие
+# "Ѐ" <= c <= "ӿ" засчитывало как русские украинские і/ї/є, белорусскую ў,
+# сербские ђ/ћ и всю нерусскую кириллицу — а именно так выглядит порча OCR на
+# русском тексте: «Росскіской Федерациг». Замер 03.08.2026: 29 страниц из 132 в
+# живом кеше содержат i/I/ï/є и не помечены ничем.
+_RU_LETTERS = frozenset("абвгдеёжзийклмнопрстуфхцчшщъыьэюя"
+                        "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ")
+
+
+def is_ru_letter(c: str) -> bool:
+    return c in _RU_LETTERS
+
+
+def foreign_cyrillic(t: str) -> list[str]:
+    """Кириллические буквы НЕ русского алфавита. Пусто — алфавит чист."""
+    return sorted({c for c in t if "Ѐ" <= c <= "ӿ" and c not in _RU_LETTERS})
+
+
 def _lat_share(t):
-    """Доля латиницы среди букв. None — букв слишком мало, судить не по чему."""
+    """Доля НЕ русских букв среди букв. None — букв мало, судить не по чему."""
     letters = [c for c in t if c.isalpha()]
     if len(letters) < 100:
         return None
-    cyr = sum(1 for c in letters if "Ѐ" <= c <= "ӿ")
-    return (len(letters) - cyr) / len(letters)
+    ru = sum(1 for c in letters if is_ru_letter(c))
+    return (len(letters) - ru) / len(letters)
 
 
 def text_layer_ok(t, doc_is_ru=True):
@@ -345,7 +363,7 @@ def pdf_garbage_pages(path, idx):
     letters = [c for t in texts.values() for c in t if c.isalpha()]
     if not letters:
         return []
-    cyr = sum(1 for c in letters if "Ѐ" <= c <= "ӿ")
+    cyr = sum(1 for c in letters if is_ru_letter(c))
     doc_is_ru = cyr >= len(letters) * RU_MIN
     bad = [i for i in idx if not text_layer_ok(texts[i], doc_is_ru)]
     return list(idx) if len(bad) >= max(2, len(idx) * ALL_BAD) else bad
@@ -437,7 +455,11 @@ _REQ = {
     "snils": re.compile(r"СНИЛС[:\s№-]{0,4}(\d{3}[- ]\d{3}[- ]\d{3}[- ]?\d{2})"),
     # 20-значный счет с кодом валюты 810 (рубли) на позициях 6-8
     "account": re.compile(r"\b\d{5}810\d{12}\b"),
-    "bik": re.compile(r"БИК[:\s]*?(0\d{8})\b", re.IGNORECASE),
+    # БИК — 9 цифр, НЕ обязательно с нуля: в справочнике ЦБ (ED807, выгрузка
+    # 04.08.2026, 1429 записей) с «0» начинаются 1316, а 113 — это казначейство
+    # (префиксы 20-29) и банки-нерезиденты (10). Прежний шаблон `0\d{8}` терял их
+    # молча — то есть БИК получателя госпошлины из платёжки не извлекался вовсе.
+    "bik": re.compile(r"БИК[:\s№-]{0,4}(\d{9})\b", re.IGNORECASE),
     # КПП идет рядом с ИНН организации; контрольной суммы нет, но формат ловит
     # потерю знака при OCR — а неверный КПП в реквизитах суда это отдельная правка
     "kpp": re.compile(r"КПП[:\s№-]{0,4}(\d{4}[0-9A-ZА-Я]{2}\d{3})\b", re.IGNORECASE),
@@ -478,9 +500,58 @@ def extract_requisites(body):
     return out
 
 
+def selftest() -> int:
+    """Разбор реквизитов и алфавита — БЕЗ СЕТИ и БЕЗ ФАЙЛОВ.
+
+    Роутер извлекает реквизиты один раз на весь конвейер: всё, что он пропустит,
+    дальше не проверит уже никто (`quality_gate --case` читает ЕГО кеш). Поэтому
+    шаблоны обязаны иметь фикстуры — до 04.08.2026 у скрипта не было ни одной.
+    """
+    checks = [
+        # БИК бывает не только с нуля: казначейство 20-29, нерезиденты 10.
+        ("БИК кредитной организации", extract_requisites("БИК 044525225").get("bik") == ["044525225"]),
+        ("БИК казначейства (20-29)", extract_requisites("БИК: 200000154").get("bik") == ["200000154"]),
+        ("БИК банка-нерезидента (10)", extract_requisites("БИК 100070023").get("bik") == ["100070023"]),
+        ("восьмизначный БИК не берётся", "bik" not in extract_requisites("БИК 04452522")),
+        ("ИНН организации", extract_requisites("ИНН 7707083893").get("inn") == ["7707083893"]),
+        ("ИНН физлица 12 знаков",
+         extract_requisites("ИНН 165712345678").get("inn") == ["165712345678"]),
+        ("ОГРН", extract_requisites("ОГРН 1027700132195").get("ogrn") == ["1027700132195"]),
+        ("СНИЛС", extract_requisites("СНИЛС 123-456-789 64").get("snils") == ["123-456-789 64"]),
+        ("рублёвый счёт", extract_requisites("сч. 40817810808430000005")
+         .get("account") == ["40817810808430000005"]),
+        ("номер дела СОЮ", extract_requisites("дело № 2-45/2026").get("case_soyu") == ["2-45/2026"]),
+        ("номер дела арбитража",
+         extract_requisites("дело № А65-12345/2024").get("case_arb") == ["А65-12345/2024"]),
+        ("сумма с копейками не обрезается",
+         extract_requisites("265 000,00 ₽").get("sum_rub") == ["265 000,00 ₽"]),
+        # Алфавит. Украинская і и белорусская ў — не русские буквы; именно так
+        # выглядит порча распознавания на русском листе.
+        ("украинская i опознана как чужая", foreign_cyrillic("Росскіской") == ["і"]),
+        ("чистый русский текст чужих букв не даёт", foreign_cyrillic("Российской") == []),
+        ("є и ў опознаны", set(foreign_cyrillic("є ў")) == {"є", "ў"}),
+        ("русская буква не считается чужой", is_ru_letter("я") and is_ru_letter("Ё")),
+        ("украинская і не считается русской", not is_ru_letter("і")),
+        # Доля. Украинская кириллица теперь ПОПАДАЕТ в числитель — прежняя
+        # формула считала её русской и давала ровно ноль на порченой странице.
+        ("украинская кириллица попадает в долю чужих букв",
+         (_lat_share("Росскіской Федерациг " * 12) or 0) > 0),
+        ("чистая русская страница даёт ноль",
+         (_lat_share("Российской Федерации " * 12) or 0) == 0),
+        ("латиница в кириллице по-прежнему ловится долей",
+         (_lat_share("Pоccийcкoй Фeдepaции " * 12) or 0) > LAT_MAX),
+    ]
+    for name, ok in checks:
+        print(f"  {'✓' if ok else '✗'} {name}")
+    bad = [n for n, ok in checks if not ok]
+    print(f"selftest {'пройден' if not bad else 'ПРОВАЛЕН'}: {len(checks) - len(bad)}/{len(checks)}")
+    return 1 if bad else 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("file", nargs="?")
+    ap.add_argument("--selftest", action="store_true", help="проверка шаблонов без сети")
     ap.add_argument("--inline", action="store_true", help="весь Markdown в stdout")
     ap.add_argument("--grep", default=None, help="печатать только строки по регэкспу (+ № строки)")
     ap.add_argument("--json-meta", action="store_true")
@@ -491,6 +562,9 @@ def main():
     ap.add_argument("--apply", action="store_true", help="с --purge-case: удалить на самом деле")
     ap.add_argument("--max-chars", type=int, default=200000)
     a = ap.parse_args()
+
+    if a.selftest:
+        return selftest()
 
     if a.purge_case:
         r = purge_case(a.purge_case, dry=not a.apply)

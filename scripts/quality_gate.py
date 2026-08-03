@@ -48,6 +48,13 @@ MIXED_MAX_SHARE = 8.0
 # длинной странице три слова из двухсот не дают превышения доли и тревоги не поднимут.
 MIN_BAD_WORDS = 3
 _CYR = re.compile(r"[А-Яа-яЁё]")
+# Кириллица не русского алфавита. В русском процессуальном документе её нет:
+# і/ї/є (украинская), ў (белорусская), ђ/ћ/џ (сербская), ә/ғ/қ/ң/ө/ұ/һ (казахская).
+# Распознаватель ставит их вместо похожих русских — слово остаётся «русским» на
+# вид, доля латиницы не растёт, а реквизит уже другой.
+_FOREIGN_CYR = re.compile(r"[\u0400-\u04FF]")
+_RU_ALPHABET = frozenset("абвгдеёжзийклмнопрстуфхцчшщъыьэюя"
+                         "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ")
 _LAT = re.compile(r"[A-Za-z]")
 _VOWELS = set("аеёиоуыэюя")
 
@@ -67,6 +74,15 @@ def word_is_odd(word: str) -> bool | None:
     if re.search(r"(.)\1{3,}", lw):
         return True                                    # четыре одинаковых подряд
     return False
+
+
+def foreign_cyrillic_letters(text: str) -> dict[str, int]:
+    """Кириллические буквы вне русского алфавита: {буква: сколько раз}."""
+    out: dict[str, int] = {}
+    for c in _FOREIGN_CYR.findall(text):
+        if c not in _RU_ALPHABET:
+            out[c] = out.get(c, 0) + 1
+    return out
 
 
 def mixed_script_share(text: str) -> tuple[float, int, int]:
@@ -107,6 +123,16 @@ def page_text_bad(text: str) -> str:
     if bad >= MIN_BAD_WORDS and share > GARBLED_MAX_SHARE:
         return (f"{share:.0f}% слов непохожи на русские (порог {GARBLED_MAX_SHARE:.0f}%, "
                 f"испорчено {bad} из {counted}) — распознавание испорчено, читать нельзя")
+    # Третья поломка, которую доля не ловит: соседняя кириллица. Распознаватель
+    # подменяет русскую «и» украинской «і», «е» — «є», «у» — белорусской «ў».
+    # Слово остаётся кириллическим и «похожим на русское», доля чужих букв
+    # остаётся низкой, а реквизит в нём уже другой. В русском процессуальном
+    # документе таких букв не бывает — три штуки на лист это порча, не цитата.
+    alien = foreign_cyrillic_letters(text)
+    if sum(alien.values()) >= MIN_BAD_WORDS:
+        listed = ", ".join(f"«{c}»×{n}" for c, n in sorted(alien.items(), key=lambda x: -x[1])[:6])
+        return (f"нерусские кириллические буквы: {listed} — распознаватель подменил "
+                "русские буквы соседними, страницу сверить по PNG")
     return ""
 
 
@@ -199,6 +225,44 @@ def check_requisites(path: str, bik: str | None) -> list[str]:
     return list(scan_requisites(req, bik))
 
 
+EXTRACT_CACHE = os.path.expanduser("~/.cache/legal_extract")
+
+
+def case_requisite_files(case: str, cache_dir: str = EXTRACT_CACHE) -> list[str]:
+    """Файлы <sha>.requisites.json, относящиеся к материалам ЭТОГО дела.
+
+    Кеш роутера адресуется по СОДЕРЖИМОМУ: имя артефакта — sha256 исходника.
+    Значит принадлежность делу считается точно, тем же способом, что и в
+    markdown_extract.purge_case: берём sha каждого материала дела и ищем его
+    артефакт. Никакого сопоставления по именам — материалы дела лежат с
+    кириллицей и пробелами, по имени связь не восстанавливается.
+
+    Зачем вообще: до 04.08.2026 ветка `--requisites` не вызывалась НИ ОДНИМ
+    агентом (`grep -rn -- "--requisites"` давал попадания только внутри самого
+    quality_gate.py), то есть scan_requisites не отработала ни разу ни на одном
+    деле — при том, что прецедент 02.08.2026 дал в карте дела несуществующие
+    ИНН и ОГРН.
+    """
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from markdown_extract import IMAGE, OFFICE, ext_of, sha_of
+
+    kinds = OFFICE | IMAGE | {"pdf", "doc", "xls", "ppt"}
+    out: list[str] = []
+    for root, dirs, files in os.walk(case):
+        dirs[:] = [d for d in dirs if d not in ("_baselines", "__pycache__")]
+        for name in sorted(files):
+            path = os.path.join(root, name)
+            if ext_of(path) not in kinds:
+                continue
+            try:
+                req = os.path.join(cache_dir, f"{sha_of(path)}.requisites.json")
+            except OSError:
+                continue
+            if os.path.isfile(req) and req not in out:
+                out.append(req)
+    return out
+
+
 def case_paths(case: str) -> dict:
     """Что из дела можно проверить машиной."""
     ctx = os.path.join(case, "01_context")
@@ -207,7 +271,8 @@ def case_paths(case: str) -> dict:
     sources = [p for p in (os.path.join(ctx, n) for n in
                            ("knowledge-map.md", "positions.md", "practice.md"))
                if os.path.isfile(p)]
-    return {"drafts": drafts, "sources": sources}
+    return {"drafts": drafts, "sources": sources,
+            "requisites": case_requisite_files(case)}
 
 
 def main() -> int:
@@ -249,6 +314,19 @@ def main() -> int:
             else:
                 report.append((f"числа {os.path.basename(d)}",
                                ["нет ни карты, ни позиции — числа сверять не с чем"]))
+        # Реквизиты материалов дела. Ветка была написана, но не подключена:
+        # ИНН/ОГРН/СНИЛС/БИК/счета доверителя проверяла модель на глаз либо никто.
+        reqs = paths["requisites"]
+        if reqs:
+            found: list[str] = []
+            for r in reqs:
+                found += check_requisites(r, args.bik)
+            report.append((f"реквизиты материалов дела ({len(reqs)} файлов)", found))
+        else:
+            report.append((f"реквизиты дела {args.case}",
+                           ["в кеше роутера нет ни одного <sha>.requisites.json для "
+                            "материалов дела — материалы не прогнаны через "
+                            "markdown_extract.py, реквизиты НЕ проверены"]))
     if not report:
         print("нечего проверять: задать --ocr / --doc / --requisites / --case", file=sys.stderr)
         return 2
@@ -329,6 +407,16 @@ def selftest() -> int:
         ("три ломаных слова на короткой странице ловятся",
          "непохожи" in page_text_bad("Настоящим гражданин явился отдел "
                                      "стрктр джквш првлн")),
+        # Соседняя кириллица: слово выглядит русским, доля латиницы не растёт,
+        # но «і» вместо «и» меняет реквизит. 29 страниц из 132 в живом кеше.
+        ("подмена русских букв украинскими ловится",
+         "нерусские кириллические" in page_text_bad(
+             "Паспорт гражданина Росскіской Федерациї выдан отделом внутренніх дел")),
+        ("чистый русский текст чужой кириллицы не даёт",
+         foreign_cyrillic_letters("Российской Федерации") == {}),
+        ("одна чужая буква тревоги не даёт",
+         page_text_bad("Паспорт гражданина Российской Федерациї выдан "
+                       "отделом внутренних дел города Казани") == ""),
         ("короткая смесь алфавитов ловится",
          "смешивают" in page_text_bad("Пpиложение к Cпpaвке Bepxoвного Cyдa")),
         # Смешение алфавитов внутри слова бывает и законным: «SMS-сообщение»,
