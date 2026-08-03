@@ -436,6 +436,11 @@ def get_document(url):
 # выдаётся за «практику по вопросу». Партиционирование делает выборку честной, а
 # то, что всё равно не достали, попадает в отчёт явно — как непокрытое.
 CAP_HINT = 500  # практический предел одной выдачи sudact
+# Ниже этой доли собранная выборка не может выдаваться за практику по вопросу.
+# Порог не «чем больше, тем лучше»: у sudact счётчик считает вхождения слов, а не
+# релевантные акты, поэтому 100% недостижимы на широком запросе — и именно поэтому
+# результат обязан помечаться неполным, а не молча уходить в hunter-файл.
+COVERAGE_OK_PERCENT = 80.0
 
 
 def cacheable(results, total_str) -> bool:
@@ -510,15 +515,28 @@ def partitioned_search(text, section="regular", per_region=30, max_regions=0,
 
     reachable = len(out)
     coverage = (reachable / declared_total * 100) if declared_total else 100.0
+    skipped = len(regions) - done
     report = {
         "актов": reachable,
         "заявлено источником": declared_total,
         "охват процентов": round(coverage, 2),
         "регионов обойдено": done,
         "регионов всего": len(regions),
-        "регионов пропущено лимитом обхода": len(regions) - done,
+        "регионов пропущено лимитом обхода": skipped,
         "части с неполным охватом": thin,
     }
+    # Неполный охват — это ошибка прогона, а не примечание к нему. Раньше отчёт
+    # печатал «⚠ ОХВАТ НЕПОЛОН» и возвращал 0: автоматика (охотник, скрипт, хук)
+    # видела успех и писала верхушку выдачи в hunter-файл как «всю практику».
+    why = []
+    if thin:
+        why.append(f"частей с неполным охватом: {len(thin)}")
+    if skipped:
+        why.append(f"регионов не обойдено: {skipped}")
+    if declared_total and coverage < COVERAGE_OK_PERCENT:
+        why.append(f"охват {round(coverage, 2)}% ниже порога {COVERAGE_OK_PERCENT}%")
+    if why:
+        report["error"] = "охват неполон: " + "; ".join(why)
     return out, report
 
 
@@ -636,6 +654,17 @@ def selftest():
         def _unsolvable_reported():
             return any(t["часть"] == "москва" for t in hard["части с неполным охватом"])
 
+        # Третий случай: источник отдал ВСЁ заявленное — отчёт обязан быть чистым,
+        # иначе честный прогон тоже красится и сигнал обесценивается.
+        def full_take(text, section="regular", limit=20, max_wait=25.0, **kw):
+            return ([{"url": f"f-{kw.get('area')}-{i}"} for i in range(3)],
+                    "Найдено 3 документа")
+
+        globals()["search"] = full_take
+        _, full = partitioned_search("иск", per_region=20)
+        globals()["search"] = always_capped
+        _, limited = partitioned_search("иск", per_region=20, max_regions=1)
+
         globals()["search"], _load_dicts = real_search, real_dicts2
 
         checks += [
@@ -675,6 +704,15 @@ def selftest():
             ("тело отделяется от кода",
              split_status("<html>тело</html>__HTTPSTATUS__500") == ("<html>тело</html>", "500")),
             ("ответ без маркера не портится", split_status("<html>тело</html>")[0] == "<html>тело</html>"),
+            # Неполный охват обязан быть машиночитаемой ошибкой, а не примечанием:
+            # без этого «⚠ ОХВАТ НЕПОЛОН» + rc=0 читается автоматикой как успех.
+            ("неполный охват помечен ошибкой в отчёте", bool(rep.get("error"))),
+            ("нерешаемый недобор помечен ошибкой", bool(hard.get("error"))),
+            ("полный охват ошибкой не помечен", not full.get("error")),
+            ("необойдённые регионы попадают в ошибку",
+             "не обойдено" in (limited.get("error") or "")),
+            ("порог охвата назван в тексте ошибки",
+             "охват" in (hard.get("error") or "")),
         ]
     finally:
         _load_dicts, _search_page, search_allowed = real_dicts, real_page, real_allowed
@@ -712,7 +750,16 @@ def main():
     ap.add_argument("--i-accept-robots-risk", action="store_true",
                     help="включить поиск, запрещенный robots.txt источника (решение владельца)")
     args = ap.parse_args()
+    # Флаг риска — согласие ЗА молчание, а не поверх явного запрета. Прежняя
+    # безусловная запись env="1" делала аварийный выключатель бесполезным: тот, кто
+    # выставил THEMIS_SUDACT_SEARCH=0, получал поиск. Хук claude_guard.py при env=0
+    # сырой curl не пускает — скрипт и хук расходились.
     if getattr(args, "i_accept_robots_risk", False):
+        if os.environ.get("THEMIS_SUDACT_SEARCH") == "0":
+            print("ОТКАЗ: THEMIS_SUDACT_SEARCH=0 — поиск выключен явно. Флаг "
+                  "--i-accept-robots-risk запрет не снимает: снимите переменную "
+                  "или выставьте THEMIS_SUDACT_SEARCH=1.", file=sys.stderr)
+            return 4
         os.environ["THEMIS_SUDACT_SEARCH"] = "1"
 
     if args.selftest:
@@ -737,8 +784,11 @@ def main():
             instance=args.instance, court=args.court, law=args.law,
             date_from=args.date_from, date_to=args.date_to)
         if args.json:
-            print(json.dumps({"results": acts, "coverage": rep}, ensure_ascii=False, indent=2))
-            return 0
+            out = {"results": acts, "coverage": rep}
+            if rep.get("error"):
+                out["error"] = rep["error"]
+            print(json.dumps(out, ensure_ascii=False, indent=2))
+            return 0 if not rep.get("error") else 5
         print(f"\nСобрано актов: {rep.get('актов', 0)} из заявленных источником "
               f"{rep.get('заявлено источником', 0):,}".replace(",", " ")
               + f" — охват {rep.get('охват процентов', 0)}% "
@@ -753,6 +803,9 @@ def main():
                   "либо честно писать в hunter-файле, какая доля выдачи просмотрена.")
         for i, r in enumerate(acts[:args.limit], 1):
             print(f"\n{i}. {r['title']}\n   {r['court']}\n   {r['url']}")
+        if rep.get("error"):
+            print(f"\n❌ {rep['error']}", file=sys.stderr)
+            return 5
         return 0
 
     results, total = search(
