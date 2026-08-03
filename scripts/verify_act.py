@@ -38,6 +38,7 @@ ponytail: кеш на диске, без БД — актов десятки, н�
 """
 import argparse
 import hashlib
+import html as htmllib
 import json
 import os
 import re
@@ -77,6 +78,91 @@ SUBJECT_HINTS = {
     "трудов": "трудовой спор",
     "налог": "налоговый спор",
 }
+
+
+# Официальный публикатор нормативных актов. Адрес документа — по eoNumber, номеру
+# электронного опубликования: 0001 + ГГГГММДД публикации + четырёхзначный порядковый.
+#
+# ЛОВУШКА, стоившая совету ложного «акт не существует» (03.08.2026). eoNumber
+# соседних актов идут подряд: 0001202411300011 — ФЗ № 420-ФЗ, ...0012 — уже № 421-ФЗ.
+# Идентификатор, угаданный «по порядку», открывает СУЩЕСТВУЮЩУЮ страницу другого
+# акта, и проверка по одному факту «страница открылась» подтверждает что угодно.
+# Обратный случай хуже: несуществующий eoNumber отдаёт HTTP 404 страницей в 12,5 КБ —
+# она проходит порог MIN_PAGE_BYTES и выглядит как нормальный ответ.
+# Поэтому единственный допустимый критерий — СВЕРКА ЗАГОЛОВКА страницы с
+# реквизитами акта. Дата внутри самого eoNumber — дата ПУБЛИКАЦИИ, не дата акта,
+# и сверять по ней нельзя.
+EO_URL = "http://publication.pravo.gov.ru/document/{eo}"
+EO_RE = re.compile(r"^\d{16}$")
+# «Федеральный закон от 30.11.2024 № 420-ФЗ ∙ Официальное опубликование…»
+EO_TITLE_RE = re.compile(r"от\s+(\d{2}\.\d{2}\.\d{4})\s*№\s*([^\s∙|]+)")
+
+
+def page_title(html_text: str) -> str:
+    """Заголовок страницы с раскрытыми сущностями. Пусто — страницы нет."""
+    m = re.search(r"(?is)<title[^>]*>(.*?)</title>", html_text)
+    return htmllib.unescape(m.group(1)).replace("\xa0", " ").strip() if m else ""
+
+
+def parse_eo_title(title: str) -> tuple[str, str] | None:
+    """«… от 30.11.2024 № 420-ФЗ ∙ …» -> ('30.11.2024', '420-ФЗ'). Нет пары — None."""
+    m = EO_TITLE_RE.search(title or "")
+    return (m.group(1), m.group(2).strip(" .,")) if m else None
+
+
+def same_act_number(claimed: str, found: str) -> bool:
+    """Сравнение номеров без чувствительности к регистру, дефисам и пробелам."""
+    norm = lambda s: re.sub(r"[\s\-‑–—]", "", (s or "")).upper().replace("N", "№")
+    return bool(claimed) and norm(claimed) == norm(found)
+
+
+def analyze_eo(title: str, num: str, claimed_date: str | None) -> dict:
+    """Решение по странице публикатора. Заголовок — единственное основание."""
+    base = {"eo_title": title}
+    if not title:
+        return {**base, "status": "НЕ ПОДТВЕРЖДЕН",
+                "note": "страница без заголовка — идентификатора нет у публикатора "
+                        "(HTTP 404 отдаётся полноразмерной страницей)"}
+    pair = parse_eo_title(title)
+    if not pair:
+        return {**base, "status": "НЕ ПОДТВЕРЖДЕН",
+                "note": f"в заголовке «{title[:80]}» нет пары «от ДД.ММ.ГГГГ № номер» — "
+                        "сверить реквизит невозможно"}
+    found_date, found_num = pair
+    if not same_act_number(num, found_num):
+        return {**base, "status": "НЕ ПОДТВЕРЖДЕН", "eo_date": found_date,
+                "eo_num": found_num,
+                "note": f"идентификатор указывает на ДРУГОЙ акт: № {found_num} "
+                        f"от {found_date}. Заявлен № {num}. eoNumber соседних актов "
+                        "идут подряд — угаданный по порядку открывает чужую страницу"}
+    if claimed_date and claimed_date != found_date:
+        return {**base, "status": "РАСХОЖДЕНИЕ", "eo_date": found_date,
+                "eo_num": found_num, "date_match": False,
+                "note": f"номер совпал, дата у публикатора {found_date}, заявлена {claimed_date}"}
+    return {**base, "status": "ПОДТВЕРЖДЕН", "eo_date": found_date, "eo_num": found_num,
+            "date_match": True if claimed_date else None}
+
+
+def verify_eo(eo: str, num: str, claimed_date: str | None = None) -> dict:
+    """Проверка нормативного акта по номеру электронного опубликования."""
+    base = {"act": num, "claimed_date": claimed_date, "eo": eo, "hits": 0,
+            "dates": [], "collegium": "", "subject": "", "date_match": None,
+            "url": "", "snapshot": None}
+    if not EO_RE.match(eo or ""):
+        return {**base, "status": "НЕ ПОДТВЕРЖДЕН",
+                "note": f"eoNumber «{eo}» не 16 цифр — это не идентификатор публикатора"}
+    url = EO_URL.format(eo=eo)
+    dest = os.path.join(CACHE, f"eo_{eo}.html")
+    state = fetch(url, dest)
+    if state == "unreachable":
+        return {**base, "status": "КАНАЛ НЕДОСТУПЕН", "url": url,
+                "note": "публикатор не ответил — проверка НЕ выполнена"}
+    if state == "small":
+        return {**base, "status": "НЕ ПОДТВЕРЖДЕН", "url": url,
+                "note": "ответ короче страницы документа"}
+    raw = open(dest, encoding="utf-8", errors="ignore").read()
+    res = analyze_eo(page_title(raw), num, claimed_date)
+    return {**base, **res, "url": url, "snapshot": snapshot(dest, strip_tags(raw))}
 
 
 def slugify(num: str) -> str:
@@ -257,12 +343,19 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Верификация реквизитов судебных актов")
     ap.add_argument("acts", nargs="+", help="номер@ДД.ММ.ГГГГ, напр. 81-КГ19-2@26.03.2019")
     ap.add_argument("--url", help="прямой URL (для одного акта)")
+    ap.add_argument("--eo", help="номер электронного опубликования (16 цифр, "
+                                 "publication.pravo.gov.ru) — для одного акта")
     ap.add_argument("--json", action="store_true", help="выводить JSON")
     ap.add_argument("--emit", metavar="FILE", help="дописать результаты в ledger (JSON)")
     a = ap.parse_args()
 
     pairs = [parse_arg(x) for x in a.acts]
-    out = [verify(n, d, a.url if len(pairs) == 1 else None) for n, d in pairs]
+    if a.eo:
+        if len(pairs) != 1:
+            ap.error("--eo проверяет один акт: один идентификатор — один документ")
+        out = [verify_eo(a.eo, pairs[0][0], pairs[0][1])]
+    else:
+        out = [verify(n, d, a.url if len(pairs) == 1 else None) for n, d in pairs]
 
     if a.emit:
         os.makedirs(os.path.dirname(os.path.abspath(a.emit)), exist_ok=True)
@@ -344,7 +437,40 @@ def demo() -> None:
     assert parse_arg("81-КГ19-2@26.03.2019") == ("81-КГ19-2", "26.03.2019")
     assert parse_arg("81-КГ19-2") == ("81-КГ19-2", None)
 
-    print("demo: разбор, сверка даты и сборка URL корректны")
+    # 6. eoNumber. Заголовки — дословные слепки живых страниц публикатора
+    # (проверено 04.08.2026: ...0011 → 420-ФЗ, соседний ...0012 → уже 421-ФЗ).
+    t420 = "Федеральный закон от 30.11.2024 № 420-ФЗ ∙ Официальное опубликование правовых актов"
+    t421 = "Федеральный закон от 30.11.2024 № 421-ФЗ ∙ Официальное опубликование правовых актов"
+    assert parse_eo_title(t420) == ("30.11.2024", "420-ФЗ"), parse_eo_title(t420)
+    ok = analyze_eo(t420, "420-ФЗ", "30.11.2024")
+    assert ok["status"] == "ПОДТВЕРЖДЕН", ok
+    # ГЛАВНОЕ: чужой идентификатор открывает существующую страницу другого акта.
+    # Прежде «страница есть» само по себе считалось подтверждением.
+    alien = analyze_eo(t421, "420-ФЗ", "30.11.2024")
+    assert alien["status"] == "НЕ ПОДТВЕРЖДЕН" and "ДРУГОЙ акт" in alien["note"], alien
+    # Несуществующий eoNumber отдаёт 404 полноразмерной страницей без заголовка.
+    # Диагноз обязан отличаться от «заголовок есть, но реквизитов в нём нет»:
+    # первое — идентификатора не существует, второе — сменилась вёрстка публикатора.
+    empty = analyze_eo("", "420-ФЗ", "30.11.2024")
+    assert empty["status"] == "НЕ ПОДТВЕРЖДЕН" and "без заголовка" in empty["note"], empty
+    # Заголовок без пары «от … №» не даёт сверить реквизит — подтверждать нечем.
+    assert analyze_eo("Официальное опубликование правовых актов",
+                      "420-ФЗ", None)["status"] == "НЕ ПОДТВЕРЖДЕН"
+    # Номер тот же, дата у публикатора другая — расхождение, не подтверждение.
+    diff = analyze_eo(t420, "420-ФЗ", "01.12.2024")
+    assert diff["status"] == "РАСХОЖДЕНИЕ" and diff["date_match"] is False, diff
+    # Приказ ведомства с косой чертой в номере разбирается так же.
+    tprikaz = ("Приказ Федеральной службы государственной регистрации, кадастра и "
+               "картографии от 28.10.2024 № П/0335/24 ∙ Официальное опубликование")
+    assert parse_eo_title(tprikaz) == ("28.10.2024", "П/0335/24"), parse_eo_title(tprikaz)
+    assert analyze_eo(tprikaz, "П/0335/24", "28.10.2024")["status"] == "ПОДТВЕРЖДЕН"
+    # Написание номера различается у источников — сравнение это переживает.
+    assert same_act_number("420-ФЗ", "420-фз") and same_act_number("420 ФЗ", "420-ФЗ")
+    assert not same_act_number("420-ФЗ", "421-ФЗ")
+    # Кривой идентификатор в сеть не ходит вовсе.
+    assert verify_eo("12345", "420-ФЗ")["status"] == "НЕ ПОДТВЕРЖДЕН"
+
+    print("demo: разбор, сверка даты, сборка URL и сверка eoNumber корректны")
 
 
 if __name__ == "__main__":
