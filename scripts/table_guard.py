@@ -16,6 +16,7 @@
   table_guard.py page.png page.txt   # пара растр+текст (код 3 при потере)
   table_guard.py page.png            # только растровый сигнал
 """
+import os
 import sys
 
 import numpy as np
@@ -84,7 +85,47 @@ def text_has_structure(text: str) -> bool:
     return aligned >= 3
 
 
+def selftest():
+    """Растровую часть проверяем на сгенерированной сетке, текстовую — на строках.
+    Сети и реальных сканов не требуется."""
+    import tempfile
+    from PIL import Image, ImageDraw
+    tmp = tempfile.mkdtemp()
+
+    grid = os.path.join(tmp, "grid.png")
+    im = Image.new("L", (1200, 1600), 255)
+    d = ImageDraw.Draw(im)
+    for y in range(200, 1400, 120):          # горизонтальные линии таблицы
+        d.line([(100, y), (1100, y)], fill=0, width=3)
+    for x in range(100, 1101, 200):          # вертикальные
+        d.line([(x, 200), (x, 1360)], fill=0, width=3)
+    im.save(grid)
+
+    blank = os.path.join(tmp, "blank.png")
+    Image.new("L", (1200, 1600), 255).save(blank)
+
+    g_grid = grid_signals(grid)
+    g_blank = grid_signals(blank)
+    checks = [
+        ("сетка на растре найдена", g_grid["grid"]),
+        ("на чистом листе сетки нет", not g_blank["grid"]),
+        ("markdown-таблица считается структурой",
+         text_has_structure("| a | b |\n| - | - |\n| 1 | 2 |\n| 3 | 4 |")),
+        ("колонки через пробелы считаются структурой",
+         text_has_structure("Счет  Остаток  Дата\n123  45  01.02\n456  78  03.04\n789  10  05.06")),
+        ("сплошная проза структурой не считается",
+         not text_has_structure("Обычный абзац текста без всяких колонок и таблиц.")),
+    ]
+    for name, ok in checks:
+        print(f"  {'✓' if ok else '✗'} {name}")
+    bad = [n for n, ok in checks if not ok]
+    print(f"selftest {'пройден' if not bad else 'ПРОВАЛЕН'}: {len(checks) - len(bad)}/{len(checks)}")
+    return 1 if bad else 0
+
+
 def main():
+    if "--selftest" in sys.argv:
+        sys.exit(selftest())
     png = sys.argv[1]
     g = grid_signals(png)
     print(f"растр: h_lines={g['h_lines']} v_lines={g['v_lines']}"

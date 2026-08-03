@@ -42,7 +42,29 @@ def crosscheck(text_a: str, text_b: str, min_digits: int = 2):
     return a - b, b - a, sum((a & b).values())
 
 
+def selftest():
+    """Без сети и без файлов: сверка мультимножеств чисел."""
+    a = "Взыскать 1 250 000 руб. по договору 4412, пени 12 500 руб., еще 12 500 руб."
+    b = "Договор 4412. Сумма 1250000 руб. Пени 12 500 руб."
+    only_a, only_b, common = crosscheck(a, b, 4)
+    checks = [
+        ("пробелы в числе не мешают сравнению", "1250000" not in only_a),
+        ("повтор учитывается как кратность", only_a.get("12500") == 1),
+        ("общие числа посчитаны", common >= 2),
+        ("лишнего в источнике нет", not only_b),
+        ("пустые тексты не роняют", crosscheck("", "", 4)[2] == 0),
+        ("порог значащих цифр работает", "44" not in numbers_of("код 44", 4)),
+    ]
+    for name, ok in checks:
+        print(f"  {'✓' if ok else '✗'} {name}")
+    bad = [n for n, ok in checks if not ok]
+    print(f"selftest {'пройден' if not bad else 'ПРОВАЛЕН'}: {len(checks) - len(bad)}/{len(checks)}")
+    return 1 if bad else 0
+
+
 def main():
+    if "--selftest" in sys.argv:
+        sys.exit(selftest())
     args = [x for x in sys.argv[1:] if not x.startswith("--")]
     md = 2
     if "--min-digits" in sys.argv:

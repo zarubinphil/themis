@@ -3,7 +3,7 @@
 > Белый список. Фемида и агенты вправе обращаться ТОЛЬКО к тому, что здесь разрешено.
 > Сервиса нет в списке — не запускать, а спросить владельца и внести сюда после согласия.
 > Проверка фактической доступности: `python3 scripts/preflight_search.py`.
-> Обновлено: 02.08.2026.
+> Обновлено: 03.08.2026.
 
 ---
 
@@ -11,9 +11,9 @@
 
 | Инструмент | Назначение | Команда |
 |---|---|---|
-| Apple Vision OCR | распознавание сканов и картинок | `bin/vision-ocr` через `scripts/markdown_extract.py --render-dir` |
+| Apple Vision OCR | распознавание сканов и картинок | `bin/vision-doc` (структурный, основной) через `scripts/markdown_extract.py --render-dir`; `bin/vision-ocr` — строковый резерв |
 | markitdown | текст из PDF, DOCX, XLSX, PPTX | `scripts/markdown_extract.py FILE --json-meta` |
-| Кеш роутера | повторное чтение уже извлеченного | `~/.cache/legal_extract/<sha>.md` и `<sha>.requisites.json` |
+| Кеш роутера | повторное чтение уже извлеченного | `~/.cache/legal_extract/<sha>.md` и `<sha>.requisites.json`. **Содержит персональные данные доверителей и живет вне `cases/`** — при закрытии дела чистить `markdown_extract.py --purge-case ДЕЛО --apply` |
 | verify_act.py | верификация реквизитов судебных актов | `python3 scripts/verify_act.py 81-КГ19-2` |
 | preflight_search.py | проверка каналов поиска | `python3 scripts/preflight_search.py` |
 | render_tail.py | дорендер хвоста длинных сканов | `python3 scripts/render_tail.py FILE OCR_DIR 81` |
@@ -25,7 +25,13 @@
 | verify_inn.py | контрольные суммы ИНН/ОГРН — локально, без сети | `python3 scripts/verify_inn.py 7707083893` |
 | vision-doc | структурный OCR: текст + таблицы с ячейками (macOS 26+) | `bin/vision-doc FILE [--md\|--json\|--text]`, роутер зовёт сам |
 | cite.py | дословная норма/пункт Пленума из локального корпуса | `python3 scripts/cite.py "ст. 683 ГК"` — сеть НЕ трогает никогда |
-| update_legal_corpus.py | обновление локального корпуса права (кодексы, Пленумы) | `python3 scripts/update_legal_corpus.py --check` — сеть только сюда, не с дела |
+| update_legal_corpus.py | обновление локального корпуса права (кодексы, Пленумы) | `--check` по кешу не старше суток; сверка с источником — `--check --refresh`. Ненулевой код = изъяны |
+| token_ledger.py | фактический расход токенов по шагам конвейера | `python3 scripts/token_ledger.py --track FAST\|FULL`; код 3 — перерасход |
+| quality_gate.py | механические проверки: числа, реквизиты, полнота OCR | `python3 scripts/quality_gate.py --case cases/К/Д` |
+| document_guard.py | формат `.docx` и согласованность с `.md` | `python3 scripts/document_guard.py ДОК.docx --md ДОК.md [--l3]` |
+| registry_check.py | сверка `_index.md` / `_clients.md` / `_client.md` с диском | `python3 scripts/registry_check.py [--fix]` |
+| gosposhlina.py | госпошлина по ст. 333.19/333.21 НК из корпуса, с датой редакции | `python3 scripts/gosposhlina.py --cena N` либо `--neimushchestvennyy --status fiz\|org` |
+| practice_harvest.py | практика из дел, которой нет в базе; аудит базы | `python3 scripts/practice_harvest.py [--audit]` |
 
 ## Разрешено без спроса — внешнее, в пределах включенной подписки
 
@@ -34,13 +40,25 @@
 | WebSearch | поиск судебной практики | лимит 200 запросов на сессию; исчерпан — охота по внешним каналам не запускается |
 | WebFetch | чтение конкретной страницы по известному URL | публичные адреса; данные клиентов не передавать |
 | ScrapeGraphAI (`sgai`) | резервный веб-поиск, всегда `--json` | ключ в `~/.scrapegraphai/config.json` — не выводить, не логировать, не записывать в файлы |
-| Публикаторы судебных актов | vsrf.ru, ksrf.ru, legalacts.ru, eg-online.ru, sudact.ru, garant.ru, consultant.ru | только чтение, только публичные страницы |
+| Публикаторы судебных актов | vsrf.ru, ksrf.ru, legalacts.ru, eg-online.ru, sudact.ru, garant.ru, consultant.ru | только чтение, только публичные страницы. **sudact.ru: см. отдельную строку ниже про robots.txt** |
+| ЦБ РФ | ключевая ставка, справочник БИК | `cbr.ru/scripts/` — официальный XML, без ключа |
 | **DaData** (`suggestions.dadata.ru`) | ЕГРЮЛ/ЕГРИП по ИНН/ОГРН и по названию, адреса (ФИАС/КЛАДР), банки по БИК, разбор ФИО | ключ в Keychain `THEMIS_DADATA_API_KEY`, тариф «Подсказки» бесплатный. Наружу уходит ТОЛЬКО реквизит или наименование организации — фактура дела не передаётся. Данные, полученные оттуда, помечать в файлах дела строкой `_Источник: ЕГРЮЛ через DaData…_` |
+
+## Решения владельца по спорным каналам
+
+| Канал | Факт на 03.08.2026 | Статус |
+|---|---|---|
+| **Поиск практики на sudact.ru** (`scripts/practice_search.py`) | `robots.txt` источника для `User-agent: *` содержит `Disallow: /{раздел}/doc_ajax/`. Асинхронный поиск идет ровно через них; разрешенный `/{раздел}/doc/` выдачи не отдает ни при каком числе опросов (проверено 03.08.2026, подтверждено двумя независимыми аудитами) | **РАЗРЕШЕН РЕШЕНИЕМ ВЛАДЕЛЬЦА 03.08.2026**, риск принят осознанно. Точка правды — `SUDACT_SEARCH_ALLOWED = True` в `scripts/practice_search.py`; хук `claude_guard.py` читает её же. Выключить: константа в `False` либо `THEMIS_SUDACT_SEARCH=0`. Открытие акта по известному URL (`--doc URL`) под запрет источника не подпадало и работало всегда |
+| КАД арбитр, ras.arbitr.ru | `robots.txt` обоих: точечные `Allow`, затем `Disallow: /` | автоматический сбор не строить |
+| Backend-поиск ЕФРСБ (`fedresurs.ru/backend/*/search`) | запрещен в `robots.txt`, стоит Qrator, отвечает 403 | не использовать |
 
 ## Запрещено до отдельного согласования владельца
 
 | Сервис | Причина |
 |---|---|
+| api-cloud.ru, parser-api.com, api-assist.com, you-right.ru | посредники без подтвержденного отношения к операторам источников; оферта снимает ответственность за точность и перекладывает законность передачи ПДн на клиента |
+| Проекты GitHub без файла лицензии | открытый исходник без лицензии использовать нельзя. Проверять `gh api repos/O/R/license` (404 = лицензии нет) |
+| Датасеты и код под CC BY-NC | некоммерческая лицензия несовместима с адвокатской практикой |
 | Tavily MCP | зарегистрирован в `~/.claude.json` без ключа; кроме того, MCP не наследуется агентом с явным списком `tools` — поручение агенту заведомо бесполезно (прецедент 02.08.2026: 249 950 токенов впустую) |
 | Firecrawl MCP | не зарегистрирован в конфигурации |
 | Любой облачный OCR и облачный vision на основном проходе | нарушает LOCAL-FIRST; допустим только как точечный фолбэк по трем случаям протокола |

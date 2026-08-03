@@ -39,7 +39,11 @@ def check_frontmatter() -> list[str]:
     try:
         import yaml
     except ImportError:
-        return []
+        # Молчаливый return [] отключал проверку сломанного frontmatter — ту самую,
+        # что конституция называет главной причиной остановки конвейера. Отсутствие
+        # библиотеки обязано быть видно, а не выглядеть как «всё чисто».
+        return ["pyyaml не установлен — проверка frontmatter агентов НЕ выполнена. "
+                "Установить pyyaml либо считать реестр агентов непроверенным"]
     root = Path(__file__).resolve().parent.parent / ".claude"
     bad = []
     for f in sorted(root.glob("agents/*.md")) + sorted(root.glob("skills/**/SKILL.md")):

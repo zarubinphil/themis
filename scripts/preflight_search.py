@@ -117,6 +117,13 @@ def main() -> int:
         rows.append((f"Публикатор {name}", ok, "отвечает" if ok else "недоступен",
                      "verify_act.py сработает" if ok else "верификация через фолбэк"))
 
+    # Поиск практики на sudact закрыт до решения владельца: robots.txt источника
+    # запрещает роботам /{раздел}/doc_ajax/, а иного пути к поиску у сайта нет.
+    sudact_on = os.environ.get("THEMIS_SUDACT_SEARCH") == "1"
+    rows.append(("Поиск практики sudact.ru", sudact_on,
+                 "включен владельцем" if sudact_on else "закрыт: robots.txt источника",
+                 "practice_search.py ищет"
+                 if sudact_on else "искать в knowledge/practice_index.md; акт по URL — --doc"))
     rows.append(("WebSearch (квота сессии)", None, "программно не проверяется",
                  "лимит 200 запросов на сессию — спросить у охотника в первом отчете"))
 

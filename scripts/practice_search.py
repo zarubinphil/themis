@@ -222,10 +222,74 @@ def parse_results(content, section, limit):
     return out
 
 
+# ─────────── Соответствие robots.txt источника ───────────
+# На 03.08.2026 https://sudact.ru/robots.txt для User-Agent: * содержит
+#   Disallow: /vsrf/doc_ajax/   /regular/doc_ajax/   /arbitral/doc_ajax/   /magistrate/doc_ajax/
+# то есть ровно тот путь, которым идет асинхронный поиск. Проверено: обычный
+# GET на разрешенный /{раздел}/doc/ результатов не отдает ни при каком числе
+# опросов — разрешенного пути к поиску у сайта нет.
+#
+# Открытие КОНКРЕТНОГО акта по известному URL (/{раздел}/doc/<id>/) под запрет
+# не подпадает и работает без всякого гейта.
+#
+# РЕШЕНИЕ ВЛАДЕЛЬЦА 03.08.2026: поиск разрешён, риск принят осознанно.
+# Единственная точка правды — константа ниже; её же читает PreToolUse-хук
+# scripts/claude_guard.py, чтобы два гейта не разъехались.
+# Выключить обратно: SUDACT_SEARCH_ALLOWED = False либо THEMIS_SUDACT_SEARCH=0.
+SUDACT_SEARCH_ALLOWED = True
+ROBOTS_BLOCKED_HINT = (
+    "ПОИСК ВЫКЛЮЧЕН (SUDACT_SEARCH_ALLOWED=False либо THEMIS_SUDACT_SEARCH=0). "
+    "Напоминание: sudact.ru в robots.txt запрещает роботам путь "
+    "/{раздел}/doc_ajax/, а асинхронный поиск идет только через него "
+    "(разрешенный /doc/ выдачи не отдает — проверено 03.08.2026).\n"
+    "Что можно без ограничений: открыть известный акт — practice_search.py --doc URL.\n"
+    "Что делать с поиском: решение владельца. Разрешил — "
+    "THEMIS_SUDACT_SEARCH=1 либо --i-accept-robots-risk, и строку в "
+    "knowledge/allowed-services.md. Не разрешил — практику брать из "
+    "knowledge/practice_index.md и договорного канала."
+)
+
+
+def search_allowed() -> bool:
+    env = os.environ.get("THEMIS_SUDACT_SEARCH")
+    if env is not None:
+        return env == "1"          # переменная перекрывает решение в обе стороны
+    return SUDACT_SEARCH_ALLOWED
+
+
+PAGE_SIZE = 10  # sudact отдает по 10 карточек на страницу
+
+
 def search(text, section="regular", limit=20, max_wait=25.0, **kw):
-    """Найти акты. Возвращает (список, всего_найдено_строкой)."""
+    """Найти акты. Возвращает (список, всего_найдено_строкой).
+
+    limit больше размера страницы честно догружает следующие страницы. Раньше
+    `--limit 20` молча возвращал 10: разбиралась одна страница, а флаг обещал больше.
+    """
     if section not in SECTIONS:
         raise ValueError(f"раздел {section!r} неизвестен; доступны: {', '.join(SECTIONS)}")
+    if not search_allowed():
+        raise PermissionError(ROBOTS_BLOCKED_HINT)
+
+    start_page = int(kw.pop("page", 1) or 1)
+    if limit > PAGE_SIZE:
+        out, total, seen = [], "", set()
+        pages = (limit + PAGE_SIZE - 1) // PAGE_SIZE
+        for i in range(pages):
+            got, tot = _search_page(text, section, limit, max_wait,
+                                    page=start_page + i, **kw)
+            total = total or tot
+            fresh = [r for r in got if r["url"] not in seen]
+            seen.update(r["url"] for r in fresh)
+            out += fresh
+            if not fresh or len(out) >= limit:
+                break
+        return out[:limit], total
+    return _search_page(text, section, limit, max_wait, page=start_page, **kw)
+
+
+def _search_page(text, section="regular", limit=20, max_wait=25.0, **kw):
+    """Одна страница выдачи."""
     qs = build_query(section, text=text, **kw)
     ckey = f"search:{section}:{qs}:{limit}"
     cached = _cache_get(ckey)
@@ -262,8 +326,25 @@ def search(text, section="regular", limit=20, max_wait=25.0, **kw):
     return results, total
 
 
+# Акт цитируется дословно в судебный документ. Значит источник страницы обязан
+# быть тем, за кого себя выдаёт: чужой хост, редирект на форму входа, страница
+# ошибки с кодом 200 или локальный файл не должны попасть в цитату молча.
+DOC_URL_RE = re.compile(
+    r"^https://sudact\.ru/(vsrf|regular|arbitral|magistrate|law)/doc/[A-Za-z0-9_-]+/?$")
+
+
+def doc_url_ok(url: str) -> bool:
+    return bool(DOC_URL_RE.match((url or "").strip()))
+
+
 def get_document(url):
     """Полный текст акта для дословного цитирования."""
+    if not doc_url_ok(url):
+        return {"url": url, "error": (
+            "адрес не похож на страницу акта sudact. Ожидается "
+            "https://sudact.ru/{vsrf|regular|arbitral|magistrate|law}/doc/<id>/ — "
+            "чужой хост, схема file:// и произвольный путь запрещены: текст отсюда "
+            "идет в судебный документ дословно")}
     cached = _cache_get(f"doc:{url}")
     if cached:
         return cached
@@ -275,6 +356,9 @@ def get_document(url):
         os.unlink(jar)
     if not page:
         return {"url": url, "error": "документ не получен"}
+    # Страница ошибки/капчи отдаётся с кодом 200 и выглядит как обычный HTML.
+    if re.search(r"(?i)<title>[^<]*(404|не найдена|ошибка|captcha|доступ огранич)", page):
+        return {"url": url, "error": "страница не является актом (ошибка, капча либо заглушка)"}
     # Тело акта лежит между <hr class="hr-h1"> и блоком «поделиться» в подвале.
     # Отдельного контейнера у него нет — рамки установлены по разметке страницы.
     start = page.find('<hr class="hr-h1">')
@@ -291,9 +375,91 @@ def get_document(url):
         ln.strip() for ln in _strip_keep_lines(raw).splitlines())).strip()
     title = re.search(r"<h1[^>]*>(.*?)</h1>", page, re.S)
     doc = {"url": url, "title": _strip(title.group(1)) if title else "", "text": text}
+    if len(text) <= 200:
+        doc["error"] = ("текста меньше 200 знаков — вёрстка источника изменилась либо "
+                        "страница пустая. Цитировать нельзя, сверить глазами по URL")
     if len(text) > 200:
         _cache_put(f"doc:{url}", doc)
     return doc
+
+
+def selftest():
+    """Разбор выдачи и сборка запроса — БЕЗ СЕТИ.
+
+    Раньше проверка дергала справочники сайта и потому зеленела только при живом
+    интернете, а на отключенном канале падала SystemExit. Справочник подменяется
+    статическим слепком реальных кодов (они читаются из формы сайта, см. _load_dicts).
+    """
+    global _load_dicts, _search_page, search_allowed
+    real_dicts, real_page, real_allowed = _load_dicts, _search_page, search_allowed
+    _load_dicts = lambda section="regular": {
+        "workflow_stage": {"первая инстанция": "10", "апелляция": "20",
+                           "кассация": "30", "надзор": "60", "пересмотр": "40"},
+        "area": {"республика татарстан": "1060", "москва": "1077"},
+    }
+    try:
+        sample = ('<ul class="results"><li><h4><a href="/regular/doc/AbC123/?x=1">'
+                  'Решение № 2-45/2026 от 25 февраля 2026 г. по делу № 2-45/2026</a></h4>'
+                  '<div class="b-justice">Вахитовский районный суд (Республика Татарстан)'
+                  '</div><p>текст сниппета</p></li></ul>')
+        r = parse_results(sample, "regular", 5)
+        q = build_query("regular", text="иск", instance="апелляция", area="Татарстан")
+        params = dict(kv.split("=", 1) for kv in q.split("&") if "=" in kv)
+        checks = [
+            ("одна карточка разобрана", len(r) == 1),
+            ("URL абсолютный", r and r[0]["url"] == "https://sudact.ru/regular/doc/AbC123/"),
+            ("номер дела извлечен", r and r[0]["number"] == "2-45/2026"),
+            ("суд извлечен", r and "Вахитовский" in r[0]["court"]),
+            ("дата извлечена", r and "25 февраля 2026" in r[0]["date"]),
+            # именно ПОЛНОЕ значение: подстрочная проверка "=2" совпадала и с "=20",
+            # из-за чего угаданные коды 1/2/3 когда-то прошли тест
+            ("код инстанции точный (20, не 2)", params.get("regular-workflow_stage") == "20"),
+            ("код региона точный", params.get("regular-area") == "1060"),
+            ("пустая выдача не выдумывает результатов", parse_results("", "regular", 5) == []),
+            ("мусорный HTML не роняет разбор", parse_results("<html>oops", "regular", 5) == []),
+        ]
+        # Пагинация: limit больше страницы обязан догрузить следующие и не дублировать
+        pages_asked = []
+
+        def fake_page(text, section="regular", limit=20, max_wait=25.0, **kw):
+            pg = kw.get("page", 1)
+            pages_asked.append(pg)
+            return ([{"url": f"u{pg}-{i}"} for i in range(PAGE_SIZE)], "всего 25")
+
+        _search_page = fake_page
+        search_allowed = lambda: True
+        many, _ = search("иск", limit=25)
+        one_page = list(pages_asked)
+        pages_asked.clear()
+        few, _ = search("иск", limit=5)
+
+        _search_page = lambda text, section="regular", limit=20, max_wait=25.0, **kw: (
+            [{"url": f"same-{i}"} for i in range(PAGE_SIZE)], "всего 10")
+        dup, _ = search("иск", limit=30)
+
+        checks += [
+            ("адрес акта принимается",
+             doc_url_ok("https://sudact.ru/regular/doc/AbC123/")),
+            ("чужой хост отбивается",
+             not doc_url_ok("https://evil.example/regular/doc/AbC123/")),
+            ("file:// отбивается", not doc_url_ok("file:///etc/passwd")),
+            ("http вместо https отбивается",
+             not doc_url_ok("http://sudact.ru/regular/doc/AbC123/")),
+            ("путь /doc/print/ отбивается (запрещён robots)",
+             not doc_url_ok("https://sudact.ru/regular/doc/print/AbC123/")),
+            ("хвост с параметрами отбивается",
+             not doc_url_ok("https://sudact.ru/regular/doc/AbC123/?x=1")),
+            ("limit 25 догружает три страницы", one_page == [1, 2, 3] and len(many) == 25),
+            ("limit 5 одной страницей", len(few) == PAGE_SIZE and pages_asked == [1]),
+            ("повтор той же выдачи не дублируется", len(dup) == PAGE_SIZE),
+        ]
+    finally:
+        _load_dicts, _search_page, search_allowed = real_dicts, real_page, real_allowed
+    for name, ok in checks:
+        print(f"  {'✓' if ok else '✗'} {name}")
+    bad = [n for n, ok in checks if not ok]
+    print(f"selftest {'пройден' if not bad else 'ПРОВАЛЕН'}: {len(checks) - len(bad)}/{len(checks)}")
+    return 1 if bad else 0
 
 
 def main():
@@ -315,24 +481,14 @@ def main():
     ap.add_argument("--doc", default="", help="URL акта — выдать полный текст")
     ap.add_argument("--json", action="store_true", help="машинный вывод")
     ap.add_argument("--selftest", action="store_true", help="проверка разбора без сети")
+    ap.add_argument("--i-accept-robots-risk", action="store_true",
+                    help="включить поиск, запрещенный robots.txt источника (решение владельца)")
     args = ap.parse_args()
+    if getattr(args, "i_accept_robots_risk", False):
+        os.environ["THEMIS_SUDACT_SEARCH"] = "1"
 
     if args.selftest:
-        sample = ('<ul class="results"><li><h4><a href="/regular/doc/AbC123/?x=1">'
-                  'Решение № 2-45/2026 от 25 февраля 2026 г. по делу № 2-45/2026</a></h4>'
-                  '<div class="b-justice">Вахитовский районный суд (Республика Татарстан)'
-                  '</div><p>текст сниппета</p></li></ul>')
-        r = parse_results(sample, "regular", 5)
-        assert len(r) == 1, r
-        assert r[0]["url"] == "https://sudact.ru/regular/doc/AbC123/", r
-        assert r[0]["number"] == "2-45/2026", r
-        assert "Вахитовский" in r[0]["court"], r
-        assert "25 февраля 2026" in r[0]["date"], r
-        q = build_query("regular", text="иск", instance="апелляция")
-        assert "regular-workflow_stage=2" in q, q
-        assert parse_results("", "regular", 5) == []
-        print("selftest: OK")
-        return 0
+        return selftest()
 
     if args.doc:
         d = get_document(args.doc)
@@ -369,5 +525,14 @@ def main():
     return 0
 
 
+def _main_guarded():
+    """Отказ по robots — это решение, а не авария: печатаем объяснение, не трейс."""
+    try:
+        return main()
+    except PermissionError as e:
+        print(str(e), file=sys.stderr)
+        return 4
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_main_guarded())

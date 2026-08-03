@@ -45,6 +45,15 @@ def ogrn_valid(ogrn: str) -> bool:
     return int(ogrn[:-1]) % mod % 10 == int(ogrn[-1])
 
 
+def kpp_valid(kpp: str) -> bool:
+    """КПП: 9 знаков. Контрольной суммы у него нет — проверяем формат по приказу
+    ФНС: NNNN PP XXX, где NNNN — код органа, PP — причина постановки (цифры либо
+    латинские A-Z для иностранных организаций), XXX — порядковый номер.
+    Формальная проверка ловит потерю знака при OCR, а это уже половина ошибок."""
+    k = re.sub(r"\s", "", kpp).upper()
+    return bool(re.fullmatch(r"\d{4}([0-9A-Z]{2})\d{3}", k)) and k[4:6] != "00"
+
+
 def snils_valid(snils: str) -> bool:
     ds = re.sub(r"\D", "", snils)
     if len(ds) != 11:
@@ -93,6 +102,9 @@ def scan_requisites(req: dict, bik: str | None = None) -> list[str]:
     for v in req.get("ogrn", []):
         if not ogrn_valid(v):
             bad.append(f"ОГРН {v}: контрольное число НЕ сходится — вероятна ошибка OCR")
+    for v in req.get("kpp", []):
+        if not kpp_valid(v):
+            bad.append(f"КПП {v}: неверный формат (4 цифры + причина + 3 цифры)")
     for v in req.get("snils", []):
         if not snils_valid(v):
             bad.append(f"СНИЛС {v}: контрольное число НЕ сходится")
@@ -110,7 +122,9 @@ def _selftest():
     ok = [
         inn_valid("1655248572"), inn_valid("7728168971"),
         ogrn_valid("1021600000124"), ogrn_valid("1027739642281"), ogrn_valid("1021603150150"),
-        snils_valid("039-656-252-89"), snils_valid("048-020-883 40"), snils_valid("113-195-207 21"),
+        kpp_valid("165501001"), kpp_valid("7728AB001"), not kpp_valid("165500001"),
+        not kpp_valid("1655001"), not kpp_valid("16550ab01".upper() + "0"),
+        snils_valid("123-456-789 64"), snils_valid("111-222-333 72"), snils_valid("555-666-777 50"),
         account_valid("40817810808430000005", "044525593"),   # синтетический счет, проходит контрольную сумму
         account_valid("40702810029160002367", "042202824"),
         account_valid("40702810929070003307", "042202824"),
@@ -119,7 +133,7 @@ def _selftest():
         not inn_valid("1655248573"),
         not account_valid("40817810808430075620", "044525593"),
         not ogrn_valid("1021600000125"),
-        not snils_valid("039-656-252-88"),
+        not snils_valid("123-456-789 63"),
         isin_valid("US4581401001"),        # Intel — стр. 82 заключения
         isin_valid("US7170811035"),        # Pfizer
         isin_valid("US7802593050"),        # Shell ADR
@@ -127,7 +141,7 @@ def _selftest():
         not isin_valid("US7805293050"),    # порча gundam-прогона 02.08.2026
         not isin_valid("US481401001"),     # gundam потерял цифру
         # живой улов 02.08.2026: ИНН/ОГРН «КАН АВТО ЭКСПЕРТ-26» из карты дела
-        # doveritel-3/tamozhnya-kan-avto-2026 не существуют (проверено по ЕГРЮЛ)
+        # из таможенного дела 08.2026 не существуют (проверено по ЕГРЮЛ)
         not inn_valid("1657246601"),
         not ogrn_valid("1161690019502"),
     ]

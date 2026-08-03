@@ -46,7 +46,7 @@
                             перекачки всех статей
   --doc SLUG                ограничиться одним документом реестра кодексов
   --plenums                 обход каталога Пленумов ВС РФ (sudact.ru)
-  --plenum-pages N          сколько страниц каталога обойти (по умолчанию 3)
+  --plenum-pages N          потолок страниц каталога (обход встает на первой пустой)
   --plenum-slug SLUG        один Пленум по известному URL-слагу sudact.ru
   --demo                    самопроверка парсера без сети
 
@@ -102,6 +102,15 @@ KODEKSY = [
     {"slug": "nk-rf-gosposhlina", "title": "Налоговый кодекс Российской Федерации "
      "(глава 25.3 «Государственная пошлина»)",
      "doc_ids": [28165], "chapter_scope": "25.3"},
+    # Не кодексы, но ходовые федеральные законы: треть живой практики по неустойке —
+    # потребительские споры, а ЗоЗПП в реестре не было вовсе (аудит 03.08.2026).
+    # doc_id сверены по <title> страницы, не угаданы.
+    {"slug": "zozpp", "title": "Закон РФ «О защите прав потребителей» от 07.02.1992 N 2300-1",
+     "doc_ids": [305]},
+    {"slug": "fz-229-ispolnitelnoe", "title": "Федеральный закон «Об исполнительном производстве» "
+     "от 02.10.2007 N 229-ФЗ", "doc_ids": [71450]},
+    {"slug": "fz-127-bankrotstvo", "title": "Федеральный закон «О несостоятельности (банкротстве)» "
+     "от 26.10.2002 N 127-ФЗ", "doc_ids": [39331]},
     {"slug": "tk-rf", "title": "Трудовой кодекс Российской Федерации",
      "doc_ids": [34683]},
     {"slug": "zhk-rf", "title": "Жилищный кодекс Российской Федерации",
@@ -125,9 +134,17 @@ SUDACT_PLENUM_CATALOG = "https://sudact.ru/law/authority/plenum-vs-rf/"
 # подхватывается ssl-модулем Python), а curl те же адреса берет штатно —
 # он использует системную связку доверия macOS напрямую. Тот же прием уже
 # в проекте (scripts/fetch_url.sh, scripts/verify_act.py) — не новое решение.
+# Кеш HTTP был бессрочным: один раз скачав страницу, скрипт больше НИКОГДА не шел
+# к источнику, а `--check` при этом рапортовал «без изменений». Проверка актуальности
+# по вечному кешу — не проверка. Держим срок жизни и режим обхода.
+CACHE_MAX_AGE = 86400  # сутки: внутри одного прогона повторы дешевы, между прогонами — нет
+
+
 def http_get(url: str, cache_key: str) -> bytes | None:
     cache_path = os.path.join(CACHE_DIR, cache_key)
-    if os.path.exists(cache_path) and os.path.getsize(cache_path) > 200:
+    if (CACHE_MAX_AGE > 0 and os.path.exists(cache_path)
+            and os.path.getsize(cache_path) > 200
+            and time.time() - os.path.getmtime(cache_path) < CACHE_MAX_AGE):
         return open(cache_path, "rb").read()
     data = None
     for attempt in range(3):
@@ -154,6 +171,24 @@ def http_get(url: str, cache_key: str) -> bytes | None:
 
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+# Что пошло не так за прогон. Пустой список = честный ноль на выходе; непустой —
+# ненулевой код возврата, иначе launchd месяцами считает сломанный прогон удачным.
+FAILURES: list[str] = []
+
+
+def write_atomic(path: str, content: str) -> None:
+    """Запись через временный файл в той же папке + os.replace.
+
+    Прямой open(path,"w") усекает файл ДО того, как новое содержимое записано:
+    сбой в этот момент уничтожает рабочий корпус безвозвратно."""
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(content)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
 
 
 # --------------------------------------------------------------------------
@@ -243,9 +278,17 @@ def extract_article_text(html_bytes: bytes) -> str:
     return parser.text()
 
 
+# Хвост «, с изм. от ДД.ММ.ГГГГ» после даты редакции ломал прежний шаблон, который
+# требовал закрывающую скобку сразу за датой. Из-за этого СК РФ получил в корпусе
+# дату 29.12.1995 — день ПРИНЯТИЯ закона вместо редакции от 23.03.2026, и cite.py
+# уверенно выдавал устаревшую дату юристу.
 TITLE_RE = re.compile(
     r'"([^"]+?)"\s+от\s+(\d{2}\.\d{2}\.\d{4})\s+N\s+([^\s<(]+)'
-    r'(?:\s*\(ред\.\s+от\s+(\d{2}\.\d{2}\.\d{4})\))?', re.S)
+    r'(?:\s*\(ред\.\s+от\s+(\d{2}\.\d{2}\.\d{4})[^)]*\))?', re.S)
+
+# На странице оглавления некоторых кодексов (ГК) даты редакции нет вовсе — там
+# стоит «(последняя редакция)». Она есть на странице ЛЮБОЙ статьи, оттуда и берем.
+REDACTION_ONLY_RE = re.compile(r'\(ред\.\s+от\s+(\d{2}\.\d{2}\.\d{4})[^)]*\)')
 
 
 def parse_doc_meta(html_text: str) -> dict:
@@ -253,8 +296,19 @@ def parse_doc_meta(html_text: str) -> dict:
     m = TITLE_RE.search(html_text)
     if not m:
         return {}
+    red = m.group(4)
     return {"title": m.group(1), "law_date": m.group(2), "law_num": m.group(3),
-            "redaction_date": m.group(4) or m.group(2)}
+            "redaction_date": red or "?"}
+
+
+def redaction_from_article(doc_id: int, art_hash: str) -> str | None:
+    """Фолбэк: дата редакции со страницы конкретной статьи."""
+    url = f"https://www.consultant.ru/document/cons_doc_LAW_{doc_id}/{art_hash}/"
+    raw = http_get(url, f"red_{doc_id}_{art_hash[:12]}.html")
+    if raw is None:
+        return None
+    m = REDACTION_ONLY_RE.search(raw.decode("utf-8", errors="ignore"))
+    return m.group(1) if m else None
 
 
 TOC_ENTRY_TMPL = r'href="/document/cons_doc_LAW_{doc_id}/([a-f0-9]+)/">([^<]+)</a>'
@@ -283,6 +337,15 @@ def fetch_toc(doc_id: int) -> tuple[dict, list[tuple[str, str, str]]]:
             entries.append(("article", am.group(1), am.group(2), href_hash))
         else:
             entries.append(("heading", None, label, href_hash))
+
+    # ГК на оглавлении пишет «(последняя редакция)» без даты. Молча подставлять
+    # дату принятия закона нельзя — это и породило «ред. 29.12.1995» у СК.
+    if meta.get("redaction_date") in (None, "?", meta.get("law_date")):
+        first_art = next((h for kind, _, _, h in entries if kind == "article"), None)
+        if first_art:
+            red = redaction_from_article(doc_id, first_art)
+            if red:
+                meta["redaction_date"] = red
     return meta, entries
 
 
@@ -319,6 +382,21 @@ def build_kodeks_body(doc_id: int, entries: list, doc_id_str: str) -> tuple[str,
             lines.append(f"\n### Статья {num}. {title}\n\n_не удалось получить со "
                           f"страницы {url} — требует ручной проверки._\n")
             continue
+        # Страница адресуется хешем: сдвинулся хеш в оглавлении или ответил кеш
+        # чужой страницы — и под заголовком «Статья N» ляжет чужой текст, а прогон
+        # доложит «чист». Сверяем номер статьи с <h1> самой страницы.
+        page = raw.decode("utf-8", errors="ignore")
+        h1 = re.search(r"<h1>(.*?)</h1>", page, re.S)
+        if h1:
+            # Номер без «хвостовой» точки: «Статья 1.» дает 1, «Статья 333.19.» — 333.19
+            got = re.search(r"Стать[яи]\s+(\d+(?:\.\d+)*(?:-\d+)?)",
+                            re.sub(r"<[^>]+>", " ", h1.group(1)))
+            if got and got.group(1) != num.rstrip("."):
+                fail += 1
+                lines.append(f"\n### Статья {num}. {title}\n\n_НЕ СОВПАЛ НОМЕР: страница "
+                             f"{url} озаглавлена «Статья {got.group(1)}». Текст не внесен, "
+                             f"требует ручной проверки._\n")
+                continue
         body = extract_article_text(raw)
         if not body:
             fail += 1
@@ -333,7 +411,8 @@ def build_kodeks_body(doc_id: int, entries: list, doc_id_str: str) -> tuple[str,
 def frontmatter(meta: dict, body_sha: str, extra: dict | None = None) -> str:
     fm = {
         "источник": meta.get("source_url", ""),
-        "закон": f"от {meta.get('law_date','?')} N {meta.get('law_num','?')}" if meta.get("law_date") else "",
+        "закон": (f"от {meta['law_date']} N {meta.get('law_num') or '?'}"
+                   if meta.get("law_date") else ""),
         "дата_редакции": meta.get("redaction_date", "?"),
         "дата_выгрузки": TODAY,
         "sha256": body_sha,
@@ -457,8 +536,18 @@ def cmd_build_one(entry: dict, mode: str) -> None:
         archive_old(path)
         print(f"  редакция изменилась — старая версия в {ARCHIVE_DIR}/{TODAY.replace('.', '-')}/")
     os.makedirs(KODEKSY_DIR, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(content)
+    # Частичный сбой не должен затирать рабочий корпус: одна сетевая ошибка при
+    # прежней прямой записи оставляла на диске обрезанный кодекс вместо целого.
+    if total_fail:
+        # Условие «только поверх существующего файла» оставляло дыру: ПЕРВЫЙ --init
+        # при обрывах писал дырявый корпус и возвращал 0. Дырявый корпус хуже пустого:
+        # cite.py отдаст «статья не найдена» там, где она есть.
+        where = "рабочий файл НЕ трогаем" if old_sha is not None else "файл НЕ создаем"
+        print(f"  ! {slug}: {total_fail} статей не скачалось — {where}. "
+              f"Повторить: --update --doc {slug}")
+        FAILURES.append(f"{slug}: {total_fail} статей не скачалось, файл не обновлен")
+        return
+    write_atomic(path, content)
     status = "новый" if old_sha is None else ("обновлен" if changed else "без изменений")
     print(f"  -> {path} ({status}, статей ok={total_ok} fail={total_fail})")
     append_log(f"кодекс {slug}: {status}, статей ok={total_ok} fail={total_fail}, "
@@ -631,6 +720,14 @@ def build_plenum_markdown(href: str, label: str) -> tuple[str, str] | None:
         # отдельным проходом — без этого cite.py не найдет пункт по дате.
         # Не нашли и так — честное "?", а не выдуманная дата.
         src = h1_title or label or ""
+        # Постановления Пленума ВС РСФСР 1990-1991 гг. заголовок пишут иначе, и дата
+        # у них есть только в slug (…-ot-23041991). Слепить ДДММГГГГ из slug — это
+        # чтение источника, а не догадка; без этого файл уходил в корпус с датой «?»
+        # и cite.py не находил его по дате никогда.
+        if "от" not in src or not re.search(r"\d{2}\.\d{2}\.\d{4}", src):
+            sm = re.search(r"-ot-(\d{2})(\d{2})(\d{4})", href)
+            if sm:
+                src = f"{src} от {sm.group(1)}.{sm.group(2)}.{sm.group(3)}"
         dm = re.search(r"от\s+(\d{2}\.\d{2}\.\d{4})", src)
         nm = re.search(r"N\s*(\S+)", src)
         redm = re.search(r"\(ред\.\s+от\s+(\d{2}\.\d{2}\.\d{4})\)", src)
@@ -677,8 +774,7 @@ def cmd_plenums(pages: int, single_slug: str | None) -> None:
             continue
         if old_sha is not None:
             archive_old(path)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(content)
+        write_atomic(path, content)
         ok += 1
         print(f"  -> {path}")
     print(f"=== Пленумы: ok={ok} fail={fail} ===")
@@ -734,6 +830,17 @@ def demo() -> None:
     print("demo: извлечение статьи, метаданные, фильтр главы, разбивка пунктов — корректны")
 
 
+def report_failures() -> int:
+    """Ненулевой код при любом изъяне: launchd и вызывающий скрипт обязаны это видеть."""
+    if not FAILURES:
+        print("\nпрогон чист: провалов и неизвестных редакций нет")
+        return 0
+    print(f"\n⚠ изъянов: {len(FAILURES)}")
+    for f in FAILURES:
+        print(f"   • {f}")
+    return 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -742,12 +849,26 @@ def main() -> int:
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--doc", metavar="SLUG", help="ограничиться одним кодексом")
     ap.add_argument("--plenums", action="store_true")
-    ap.add_argument("--plenum-pages", type=int, default=3)
+    # Было 3 при каталоге в 15+ страниц: глубина обхода зависела от того, вспомнит ли
+    # оператор про флаг. Цикл и так останавливается на первой странице без новых
+    # ссылок, поэтому потолок ставим заведомо выше каталога, а не «на глазок».
+    ap.add_argument("--plenum-pages", type=int, default=40,
+                    help="потолок страниц каталога; обход и так встает на первой пустой")
     ap.add_argument("--plenum-slug", metavar="SLUG")
     ap.add_argument("--demo", action="store_true")
+    ap.add_argument("--refresh", action="store_true",
+                    help="игнорировать HTTP-кеш (обязательно для честного --check)")
+    ap.add_argument("--selftest", action="store_true", help="то же, что --demo")
     a = ap.parse_args()
 
-    if a.demo:
+    global CACHE_MAX_AGE
+    if a.refresh:
+        CACHE_MAX_AGE = 0
+    if a.check and not a.refresh:
+        print("note: --check идет по кешу не старше суток; для сверки с источником "
+              "добавьте --refresh", file=sys.stderr)
+
+    if a.demo or a.selftest:
         demo()
         return 0
 
@@ -755,7 +876,7 @@ def main() -> int:
 
     if a.plenums or a.plenum_slug:
         cmd_plenums(a.plenum_pages, a.plenum_slug)
-        return 0
+        return report_failures()
 
     targets = [e for e in KODEKSY if not a.doc or e["slug"] == a.doc]
     if a.doc and not targets:
@@ -764,9 +885,32 @@ def main() -> int:
         return 1
 
     if a.check:
+        unknown = 0
         for e in targets:
-            print(cmd_check_one(e))
-        return 0
+            line = cmd_check_one(e)
+            print(line)
+            if "?" in line:
+                unknown += 1
+                FAILURES.append(f"{e['slug']}: дата редакции неизвестна — сверка невозможна")
+            else:
+                # Дата старше трех лет у живого кодекса — почти всегда дата принятия,
+                # подставленная разбором вслепую (sk-rf: 29.12.1995 — день принятия СК).
+                m = re.search(r"ред\. (\d{2})\.(\d{2})\.(\d{4})", line)
+                if m:
+                    from datetime import date as _d
+                    try:
+                        got = _d(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+                        if (_d.today() - got).days > 3 * 365:
+                            FAILURES.append(
+                                f"{e['slug']}: редакция от {m.group(0)[5:]} старше трех лет — "
+                                "вероятно, разобрана дата принятия, а не редакции")
+                    except ValueError:
+                        pass
+        missing = [e["slug"] for e in targets
+                   if not os.path.exists(os.path.join(KODEKSY_DIR, e["slug"] + ".md"))]
+        for slug in missing:
+            FAILURES.append(f"{slug}: файла нет на диске, кодекс не выгружен")
+        return report_failures()
 
     mode = "update" if a.update else "init"
     if not (a.init or a.update):
@@ -774,7 +918,7 @@ def main() -> int:
         return 1
     for e in targets:
         cmd_build_one(e, mode)
-    return 0
+    return report_failures()
 
 
 if __name__ == "__main__":

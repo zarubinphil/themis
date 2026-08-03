@@ -37,8 +37,16 @@ RATES = {
     "haiku": [1.0, 5.0, 1.25, 0.10],
 }
 
-# Цели трека по knowledge/optimization-plan.md §6 (верхняя граница коридора), всего токенов.
-TRACK_BUDGET = {"MICRO": 140_000, "FAST": 250_000, "FULL": 800_000}
+# Пороги трека — ИЗМЕРЕННЫЕ базовые линии по 26 сессиям проекта на 03.08.2026,
+# всего токенов (input + output + cache-write + cache-read).
+#
+# ВНИМАНИЕ: цифры вида «FAST ~400k, FULL ~1,5M» из optimization-plan.md — ДРУГОЙ ПРИБОР.
+# Они складывали поле `usage`, которое субагент возвращает в основной поток, а оно
+# содержит только последнюю итерацию агента и вовсе не видит основной поток. Реальный
+# трафик тех же прогонов: FULL-сессии 125-190 млн, FAST 22-33 млн, короткая работа 1-10 млн.
+# Расхождение ×40-100. Порог здесь = сегодняшняя норма: превышение значит «хуже обычного»,
+# а не «хуже идеала». Цель плана (минус 60-80%) — половина этих чисел и ниже.
+TRACK_BUDGET = {"MICRO": 10_000_000, "FAST": 40_000_000, "FULL": 200_000_000}
 
 # Шаг протокола по типу агента. Порядок ключей = порядок в отчёте.
 STEP_BY_AGENT = {
@@ -196,7 +204,13 @@ def collect(session_path: str) -> dict:
         agents[s["agent_id"]] = {"type": s["agent_type"], "desc": s["description"],
                                  "parent": None, "models": defaultdict(blank)}
 
-    for path in sorted(glob.glob(os.path.join(session_dir, "subagents", "agent-*.jsonl"))):
+    # Агенты лежат на двух глубинах: обычный субагент — в subagents/, агент воркфлоу —
+    # в subagents/workflows/<run>/. Без второго шаблона прибор слеп ровно к тому,
+    # что дороже всего: рою из десятка агентов.
+    transcripts = (glob.glob(os.path.join(session_dir, "subagents", "agent-*.jsonl"))
+                   + glob.glob(os.path.join(session_dir, "subagents", "workflows", "*",
+                                            "agent-*.jsonl")))
+    for path in sorted(transcripts):
         agent_id = os.path.basename(path)[len("agent-"):-len(".jsonl")]
         models, child_spawns, own = scan_file(path)
         rec = agents.setdefault(agent_id, {"type": "?", "desc": "", "parent": None,
@@ -357,15 +371,24 @@ def selftest() -> int:
         with open(os.path.join(sub_dir, "agent-bbb.jsonl"), "w", encoding="utf-8") as fh:
             fh.write(assistant("claude-haiku-4-5", 1000, 2000, 3000, 4000, "req_d"))
 
+        # агент воркфлоу лежит глубже — subagents/workflows/<run>/
+        wf_dir = os.path.join(sub_dir, "workflows", "wf_test")
+        os.makedirs(wf_dir)
+        with open(os.path.join(wf_dir, "agent-ccc.jsonl"), "w", encoding="utf-8") as fh:
+            fh.write(line(type="user", isSidechain=True, attributionAgent="doc-reviewer",
+                          message={"content": [{"type": "text", "text": "проверь документ"}]}))
+            fh.write(assistant("claude-opus-5", 7, 8, 9, 10, "req_e"))
+
         rep = collect(main)
         checks = [
             ("дубли по requestId схлопнуты", rep["by_step"]["основной поток"]["in"] == 11),
             ("synthetic отброшен", rep["by_step"]["основной поток"]["out"] == 22),
             ("субагент учтён один раз", rep["by_step"]["1 карта"]["in"] == 1100),
             ("вложенный агент свёрнут в шаг родителя", rep["by_step"]["1 карта"]["cr"] == 4400),
-            ("шагов ровно два", set(rep["by_step"]) == {"основной поток", "1 карта"}),
+            ("шагов ровно три", set(rep["by_step"]) == {"основной поток", "1 карта", "5 проверка"}),
             ("модели разнесены", set(rep["by_model"]) == {"opus", "sonnet", "haiku"}),
-            ("итог сходится", tokens(rep["total"]) == 110 + 11000),
+            ("агент воркфлоу учтён", rep["by_step"].get("5 проверка", {}).get("out") == 8),
+            ("итог сходится", tokens(rep["total"]) == 110 + 11000 + 34),
             ("деньги посчитаны", rep["money"] > 0),
             ("шаг по описанию", step_of("general-purpose", "Ареопаг раунд 2") == "3 позиция"),
             ("неизвестный агент → прочее", step_of("general-purpose", "чинить сборку") == "прочее"),

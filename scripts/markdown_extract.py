@@ -217,6 +217,43 @@ def render_scan(path, outdir, dpi=DPI, maxp=MAXP):
 # Вызов оставался в коде мёртвым и печатал предупреждение в каждый прогон.
 
 
+
+def purge_case(case_dir, dry=True):
+    """Убрать из кеша всё, что извлечено из материалов ЭТОГО дела.
+
+    Кеш адресуется по содержимому, поэтому принадлежность считается точно: берём
+    sha каждого файла дела и удаляем ровно его артефакты. Зачем: в кеше лежат
+    `<sha>.requisites.json` — ИНН, паспорта, счета доверителей. Они живут вне
+    `cases/`, а значит вне архивации дела, вне закрытия и вне срока хранения.
+    368 МБ таких артефактов нашлись на 03.08.2026.
+    """
+    import shutil
+    shas = set()
+    for root, dirs, files in os.walk(case_dir):
+        dirs[:] = [d for d in dirs if d not in ("_baselines", "__pycache__")]
+        for f in files:
+            path = os.path.join(root, f)
+            if ext_of(path) in OFFICE | IMAGE | {"pdf", "doc", "xls", "ppt"}:
+                try:
+                    shas.add(sha_of(path))
+                except OSError:
+                    continue
+    victims, size = [], 0
+    for name in sorted(os.listdir(CACHE)):
+        sha = name.split(".")[0].split("_")[0]
+        if sha in shas:
+            full = os.path.join(CACHE, name)
+            victims.append(full)
+            size += sum(os.path.getsize(os.path.join(r, x))
+                        for r, _, fs in os.walk(full) for x in fs) if os.path.isdir(full) \
+                else os.path.getsize(full)
+    for v in victims:
+        if dry:
+            continue
+        shutil.rmtree(v) if os.path.isdir(v) else os.remove(v)
+    return {"files": len(shas), "artifacts": len(victims), "bytes": size, "dry": dry}
+
+
 def ocr_pages(outdir, png_names):
     """Apple Vision OCR по PNG → сайдкары page_NNN.txt рядом. Параллельно, $0.
     Возвращает (готово, пустых)."""
@@ -379,6 +416,10 @@ def write_manifest(odir, total_pages, text_pages=(), maxp=MAXP):
         "ocr_empty": [p for p, v in st.items() if v == "ocr_empty"],
     }
     man["complete"] = not man["missing"] and not man["beyond_maxp"]
+    # Пустая страница может быть чистым разделителем, а может быть утраченной
+    # рукописью — машине это неразличимо, поэтому не «неполно», а «нужен глаз».
+    # Блокирует приёмку в quality_gate.py --ocr, а не молча проходит.
+    man["needs_human"] = bool(man["ocr_empty"])
     with open(os.path.join(odir, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump(man, f, ensure_ascii=False, indent=1)
     return man
@@ -397,6 +438,9 @@ _REQ = {
     # 20-значный счет с кодом валюты 810 (рубли) на позициях 6-8
     "account": re.compile(r"\b\d{5}810\d{12}\b"),
     "bik": re.compile(r"БИК[:\s]*?(0\d{8})\b", re.IGNORECASE),
+    # КПП идет рядом с ИНН организации; контрольной суммы нет, но формат ловит
+    # потерю знака при OCR — а неверный КПП в реквизитах суда это отдельная правка
+    "kpp": re.compile(r"КПП[:\s№-]{0,4}(\d{4}[0-9A-ZА-Я]{2}\d{3})\b", re.IGNORECASE),
     "isin": re.compile(r"\b[A-Z]{2}[A-Z0-9]{9}\d\b"),
     "date": re.compile(r"\b\d{2}\.\d{2}\.\d{4}\b"),
     # копейки через , или . обязаны войти в захват: раньше «265 000,00 ₽»
@@ -436,14 +480,27 @@ def extract_requisites(body):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("file")
+    ap.add_argument("file", nargs="?")
     ap.add_argument("--inline", action="store_true", help="весь Markdown в stdout")
     ap.add_argument("--grep", default=None, help="печатать только строки по регэкспу (+ № строки)")
     ap.add_argument("--json-meta", action="store_true")
     ap.add_argument("--render-dir", default=None)
     ap.add_argument("--preview", type=int, default=800)
+    ap.add_argument("--purge-case", metavar="DIR",
+                    help="удалить из кеша артефакты материалов этого дела (по умолчанию — показ)")
+    ap.add_argument("--apply", action="store_true", help="с --purge-case: удалить на самом деле")
     ap.add_argument("--max-chars", type=int, default=200000)
     a = ap.parse_args()
+
+    if a.purge_case:
+        r = purge_case(a.purge_case, dry=not a.apply)
+        mb = r["bytes"] / 1024 / 1024
+        verb = "будет удалено" if r["dry"] else "удалено"
+        print(f"материалов дела: {r['files']}; артефактов кеша {verb}: "
+              f"{r['artifacts']} ({mb:.1f} МБ)")
+        if r["dry"]:
+            print("это показ. Удалить на самом деле: добавить --apply")
+        sys.exit(0)
 
     p = os.path.abspath(a.file)
     if not os.path.isfile(p):

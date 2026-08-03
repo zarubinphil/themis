@@ -40,7 +40,7 @@ def _has_marker(path, pattern: str) -> bool:
 #   «## FAST-СИНТЕЗ ФЕМИДЫ»  — FAST: синтез Фемидой без совета
 # До 02.08.2026 у FAST не было своего маркера: скилл разрешал писать practice.md
 # без маркера, а хук за это давал exit 2 — агент шёл искать обход и находил его
-# (дела doveritel-8, doveritel-9, doveritel-2 попали в 03_drafts мимо конвейера).
+# (три дела попали в 03_drafts мимо конвейера).
 # Запрет без легального пути производит обходы, а не дисциплину.
 PRACTICE_MARKER = r"## (СОВЕТ ЗАВЕРШ|FAST-СИНТЕЗ ФЕМИДЫ)"
 
@@ -94,6 +94,20 @@ def _workflow_gate(p: str) -> None:
 BIG_READ_BYTES = 48 * 1024
 
 
+def _sudact_allowed() -> bool:
+    """Решение по sudact живёт в одном месте — practice_search.py. Хук его читает,
+    а не дублирует: два гейта с собственными копиями решения неизбежно разъедутся."""
+    env = os.environ.get("THEMIS_SUDACT_SEARCH")
+    if env is not None:
+        return env == "1"
+    try:
+        src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "practice_search.py"), encoding="utf-8").read()
+    except OSError:
+        return False           # источник решения не прочитан — не пускаем
+    return bool(re.search(r"^SUDACT_SEARCH_ALLOWED\s*=\s*True", src, re.M))
+
+
 def main() -> None:
     raw = sys.stdin.read()
     if not raw.strip():
@@ -111,10 +125,17 @@ def main() -> None:
         )
 
     tool = d.get("tool_name", "")
-    ti = d.get("tool_input") or {}
+    ti = d.get("tool_input")
+    if not isinstance(ti, dict):
+        ti = {}
+
+    # Значения из tool_input приходят от харнесса и не обязаны быть строками.
+    # Сторож, падающий на None или числе, перестаёт сторожить молча.
+    def as_str(v) -> str:
+        return v if isinstance(v, str) else ""
 
     if tool == "Read":
-        p = ti.get("file_path", "")
+        p = as_str(ti.get("file_path"))
         if re.search(r"\.(docx|xlsx|pptx|pdf|doc|xls)$", p, re.I):
             block(
                 "БЛОК (LOCAL-FIRST): бинарные документы читать только через "
@@ -140,7 +161,7 @@ def main() -> None:
                 )
 
     if tool in ("Write", "Edit", "NotebookEdit"):
-        p = ti.get("file_path", "") or ti.get("notebook_path", "")
+        p = as_str(ti.get("file_path")) or as_str(ti.get("notebook_path"))
         if "/00_intake/" in p:
             block(
                 "БЛОК: 00_intake/ неприкосновенен — исходники клиента "
@@ -149,7 +170,7 @@ def main() -> None:
         _workflow_gate(p)
 
     if tool == "Bash":
-        cmd = ti.get("command", "")
+        cmd = as_str(ti.get("command"))
         protected = re.search(r"00_intake|_baselines", cmd)
         # rm только в командной позиции (начало строки / после ; & | $( `) —
         # иначе ложные срабатывания на прозу со словом «rm» в heredoc
@@ -161,10 +182,13 @@ def main() -> None:
             )
         # Затирание не менее разрушительно, чем удаление: `> файл`, cp, mv, tee,
         # truncate, dd, sed -i переписывают первичку и базу «ДО» так же безвозвратно.
+        # Каждая альтернатива — только в КОМАНДНОЙ позиции. Без этого «sed -i»
+        # и «cp» внутри текста (сообщение коммита, heredoc, комментарий) блокировали
+        # безобидную команду: сторож ловил собственное описание правил.
         write_cmd = re.search(
-            r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(?:cp|mv|tee|truncate|dd|install)\s"
-            r"|>\s*\S*(?:00_intake|_baselines)"
-            r"|sed\s+(?:-\w+\s+)*-i\b",
+            r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?"
+            r"(?:cp|mv|tee|truncate|dd|install|sed\s+(?:-\w+\s+)*-i)\b"
+            r"|>\s*\S*(?:00_intake|_baselines)",
             cmd, re.M)
         if write_cmd and protected:
             block(
@@ -173,9 +197,20 @@ def main() -> None:
                 "можно только новым именем через Write, менять существующее нельзя."
             )
 
+        # Гейт по robots.txt источника живет в practice_search.py, но обойти его
+        # можно голым curl. Закрываем и этот путь: запрет источника не должен
+        # зависеть от того, каким инструментом к нему пошли.
+        if re.search(r"doc_ajax", cmd) and not _sudact_allowed():
+            block(
+                "БЛОК: /doc_ajax/ запрещен robots.txt sudact.ru для всех роботов. "
+                "Известный акт открывается по обычному URL: "
+                "python3 scripts/practice_search.py --doc URL. Поиск включает владелец "
+                "(THEMIS_SUDACT_SEARCH=1) с записью в knowledge/allowed-services.md."
+            )
+
     # Работа вне корня проекта — прецедент 25.07.2026: сессия шла мимо cases/,
     # правила проекта не грузились, счёт 49,5 млн токенов. Предупреждаем, не блокируем.
-    cwd = d.get("cwd") or ""
+    cwd = as_str(d.get("cwd"))
     if cwd and "themis" not in cwd:
         print(f"⚠ Фемида: cwd={cwd} вне корня проекта — правила проекта могут не действовать.",
               file=sys.stderr)
@@ -223,10 +258,19 @@ def selftest() -> int:
          run({"tool_name": "Bash", "tool_input": {"command": "echo hi > d/_baselines/f.docx"}}), 2),
         ("sed -i по 00_intake блокируется",
          run({"tool_name": "Bash", "tool_input": {"command": "sed -i '' s/a/b/ 00_intake/f.md"}}), 2),
+        ("те же слова в прозе команду не блокируют",
+         run({"tool_name": "Bash", "tool_input": {"command":
+              "git commit -m 'гейт на cp/mv/tee/sed -i по 00_intake и _baselines'"}}), 0),
         ("обычный cp пропускается",
          run({"tool_name": "Bash", "tool_input": {"command": "cp a.md b.md"}}), 0),
         ("слово rm в прозе пропускается",
          run({"tool_name": "Bash", "tool_input": {"command": "echo 'norm 00_intake'"}}), 0),
+        # Гейт следует решению владельца, а не собственной копии: включён поиск —
+        # пропускаем, выключен — блокируем. Проверяем именно согласованность.
+        ("гейт совпадает с решением в practice_search.py",
+         run({"tool_name": "Bash",
+              "tool_input": {"command": "curl https://sudact.ru/regular/doc_ajax/?q=1"}}),
+         0 if _sudact_allowed() else 2),
     ]
     bad = [name for name, got, want in cases if got != want]
     for name, got, want in cases:
