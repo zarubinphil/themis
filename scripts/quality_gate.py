@@ -192,15 +192,34 @@ def check_ocr(ocr_dir: str) -> list[str]:
     return problems
 
 
+# Практика — НЕ источник фактов дела. Числа из чужих судебных актов (суммы
+# взысканий, номера дел, годы) лежат в practice.md и раньше входили в общий
+# котёл сверки: число, выдуманное для доверителя, «подтверждалось» совпадением с
+# числом из чужого дела и замечание молча снималось. Факты дела дают только
+# материалы и карта; позиция — производная от них и тоже допустима.
+PRACTICE_SOURCES = ("practice.md", "hunter_classic.md", "hunter_skeptic.md",
+                    "hunter_tactical.md")
+
+
+def is_practice_source(path: str) -> bool:
+    return os.path.basename(path) in PRACTICE_SOURCES
+
+
 def check_numbers(draft: str, sources: list[str], min_digits: int = 4) -> list[str]:
-    """Числа черновика обязаны быть в источниках: сумма из воздуха — цена документа."""
+    """Числа черновика обязаны быть в источниках ФАКТОВ дела, а не в практике."""
     from crosscheck_numbers import numbers_of
     text = open(draft, encoding="utf-8", errors="ignore").read()
     in_draft = numbers_of(text, min_digits)
+    facts = [s for s in sources if not is_practice_source(s)]
+    practice = [s for s in sources if is_practice_source(s)]
     in_src = None
-    for s in sources:
+    for s in facts:
         n = numbers_of(open(s, encoding="utf-8", errors="ignore").read(), min_digits)
         in_src = n if in_src is None else (in_src | n)
+    in_practice = None
+    for s in practice:
+        n = numbers_of(open(s, encoding="utf-8", errors="ignore").read(), min_digits)
+        in_practice = n if in_practice is None else (in_practice | n)
     orphan = in_draft - (in_src or type(in_draft)())
     # Даты и годы выкидываем: «01.02» и «2026» из даты документа законно отсутствуют
     # в карте дела, а в отчёте они забивают собой реальные суммы. Даты — зона Кони.
@@ -209,10 +228,22 @@ def check_numbers(draft: str, sources: list[str], min_digits: int = 4) -> list[s
         del orphan[tok]
     if not orphan:
         return []
-    items = ", ".join(sorted(orphan)[:25])
-    return [f"в черновике {sum(orphan.values())} чисел, которых нет ни в одном источнике: "
-            f"{items}{'…' if len(orphan) > 25 else ''} — подтвердить материалами дела "
-            f"или убрать (проверялось от {min_digits} значащих цифр)"]
+    out = []
+    # Число, которого нет в фактах дела, но есть в практике, — отдельный и более
+    # опасный случай: оно выглядит подтверждённым, хотя пришло из ЧУЖОГО дела.
+    from_practice = sorted(t for t in orphan if in_practice and t in in_practice)
+    if from_practice:
+        out.append(f"{len(from_practice)} чисел взяты из практики, а не из фактов дела: "
+                   f"{', '.join(from_practice[:15])}"
+                   f"{'…' if len(from_practice) > 15 else ''} — в чужом судебном акте "
+                   "такая сумма есть, у доверителя её может не быть; сверить с материалами")
+    rest = {t: c for t, c in orphan.items() if t not in set(from_practice)}
+    if rest:
+        items = ", ".join(sorted(rest)[:25])
+        out.append(f"в черновике {sum(rest.values())} чисел, которых нет ни в одном источнике: "
+                   f"{items}{'…' if len(rest) > 25 else ''} — подтвердить материалами дела "
+                   f"или убрать (проверялось от {min_digits} значащих цифр)")
+    return out
 
 
 def check_requisites(path: str, bik: str | None) -> list[str]:
@@ -354,6 +385,20 @@ def selftest() -> int:
     open(src, "w", encoding="utf-8").write("Договор 4412. Сумма 1250000 руб.")
     clean = check_numbers(draft, [src])
 
+    # Фикстуры для разделения источников: одно и то же число 7654321 лежит либо
+    # в карте дела (факт доверителя), либо только в practice.md (чужое дело).
+    draft_pr = os.path.join(tmp, "draft_pr.md")
+    map_pr = os.path.join(tmp, "knowledge-map.md")
+    practice_pr = os.path.join(tmp, "practice.md")
+    draft_fact = os.path.join(tmp, "draft_fact.md")
+    map_fact = os.path.join(tmp, "map_fact", "knowledge-map.md")
+    os.makedirs(os.path.dirname(map_fact), exist_ok=True)
+    open(draft_pr, "w", encoding="utf-8").write("Взыскать 7654321 руб.")
+    open(map_pr, "w", encoding="utf-8").write("Договор 4412 без сумм.")
+    open(practice_pr, "w", encoding="utf-8").write("По делу А65-1/2020 взыскано 7654321 руб.")
+    open(draft_fact, "w", encoding="utf-8").write("Взыскать 7654321 руб.")
+    open(map_fact, "w", encoding="utf-8").write("Долг доверителя 7654321 руб.")
+
     open(draft, "w", encoding="utf-8").write("Взыскать 9999999 руб. по договору 4412.")
     dirty = check_numbers(draft, [src])
 
@@ -368,6 +413,19 @@ def selftest() -> int:
     checks = [
         ("совпавшие числа замечаний не дают", clean == []),
         ("число из воздуха ловится", len(dirty) == 1 and "9999999" in dirty[0]),
+        # Практика — не источник фактов дела. Число из ЧУЖОГО судебного акта
+        # раньше входило в общий котёл и легализовало выдуманную сумму доверителя.
+        ("число, найденное только в практике, замечание не снимает",
+         any("из практики" in p for p in check_numbers(draft_pr, [map_pr, practice_pr]))),
+        ("число, найденное в карте дела, замечаний не даёт",
+         check_numbers(draft_fact, [map_fact, practice_pr]) == []),
+        ("practice.md опознан как практика", is_practice_source("/x/01_context/practice.md")),
+        ("hunter-файл опознан как практика",
+         is_practice_source("/x/01_context/hunter_classic.md")),
+        ("карта дела практикой не считается",
+         not is_practice_source("/x/01_context/knowledge-map.md")),
+        ("позиция практикой не считается",
+         not is_practice_source("/x/01_context/positions.md")),
         ("валидный ИНН проходит", check_requisites(req_ok, None) == []),
         ("битый ИНН ловится", len(check_requisites(req_bad, None)) == 1),
         ("пустая OCR-папка — замечание", len(check_ocr(empty_ocr)) == 1),

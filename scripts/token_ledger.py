@@ -90,16 +90,35 @@ STEP_ORDER = ["основной поток", "0 интейк", "1 карта", "
               "4 составление", "5 проверка", "6 архив", "система", "прочее"]
 
 
+# Неизвестная модель. Прежде любая строка без opus|sonnet|haiku молча считалась
+# по верхней ставке и складывалась в строку «opus» — в логах проекта такой была
+# claude-fable-5 (1356 вызовов, 73,1 млн токенов, 5,0 % свода). Прибор при этом
+# показывал «opus», и понять, что это другая модель, было нельзя ни по одной цифре.
+# Оценка по верхней ставке остаётся (занижать расход опаснее, чем завышать), но
+# СТРОКА В РАЗРЕЗЕ теперь своя, с явной пометкой, что цена — верхняя оценка.
+UNKNOWN_PREFIX = "неизвестная: "
+
+
 def model_key(model: str) -> str:
+    """Ключ разреза. Неизвестная модель — собственная строка, а не «opus»."""
     ml = (model or "").lower()
     for k in RATES:
         if k in ml:
             return k
-    return "opus"  # неизвестная модель считается по верхней ставке, чтобы не занизить
+    return UNKNOWN_PREFIX + (model or "без имени")
+
+
+def rate_key(model_or_key: str) -> str:
+    """Ключ тарифа. Неизвестное считаем по верхней ставке — чтобы не занизить."""
+    ml = (model_or_key or "").lower()
+    for k in RATES:
+        if k in ml:
+            return k
+    return "opus"
 
 
 def cost(u: dict, model: str) -> float:
-    r = RATES[model_key(model)]
+    r = RATES[rate_key(model)]
     return (u["in"] * r[0] + u["out"] * r[1] + u["cw"] * r[2] + u["cr"] * r[3]) / 1e6
 
 
@@ -324,20 +343,41 @@ def render(rep: dict, track: str | None) -> int:
               "по этому прогону занижены. Пополнить STEP_BY_DESCRIPTION под реальные "
               "описания вызовов либо передавать шаг явно при запуске агента.")
 
-    print(f"\n{'модель':<12}{'токенов':>14}{'доля':>8}")
+    print(f"\n{'модель':<34}{'токенов':>14}{'доля':>8}")
     for name, u in sorted(rep["by_model"].items(), key=lambda kv: -tokens(kv[1])):
-        print(f"{name:<12}{tokens(u):>14,}{tokens(u)/total_tok*100:>7.1f}%")
+        print(f"{name:<34}{tokens(u):>14,}{tokens(u)/total_tok*100:>7.1f}%")
+    unknown = {k: v for k, v in rep["by_model"].items() if k.startswith(UNKNOWN_PREFIX)}
+    if unknown:
+        n = sum(tokens(v) for v in unknown.values())
+        print(f"⚠ модель вне тарифной таблицы: {n:,} токенов ({n/total_tok*100:.1f}%). "
+              "Цена по ним — ВЕРХНЯЯ оценка (ставка opus). Внести тариф в RATES.")
 
     if not track:
         return 0
+    text, rc = track_verdict(track, tokens(t))
+    print(text)
+    return rc
+
+
+def track_verdict(track: str, spent: int) -> tuple[str, int]:
+    """Вердикт по цели трека: (что печатать, код возврата).
+
+    Пустая сессия — это «прибор не увидел данных», а не «уложились в бюджет».
+    Прежде --track FULL на сессии без единой записи usage печатал
+    «в пределах (0% цели)» и возвращал 0: молчание читалось как успех, и бюджетный
+    чекпойнт протокола проходил на пустом месте.
+    """
     limit = TRACK_BUDGET[track]
-    spent = tokens(t)
-    print(f"\nтрек {track}: цель {limit:,}, факт {spent:,} — ", end="")
+    if spent <= 0:
+        return (f"\nтрек {track}: цель {limit:,} — ДАННЫХ НЕТ. ".replace(",", " ")
+                + "Ни одной записи расхода в разобранных файлах: не тот файл сессии, "
+                  "не тот проект либо логи ещё не сброшены на диск. "
+                  "Это НЕ «уложились».", 2)
+    head = f"\nтрек {track}: цель {limit:,}, факт {spent:,} — ".replace(",", " ")
     if spent > limit:
-        print(f"ПЕРЕРАСХОД ×{spent/limit:.2f}. СТОП: доложить владельцу до продолжения.")
-        return 3
-    print(f"в пределах ({spent/limit*100:.0f}% цели).")
-    return 0
+        return (head + f"ПЕРЕРАСХОД ×{spent/limit:.2f}. "
+                       "СТОП: доложить владельцу до продолжения.", 3)
+    return head + f"в пределах ({spent/limit*100:.0f}% цели).", 0
 
 
 def project_dir(cwd: str) -> str:
@@ -372,6 +412,9 @@ def selftest() -> int:
             for _ in range(3):
                 fh.write(assistant("claude-opus-5", 10, 20, 30, 40, "req_a"))
             fh.write(assistant("claude-opus-5", 1, 2, 3, 4, "req_b"))
+            # Модель вне тарифной таблицы. В логах проекта это claude-fable-5:
+            # 1356 вызовов, 73,1 млн токенов — и все они молча считались «opus».
+            fh.write(assistant("claude-fable-5", 5, 6, 7, 8, "req_f"))
             # синтетическая строка не считается вовсе
             fh.write(assistant("<synthetic>", 999, 999, 999, 999, "req_syn"))
             fh.write(line(type="user", message={"content": [
@@ -400,14 +443,28 @@ def selftest() -> int:
 
         rep = collect(main)
         checks = [
-            ("дубли по requestId схлопнуты", rep["by_step"]["основной поток"]["in"] == 11),
-            ("synthetic отброшен", rep["by_step"]["основной поток"]["out"] == 22),
+            ("дубли по requestId схлопнуты", rep["by_step"]["основной поток"]["in"] == 16),
+            ("synthetic отброшен", rep["by_step"]["основной поток"]["out"] == 28),
             ("субагент учтён один раз", rep["by_step"]["1 карта"]["in"] == 1100),
             ("вложенный агент свёрнут в шаг родителя", rep["by_step"]["1 карта"]["cr"] == 4400),
             ("шагов ровно три", set(rep["by_step"]) == {"основной поток", "1 карта", "5 проверка"}),
-            ("модели разнесены", set(rep["by_model"]) == {"opus", "sonnet", "haiku"}),
+            ("модели разнесены",
+             {"opus", "sonnet", "haiku"} <= set(rep["by_model"])),
+            # Неизвестная модель обязана быть ВИДНА, а не растворяться в opus.
+            ("неизвестная модель — отдельная строка разреза",
+             any(k.startswith(UNKNOWN_PREFIX) and "fable" in k for k in rep["by_model"])),
+            ("неизвестная модель не приписана opus",
+             rep["by_model"]["opus"]["in"] == 18),
+            ("токены неизвестной модели не потеряны",
+             sum(v["in"] for k, v in rep["by_model"].items()
+                 if k.startswith(UNKNOWN_PREFIX)) == 5),
+            # Цена по ней — верхняя оценка: занизить расход опаснее, чем завысить.
+            ("неизвестная модель считается по верхней ставке",
+             rate_key("claude-fable-5") == "opus"),
+            ("известная модель тариф не меняет",
+             rate_key("claude-sonnet-5") == "sonnet" and rate_key("claude-haiku-4-5") == "haiku"),
             ("агент воркфлоу учтён", rep["by_step"].get("5 проверка", {}).get("out") == 8),
-            ("итог сходится", tokens(rep["total"]) == 110 + 11000 + 34),
+            ("итог сходится", tokens(rep["total"]) == 110 + 11000 + 34 + 26),
             ("деньги посчитаны", rep["money"] > 0),
             ("шаг по описанию", step_of("general-purpose", "Ареопаг раунд 2") == "3 позиция"),
             ("неизвестный агент → прочее", step_of("general-purpose", "чинить сборку") == "прочее"),
@@ -416,6 +473,21 @@ def selftest() -> int:
         ("разбор инбокса — интейк",
          step_of("general-purpose", "обработай файлы из inbox") == "0 интейк"),
         ("порог тревоги по «прочее» задан", OTHER_ALERT_SHARE > 0),
+        # Бюджетный чекпойнт: пустая сессия НЕ «уложились».
+        ("пустая сессия даёт «данных нет», а не «в пределах»",
+         track_verdict("FULL", 0)[1] == 2 and "ДАННЫХ НЕТ" in track_verdict("FULL", 0)[0]),
+        ("расход в пределах цели даёт 0",
+         track_verdict("FULL", TRACK_BUDGET["FULL"] // 2)[1] == 0),
+        ("перерасход даёт 3", track_verdict("FAST", TRACK_BUDGET["FAST"] * 2)[1] == 3),
+        ("граница цели — ещё не перерасход",
+         track_verdict("FAST", TRACK_BUDGET["FAST"])[1] == 0),
+        # Тариф: opus дороже sonnet и haiku на одном и том же объёме.
+        ("тариф модели не подменяется",
+         cost({"in": 1_000_000, "out": 0, "cw": 0, "cr": 0}, "claude-opus-5") == 15.0
+         and cost({"in": 1_000_000, "out": 0, "cw": 0, "cr": 0}, "claude-sonnet-5") == 3.0
+         and cost({"in": 1_000_000, "out": 0, "cw": 0, "cr": 0}, "claude-haiku-4-5") == 1.0),
+        ("неизвестная модель считается по верхней ставке в деньгах",
+         cost({"in": 1_000_000, "out": 0, "cw": 0, "cr": 0}, "claude-fable-5") == 15.0),
         ]
         bad = [name for name, ok in checks if not ok]
         for name, ok in checks:
