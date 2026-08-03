@@ -64,18 +64,31 @@ def contact_sheet(body, name, rows=8):
 
 if __name__ == "__main__":
     isk = cut("tall_obrazets_isk_ru.docx.png", {
-        "isk_head": (0.00, 0.13),
-        "isk_summary": (0.125, 0.225),
-        "isk_toc_num": (0.205, 0.335),
-        "isk_timeline": (0.305, 0.405),
-        "isk_parties": (0.495, 0.625),
-        "isk_calc": (0.618, 0.725),
+        "isk_head": (0.000, 0.125),
+        "isk_summary": (0.126, 0.190),
+        "isk_toc_num": (0.188, 0.295),
+        "isk_timeline": (0.340, 0.412),
+        "isk_parties": (0.5585, 0.609),
+        "isk_calc": (0.610, 0.714),
     })
     contact_sheet(isk, "isk")
 
     dog = cut("tall_obrazets_dogovor.docx.png", {
-        "dog_layer": (0.00, 0.165),
-        "dog_oblig": (0.150, 0.335),
-        "dog_attention": (0.715, 0.895),
+        "dog_layer": (0.010, 0.140),
+        "dog_oblig": (0.209, 0.336),
+        "dog_attention": (0.805, 0.905),
     })
     contact_sheet(dog, "dog")
+
+    # Образец «до» — сплошной текст без единого приема. Нужен слайду «до и после»
+    # и слайду про расчет прозой вместо таблицы. Раньше эти три картинки
+    # резались руками и в скрипт не попали: сборка деки падала на пустом месте.
+    do = cut("tall_obrazets_isk_do.docx.png", {
+        "do_page1": (0.000, 0.310),
+        "do_calc": (0.640, 0.712),
+    })
+    contact_sheet(do, "do")
+
+    cut("tall_obrazets_isk_ru.docx.png", {
+        "after_page1": (0.000, 0.243),
+    })

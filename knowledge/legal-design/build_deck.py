@@ -406,6 +406,52 @@ def s_docx_limits(prs):
     return s
 
 
+def s_fonts(prs):
+    """Утвержденный шрифтовой набор. Слайд показывает гарнитуры собой же."""
+    s = slide(prs)
+    kicker(s, "Гарнитуры")
+    text(s, "Четыре шрифта, пятого нет", M, Inches(1.15), CW, Inches(0.6), 30,
+         DISPLAY, INK, bold=True)
+    text(s, "Утверждены 03.08.2026. Свободная лицензия SIL OFL, кириллица полная. "
+            "Times New Roman выведен как проприетарный.",
+         M, Inches(1.72), Inches(8.6), Inches(0.5), 13, BODY, GREY, spacing=1.25)
+
+    rows = [
+        ("Playfair Display", "Playfair Display",
+         "Титул: суд · заголовок · подзаголовок. Вразрядку 3 pt",
+         "И С К О В О Е   З А Я В Л Е Н И Е"),
+        ("PT Serif", "PT Serif",
+         "Тело · цитаты · просительная · приложения · подпись",
+         "Ответчик получил 6 000 000 рублей."),
+        ("Golos Text", "Golos Text",
+         "Заголовки разделов · ПРОШУ · ПРИЛОЖЕНИЯ · шапки таблиц",
+         "III. Расчет требований"),
+        ("PT Mono", "PT Mono",
+         "Числовые колонки — разряды встают столбиком",
+         "6 000 000   18,00   121   358 032"),
+    ]
+    y = Inches(2.35)
+    for name, face, role, sample in rows:
+        rule(s, M, y - Inches(0.13), CW)
+        text(s, name, M, y, Inches(2.5), Inches(0.4), 18, face, INK, bold=True)
+        text(s, role, M + Inches(2.6), y + Inches(0.03), Inches(4.4),
+             Inches(0.6), 11.5, BODY, GREY, spacing=1.2)
+        text(s, sample, M + Inches(7.2), y, CW - Inches(7.2), Inches(0.6),
+             14, face, DARK, spacing=1.15)
+        y += Inches(0.86)
+
+    rule(s, M, y - Inches(0.14), CW)
+    text(s, "ГОСТ Р 7.0.97-2016, пункт 3.3: «необходимо использовать свободно "
+            "распространяемые бесплатные шрифты». Times New Roman — "
+            "проприетарная гарнитура Monotype.",
+         M, y + Inches(0.04), Inches(7.4), Inches(0.8), 13, BODY, INK, spacing=1.3)
+    text(s, "Подмены у адресата не будет:\nподаем PDF либо бумагу,\n"
+            "гарнитуры внедряются в файл.",
+         M + Inches(7.7), y + Inches(0.04), CW - Inches(7.7), Inches(0.8),
+         12.5, BODY, GREY, spacing=1.3)
+    return s
+
+
 def s_checklist(prs):
     s = slide(prs)
     kicker(s, "Чек-лист по умолчанию")
@@ -435,7 +481,7 @@ def s_checklist(prs):
         "Таймлайн сроков от трех этапов",
         "Обременительные условия отдельным выделенным разделом",
         "Чеклист приемки при поэтапном исполнении",
-        "Гарнитура общедоступная — Arial, Verdana, Georgia",
+        "Гарнитуры те же: PT Serif, Golos Text, PT Mono",
         "Термин вводится один раз, дальше единообразно",
         "Есть линейная печатная версия, если пойдет в суд",
     ]
@@ -561,6 +607,7 @@ def build():
     s_patterns(prs)
     s_ru_limits(prs)
     s_docx_limits(prs)
+    s_fonts(prs)
     s_checklist(prs)
     s_white(prs)
     s_final(prs)

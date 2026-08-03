@@ -76,7 +76,7 @@ SECTIONS = {
 # Справочники читаются из самой формы поиска и кешируются, чтобы принимать
 # человеческие слова: --instance апелляция --area Татарстан.
 def _load_dicts(section="regular"):
-    """Справочники инстанций и регионов из формы поиска. Кеш на 30 суток."""
+    """Справочники инстанций и регионов из формы поиска. Кеш — общий TTL (14 суток)."""
     key = f"dicts:{section}"
     cached = _cache_get(key)
     if cached:
@@ -322,6 +322,14 @@ def _search_page(text, section="regular", limit=20, max_wait=25.0, **kw):
     if content is None:
         return [], "ПОИСК НЕ ЗАВЕРШЕН (таймаут либо источник недоступен)"
     results = parse_results(content, section, limit)
+    # Пустой разбор при ненулевом счётчике — это сбой опроса или смена вёрстки,
+    # а не «ничего не найдено». Закешировав его на две недели, скрипт потом честно
+    # отвечает «Ничего не найдено. Найдено 183 документа» — противоречие само себе.
+    if not cacheable(results, total):
+        print(f"ВНИМАНИЕ: источник заявляет «{total}», а разобрано 0 карточек — "
+              "вероятна смена вёрстки или сбой опроса. Результат НЕ кеширую.",
+              file=sys.stderr)
+        return results, total
     _cache_put(ckey, {"results": results, "total": total})
     return results, total
 
@@ -397,6 +405,17 @@ def get_document(url):
 CAP_HINT = 500  # практический предел одной выдачи sudact
 
 
+def cacheable(results, total_str) -> bool:
+    """Класть ли выдачу в кеш на две недели.
+
+    Пустой разбор при ненулевом счётчике — сбой опроса или смена вёрстки, а не
+    «ничего не найдено». В кеше такое отравляет ответ на 14 суток: скрипт потом
+    выдаёт «Ничего не найдено. Найдено 183 документа». Найдено 14 таких записей
+    в живом кеше 03.08.2026.
+    """
+    return bool(results) or not _total_num(total_str)
+
+
 def _total_num(total_str):
     digits = re.sub(r"[^\d]", "", total_str or "")
     return int(digits) if digits else 0
@@ -404,53 +423,68 @@ def _total_num(total_str):
 
 def partitioned_search(text, section="regular", per_region=30, max_regions=0,
                        cascade=True, log=lambda s: None, **kw):
-    """Обойти выдачу по регионам. Возвращает (акты, отчёт о покрытии)."""
+    """Обойти выдачу по регионам. Возвращает (акты, отчёт об охвате).
+
+    Охват меряется ДОЛЕЙ, а не флагом «упёрлись». Прежняя формула требовала, чтобы
+    источник отдал не меньше per_region карточек — а sudact на живом запросе отдаёт
+    десяток-полтора при счётчике в тысячи. Условие не выполнялось никогда, «непокрытые
+    части» оставались пустыми, и механизм честности сообщал о полном покрытии там, где
+    реально видел проценты. Замер 03.08.2026: счётчик 3 743, отдано 24.
+    """
     regions = sorted((_load_dicts(section).get("area") or {}))
     if not regions:
         return [], {"error": f"у раздела «{section}» нет справочника регионов"}
     scanned = regions[:max_regions] if max_regions else regions
 
-    # Пользователь мог сам задать инстанцию — тогда дробить по ней бессмысленно
-    # и вдобавок падало на дубле аргумента.
+    # Пользователь сам задал инстанцию — дробить по ней бессмысленно (и падало на
+    # дубле аргумента).
     user_instance = kw.pop("instance", "") or ""
     if user_instance:
         cascade = False
-    seen, out, capped, done = set(), [], [], 0
-    for i, reg in enumerate(scanned, 1):
-        got, total = search(text, section=section, limit=per_region, area=reg,
-                            instance=user_instance, **kw)
+
+    seen, out, thin, done = set(), [], [], 0
+    declared_total = 0
+
+    def take(label, **flt):
+        """Один запрос: добрать новые акты, вернуть (сколько заявлено, сколько взято)."""
+        got, total = search(text, section=section, limit=per_region, **flt, **kw)
         fresh = [r for r in got if r["url"] not in seen]
         seen.update(r["url"] for r in fresh)
-        out += fresh
-        done += 1
-        hit_cap = _total_num(total) > len(got) >= min(per_region, CAP_HINT)
-        log(f"  [{i}/{len(scanned)}] {reg}: в счётчике {total or '—'}, взято {len(fresh)}"
-            + (" — УПЁРЛОСЬ В ПРЕДЕЛ" if hit_cap else ""))
-        if not (hit_cap and cascade):
-            if hit_cap:
-                capped.append(reg)
-            continue
-        # регион всё равно упёрся — дробим его по инстанциям
-        split_ok = False
-        for inst in ("первая инстанция", "апелляция", "кассация"):
-            sub, sub_total = search(text, section=section, limit=per_region,
-                                    area=reg, instance=inst, **kw)
-            fresh = [r for r in sub if r["url"] not in seen]
-            seen.update(r["url"] for r in fresh)
-            out += fresh
-            if _total_num(sub_total) > len(sub) >= min(per_region, CAP_HINT):
-                capped.append(f"{reg} / {inst}")
-            else:
-                split_ok = True
-        if not split_ok:
-            capped.append(reg)
+        out.extend(fresh)
+        return _total_num(total), len(got)
 
+    for i, reg in enumerate(scanned, 1):
+        total, taken = take(reg, area=reg, instance=user_instance)
+        declared_total += total
+        done += 1
+        share = (taken / total * 100) if total else 100.0
+        log(f"  [{i}/{len(scanned)}] {reg}: заявлено {total or '—'}, взято {taken}"
+            + (f" ({share:.1f}%)" if total else ""))
+        if total <= taken or not cascade:
+            if total > taken:
+                thin.append({"часть": reg, "заявлено": total, "взято": taken})
+            continue
+        # Регион отдал меньше, чем заявил — дробим по инстанциям: каждая часть
+        # корпуса имеет собственный предел выдачи, и суммарно достаём больше.
+        sub_total = sub_taken = 0
+        for inst in ("первая инстанция", "апелляция", "кассация"):
+            t, k = take(f"{reg}/{inst}", area=reg, instance=inst)
+            sub_total += t
+            sub_taken += k
+        best_taken = max(taken, sub_taken)
+        if total > best_taken:
+            thin.append({"часть": reg, "заявлено": total, "взято": best_taken})
+
+    reachable = len(out)
+    coverage = (reachable / declared_total * 100) if declared_total else 100.0
     report = {
-        "актов": len(out),
+        "актов": reachable,
+        "заявлено источником": declared_total,
+        "охват процентов": round(coverage, 2),
         "регионов обойдено": done,
         "регионов всего": len(regions),
         "регионов пропущено лимитом обхода": len(regions) - done,
-        "непокрытые части": capped,
+        "части с неполным охватом": thin,
     }
     return out, report
 
@@ -536,10 +570,10 @@ def selftest():
         def part_fake(text, section="regular", limit=20, max_wait=25.0, **kw):
             seen_calls.append((kw.get("area"), kw.get("instance")))
             if kw.get("area") == "москва" and not kw.get("instance"):
-                # регион упёрся в предел выдачи
-                return ([{"url": f"m{i}"} for i in range(limit)], "Найдено 9 000 документов")
+                # источник заявляет тысячи, отдаёт горсть — так ведёт себя живой sudact
+                return ([{"url": f"m{i}"} for i in range(12)], "Найдено 9 000 документов")
             if kw.get("area") == "москва":
-                # после дробления по инстанциям предел уже не достигается
+                # дробление по инстанциям добирает, но всё равно не всё
                 return ([{"url": f"m-{kw.get('instance')}-{i}"} for i in range(4)],
                         "Найдено 4 документа")
             return ([{"url": f"t{i}"} for i in range(3)], "Найдено 3 документа")
@@ -554,21 +588,40 @@ def selftest():
 
         globals()["search"] = always_capped
         _, hard = partitioned_search("иск", per_region=20)
+        # та же проверка без каскада — инстанция задана пользователем
+        _, hard_nc = partitioned_search("иск", per_region=20, instance="апелляция")
+
+        def _no_cascade_reports():
+            return any(t["часть"] == "москва" for t in hard_nc["части с неполным охватом"])
 
         def _unsolvable_reported():
-            return "москва" in hard["непокрытые части"]
+            return any(t["часть"] == "москва" for t in hard["части с неполным охватом"])
 
         globals()["search"], _load_dicts = real_search, real_dicts2
 
         checks += [
             ("обойдены все регионы справочника", rep["регионов обойдено"] == 2),
-            ("упёршийся регион раздроблен по инстанциям",
+            ("регион с недобором раздроблен по инстанциям",
              sum(1 for c in seen_calls if c[0] == "москва" and c[1]) == 3),
-            ("не упёршийся регион не дробится",
+            ("регион без недобора не дробится",
              sum(1 for c in seen_calls if c[0] == "татарстан") == 1),
             ("дубли между партициями сняты", len(acts) == len({a["url"] for a in acts})),
-            ("дробление сняло предел — непокрытого нет", rep["непокрытые части"] == []),
-            ("нерешаемый предел не замалчивается", _unsolvable_reported()),
+            # ГЛАВНОЕ: живой источник отдаёт горсть при счётчике в тысячи, и прежняя
+            # формула объявляла это полным покрытием. Недобор обязан попадать в отчёт.
+            ("недобор при большом счётчике назван",
+             any(t["часть"] == "москва" for t in rep["части с неполным охватом"])),
+            ("охват посчитан долей, а не флагом",
+             0 < rep["охват процентов"] < 100),
+            ("полный охват не объявляется при недоборе", rep["охват процентов"] != 100),
+            ("нерешаемый недобор не замалчивается", _unsolvable_reported()),
+            # Ветка без каскада: пользователь сам задал инстанцию. Раньше она была
+            # не покрыта тестом, и мутация в ней проходила незамеченной.
+            ("недобор попадает в отчёт и без каскада", _no_cascade_reports()),
+            ("пустая выдача при ненулевом счётчике не кешируется",
+             not cacheable([], "Найдено 183 документа")),
+            ("пустая выдача при нулевом счётчике кешируется",
+             cacheable([], "Ничего не найдено")),
+            ("непустая выдача кешируется", cacheable([{"url": "x"}], "Найдено 5 документов")),
         ]
     finally:
         _load_dicts, _search_page, search_allowed = real_dicts, real_page, real_allowed
@@ -633,13 +686,18 @@ def main():
         if args.json:
             print(json.dumps({"results": acts, "coverage": rep}, ensure_ascii=False, indent=2))
             return 0
-        print(f"\nСобрано актов: {rep.get('актов', 0)} "
-              f"(регионов {rep.get('регионов обойдено')} из {rep.get('регионов всего')})")
-        if rep.get("непокрытые части"):
-            print(f"⚠ НЕ ПОКРЫТО ПОЛНОСТЬЮ: {len(rep['непокрытые части'])} частей — "
-                  f"{', '.join(rep['непокрытые части'][:6])}"
-                  f"{'…' if len(rep['непокрытые части']) > 6 else ''}. "
-                  f"Выборка по ним неполная, сузить запрос или добавить фильтры.")
+        print(f"\nСобрано актов: {rep.get('актов', 0)} из заявленных источником "
+              f"{rep.get('заявлено источником', 0):,}".replace(",", " ")
+              + f" — охват {rep.get('охват процентов', 0)}% "
+                f"(регионов {rep.get('регионов обойдено')} из {rep.get('регионов всего')})")
+        thin = rep.get("части с неполным охватом") or []
+        if thin:
+            worst = sorted(thin, key=lambda t: -t["заявлено"])[:5]
+            print(f"⚠ ОХВАТ НЕПОЛОН в {len(thin)} частях. Крупнейшие: "
+                  + "; ".join(f"{t['часть']} — взято {t['взято']} из {t['заявлено']}"
+                              for t in worst))
+            print("  Это НЕ вся практика по вопросу. Сузить запрос (статья, даты, суд) "
+                  "либо честно писать в hunter-файле, какая доля выдачи просмотрена.")
         for i, r in enumerate(acts[:args.limit], 1):
             print(f"\n{i}. {r['title']}\n   {r['court']}\n   {r['url']}")
         return 0

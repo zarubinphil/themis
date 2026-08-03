@@ -7,8 +7,9 @@
 
 Проверяет по .claude/skills/doc-drafter/DOCX_FORMATTING.md:
   поля 20/30/30/15 мм (L3 и кассация ВС — левое 35); шрифты PT Serif (тело),
-  Golos Text (заголовки и шапка), PT Mono (числовые колонки) — набор утвержден
-  владельцем 03.08.2026, иные гарнитуры недопустимы; кегли 14/13/12/11,
+  Golos Text (заголовки), PT Mono (числовые колонки), Playfair Display
+  (титульный блок вразрядку) — набор утвержден владельцем 03.08.2026,
+  иные гарнитуры недопустимы; кегли 14/13/12/11,
   межстрочный 1.15, абзацный отступ 1.25 см, тело JUSTIFY, отсутствие курсива
   и подчеркивания, нумерация страниц — БЕЗУСЛОВНО в каждом документе.
 Плюс: текст .docx совпадает с .md, приложения пронумерованы сквозно и каждое
@@ -28,12 +29,17 @@ import sys
 
 SPEC_MARGINS_MM = {"top": 20, "bottom": 30, "left": 30, "right": 15}
 SPEC_MARGINS_MM_L3 = {**SPEC_MARGINS_MM, "left": 35}
+# Договор и прочие несудебные документы: нижнее поле 30 мм не нужно — зона
+# штампа экспедиции суда там ни при чем, а поля симметричнее и читать удобнее.
+# Шрифты, кегли, интервалы и нумерация страниц остаются общими для всего.
+SPEC_MARGINS_MM_DOGOVOR = {"top": 20, "bottom": 20, "left": 25, "right": 20}
 # Утверждено владельцем 03.08.2026. Три свободные гарнитуры (SIL OFL) с родной
 # кириллицей; заодно закрывают ГОСТ Р 7.0.97-2016 п. 3.3 о бесплатных шрифтах.
 SPEC_FONT_BODY = "PT Serif"
 SPEC_FONT_DISPLAY = "Golos Text"
 SPEC_FONT_MONO = "PT Mono"
-SPEC_FONTS = {SPEC_FONT_BODY, SPEC_FONT_DISPLAY, SPEC_FONT_MONO}
+SPEC_FONT_TITLE = "Playfair Display"
+SPEC_FONTS = {SPEC_FONT_BODY, SPEC_FONT_DISPLAY, SPEC_FONT_MONO, SPEC_FONT_TITLE}
 SPEC_FONT = SPEC_FONT_BODY  # обратная совместимость
 SPEC_SIZES = {11.0, 12.0, 13.0, 14.0}
 SPEC_LINE_SPACING = 1.15
@@ -41,20 +47,22 @@ SPEC_INDENT_CM = 1.25
 TOLERANCE_MM = 1.0
 
 
-def check_docx(path: str, l3: bool = False) -> list[str]:
+def check_docx(path: str, l3: bool = False, dogovor: bool = False) -> list[str]:
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     problems: list[str] = []
     doc = Document(path)
     sec = doc.sections[0]
-    spec = SPEC_MARGINS_MM_L3 if l3 else SPEC_MARGINS_MM
+    spec = (SPEC_MARGINS_MM_DOGOVOR if dogovor
+            else SPEC_MARGINS_MM_L3 if l3 else SPEC_MARGINS_MM)
     got = {"top": sec.top_margin.mm, "bottom": sec.bottom_margin.mm,
            "left": sec.left_margin.mm, "right": sec.right_margin.mm}
     for side, want in spec.items():
         if abs(got[side] - want) > TOLERANCE_MM:
             problems.append(f"поле {side}: {got[side]:.0f} мм вместо {want} мм"
-                            + (" (L3/кассация ВС)" if l3 and side == "left" else ""))
+                            + (" (L3/кассация ВС)" if l3 and side == "left" else "")
+                            + (" (профиль договора)" if dogovor else ""))
 
     fonts, sizes, italic, underline = set(), set(), 0, 0
     for p in doc.paragraphs:
@@ -79,6 +87,20 @@ def check_docx(path: str, l3: bool = False) -> list[str]:
         problems.append(f"курсив в {italic} фрагментах — спецификация запрещает")
     if underline:
         problems.append(f"подчеркивание в {underline} фрагментах — спецификация запрещает")
+
+    # Гиперссылка — отдельная ловушка: ее runs лежат внутри w:hyperlink, в
+    # p.runs не попадают, и проверка выше их не видит. Рендерер оформляет их
+    # стилем Hyperlink — синим с подчеркиванием — даже когда прямое
+    # форматирование говорит обратное. Стандарт запрещает и то и другое
+    # (DOCX_FORMATTING.md §3), поэтому ловим сам факт наличия гиперссылки
+    # с видимым текстом (пропущено сторожем до 03.08.2026).
+    doc_xml = doc.element.xml
+    if "<w:hyperlink" in doc_xml:
+        n = doc_xml.count("<w:hyperlink")
+        problems.append(f"гиперссылок в тексте: {n} — рендерер красит их синим с "
+                        "подчеркиванием поверх прямого форматирования; стандарт "
+                        "запрещает цвет и подчеркивание. Навигацию давать обычным "
+                        "текстом (add_static_toc с linked=False)")
 
     body = [p for p in doc.paragraphs if len(p.text.strip()) > 80]
     not_justified = [p for p in body
@@ -162,8 +184,60 @@ def check_text(text: str, where: str) -> list[str]:
     return problems
 
 
-def check_attachments(text: str) -> list[str]:
-    """Приложения: сквозная нумерация и упоминание каждого в тексте документа."""
+def docx_appendices(docx_path: str):
+    """Раздел приложений из .docx: (текст до раздела, [(номер, заголовок)]).
+
+    С 03.08.2026 номера пунктов ведет сам Word (w:numPr), и в тексте абзаца
+    их больше НЕТ. Разбор по тексту здесь слеп — номера берутся из порядка
+    нумерованных абзацев после заголовка «ПРИЛОЖЕНИЯ». Вернет пустой список,
+    если нумерация ручная: тогда вызывающий разбирает текст, как раньше.
+    """
+    from docx import Document
+    from docx.oxml.ns import qn
+
+    doc = Document(docx_path)
+    paragraphs = list(doc.paragraphs)
+    head = None
+    for i, par in enumerate(paragraphs):
+        if re.fullmatch(r"\s*(?:Приложени[ея]|ПРИЛОЖЕНИ[ЕЯ])\s*:?\s*", par.text or ""):
+            head = i
+            break
+    if head is None:
+        return "\n".join(x.text for x in paragraphs), []
+
+    items = []
+    for par in paragraphs[head + 1:]:
+        if par._p.find(qn("w:pPr")) is not None and \
+                par._p.find(qn("w:pPr")).find(qn("w:numPr")) is not None:
+            if par.text.strip():
+                items.append((len(items) + 1, par.text.strip()))
+    body = "\n".join(x.text for x in paragraphs[:head])
+    return body, items
+
+
+def check_attachments(text: str, items=None) -> list[str]:
+    """Приложения: сквозная нумерация и упоминание каждого в тексте документа.
+
+    items — готовый список (номер, заголовок) из автонумерации Word. Передан —
+    нумерация заведомо сквозная (ее ведет программа), проверяется только
+    упоминание в тексте.
+    """
+    if items:
+        problems = []
+        nums = [n for n, _ in items]
+        PROCEDURAL = ("пошлин", "егрюл", "егрип", "направлени", "вручени",
+                      "почтов", "квитанц", "опись", "доверенност", "диплом",
+                      "ордер", "выписка из един")
+        procedural_nums = {n for n, title in items
+                           if any(k in title.lower() for k in PROCEDURAL)}
+        mentioned = set(int(x) for x in re.findall(
+            r"(?:приложени[ияюе]\s*№?\s*(\d{1,2}))", text, re.I))
+        missing = [n for n in nums
+                   if n not in mentioned and n not in procedural_nums]
+        if missing and mentioned:
+            problems.append(f"приложения {missing} не упомянуты в тексте документа")
+        return problems
+
     m = re.search(r"(?im)^\s*(?:Приложени[ея]|ПРИЛОЖЕНИ[ЕЯ])\s*:?\s*$", text)
     if not m:
         return []
@@ -302,6 +376,8 @@ def main() -> int:
     ap.add_argument("docx", nargs="?", help="путь к .docx")
     ap.add_argument("--md", help="парный .md для сверки")
     ap.add_argument("--l3", action="store_true", help="L3 или кассация ВС: левое поле 35 мм")
+    ap.add_argument("--dogovor", action="store_true",
+                    help="договор и прочее несудебное: поля 20/20/25/20 мм")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
@@ -316,10 +392,14 @@ def main() -> int:
         print(f"нет файла {a.docx}", file=sys.stderr)
         return 2
 
-    problems = check_docx(a.docx, a.l3)
-    from docx import Document
-    text = "\n".join(p.text for p in Document(a.docx).paragraphs)
-    problems += check_attachments(text)
+    problems = check_docx(a.docx, a.l3, a.dogovor)
+    body, items = docx_appendices(a.docx)
+    if items:
+        problems += check_attachments(body, items)
+    else:
+        from docx import Document
+        text = "\n".join(p.text for p in Document(a.docx).paragraphs)
+        problems += check_attachments(text)
     if a.md:
         problems += check_md_vs_docx(a.md, a.docx)
 

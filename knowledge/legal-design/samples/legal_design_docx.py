@@ -186,19 +186,16 @@ def add_static_toc(b, entries, title="СОДЕРЖАНИЕ", linked=False):
 
 
 def add_numbered_body(b, num, parts, indent_cm=1.1):
-    """Абзац со сквозным номером — точная ссылка «пункт 14» вместо «стр. 6».
+    """Совместимость: номер теперь ведет Word, аргумент num не используется.
 
-    parts: str либо list[(text, bold)] — как в DocBuilder.add_body.
+    До 03.08.2026 номер писался текстом, и удаление пункта заставляло
+    перенумеровывать остальные руками. Теперь нумерация настоящая
+    (DocBuilder.add_numbered_body), а сигнатура сохранена, чтобы не трогать
+    вызовы в сборщиках образцов.
     """
-    p = b.doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    p.paragraph_format.left_indent = Cm(indent_cm)
-    p.paragraph_format.first_line_indent = Cm(-indent_cm)
-    p.paragraph_format.space_after = Pt(6)
-    _set_font(p.add_run(f"{num}. "), 12, bold=True)
-    for text, bold in _norm_parts(parts):
-        _set_font(p.add_run(text), 12, bold=bold)
-    return p
+    return b.add_numbered_body(parts)
+
+
 
 
 def add_summary_box(b, lines, fill="F2F2F2"):

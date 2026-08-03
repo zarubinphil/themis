@@ -59,3 +59,6 @@ knowledge/legal-design/_council/_mapping_SECRET.md
 
 # сырые логи прогонов агентов — не публиковать
 knowledge/legal-design/_raw/
+
+# промежуточные рендеры образцов (6 МБ, пересобираются render_qa.py)
+knowledge/legal-design/samples/_qa/

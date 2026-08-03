@@ -38,8 +38,55 @@ from docx.oxml import OxmlElement
 FONT_BODY = "PT Serif"
 FONT_DISPLAY = "Golos Text"
 FONT_MONO = "PT Mono"
+# Титульный блок: высококонтрастная антиква вразрядку — прием оформления
+# указов Президента РФ. Решение владельца 03.08.2026, вариант «Б»: гарнитура
+# работает ТОЛЬКО на наименовании суда, заголовке и подзаголовке документа.
+# Заголовки разделов остаются на Golos Text, тело на PT Serif: Playfair —
+# дисплейная антиква, в мелких кеглях она тонкая и разваливается.
+FONT_TITLE = "Playfair Display"
+
+# Разрядка титульного блока в пунктах (межбуквенный интервал).
+TRACK_TITLE_PT = 3.0
+TRACK_SUBTITLE_PT = 0.6
 
 FONT = FONT_BODY  # обратная совместимость
+
+# Порядок дочерних элементов w:rPr по ECMA-376. Элемент, вставленный не на
+# свое место, схема считает недопустимым, и рендерер молча его игнорирует.
+_RPR_ORDER = [
+    "rStyle", "rFonts", "b", "bCs", "i", "iCs", "caps", "smallCaps", "strike",
+    "dstrike", "outline", "shadow", "emboss", "imprint", "noProof",
+    "snapToGrid", "vanish", "webHidden", "color", "spacing", "w", "kern",
+    "position", "sz", "szCs", "highlight", "u", "effect", "bdr", "shd",
+    "fitText", "vertAlign", "rtl", "cs", "em", "lang", "eastAsianLayout",
+    "specVanish", "oMath",
+]
+
+
+def _rpr_insert(rPr, element):
+    tag = element.tag.split("}")[-1]
+    idx = _RPR_ORDER.index(tag)
+    for child in rPr:
+        child_tag = child.tag.split("}")[-1]
+        if child_tag not in _RPR_ORDER or _RPR_ORDER.index(child_tag) > idx:
+            child.addprevious(element)
+            return
+    rPr.append(element)
+
+
+def _track(paragraph, pt):
+    """Разрядка абзаца: w:spacing в rPr, в двадцатых долях пункта.
+
+    QuickLook на macOS этот атрибут НЕ отрисовывает — проверять только в Word
+    либо по XML (замер 03.08.2026). Отсутствие разрядки в предпросмотре
+    ничего не доказывает.
+    """
+    for run in paragraph.runs:
+        rPr = run._r.get_or_add_rPr()
+        sp = OxmlElement("w:spacing")
+        sp.set(qn("w:val"), str(int(round(pt * 20))))
+        _rpr_insert(rPr, sp)
+    return paragraph
 
 
 def _set_font(run, size_pt, bold=False, family=None):
@@ -82,6 +129,153 @@ def _set_docdefaults_line_spacing(doc):
     spacing.set(qn("w:lineRule"), "auto")
 
 
+
+# --------------------------------------------------------- нумерация Word
+# Номера пунктов до 03.08.2026 писались обычным текстом («1. », «2. »), и
+# Word их не пересчитывал: удалил пункт 3 — остальные приходилось
+# перенумеровывать руками. Здесь заводится НАСТОЯЩАЯ нумерация Word
+# (w:numPr + собственные определения в numbering.xml). Удаление, вставка и
+# перестановка пункта пересчитываются программой сами.
+#
+# Каждый список получает свое определение: просительная часть, приложения и
+# сквозные абзацы не должны делить счетчик.
+# Идентификаторы продолжают нумерацию шаблона (10, 11, 12...), а НЕ уходят в
+# отдельный диапазон: при numId вида 901 номера не отрисовываются вовсе —
+# просмотрщик, судя по поведению, держит определения массивом по индексу
+# (замер 03.08.2026: id 901 — пусто, id 10 — работает).
+_NUM_BASE_ID = 0
+
+
+def _numbering_root(doc):
+    return doc.part.numbering_part.element
+
+
+def _find_decimal_abstract(root):
+    """Шаблонное определение десятичного списка «1.» — донор для клонирования."""
+    for abstract in root.findall(qn("w:abstractNum")):
+        if abstract.get(qn("w:abstractNumId")) in (None, ""):
+            continue
+        lvl = abstract.find(qn("w:lvl"))
+        if lvl is None:
+            continue
+        fmt = lvl.find(qn("w:numFmt"))
+        text = lvl.find(qn("w:lvlText"))
+        style = lvl.find(qn("w:pStyle"))
+        if (fmt is not None and fmt.get(qn("w:val")) == "decimal"
+                and text is not None and text.get(qn("w:val")) == "%1."
+                and style is None):          # без привязки к стилю
+            return abstract
+    return None
+
+
+def _new_num_def(doc, *, left_tw=709, hanging_tw=340, start=1, font=None):
+    """Независимое определение нумерации; вернуть numId.
+
+    Определение НЕ собирается с нуля, а клонируется из шаблонного: собранное
+    вручную рендерер молча игнорирует, потому что в нем нет w:nsid и w:tmpl
+    (замер 03.08.2026 — номера не появлялись ни в одном просмотрщике, хотя
+    XML был схемно верным). Клон наследует рабочую обвязку, меняются только
+    отступы, шрифт и начальный номер.
+
+    left_tw / hanging_tw — твипы (1 см = 567). Номер садится на left - hanging,
+    текст на left.
+    """
+    from copy import deepcopy
+
+    root = _numbering_root(doc)
+    donor = _find_decimal_abstract(root)
+    if donor is None:
+        raise RuntimeError(
+            "в numbering.xml нет десятичного определения-донора: шаблон "
+            "python-docx изменился, автонумерация собрана не будет")
+
+    used_abstract = [int(a.get(qn("w:abstractNumId")))
+                     for a in root.findall(qn("w:abstractNum"))
+                     if (a.get(qn("w:abstractNumId")) or "").isdigit()]
+    used_num = [int(n.get(qn("w:numId"))) for n in root.findall(qn("w:num"))]
+    new_id = max(used_abstract + used_num + [_NUM_BASE_ID]) + 1
+
+    abstract = deepcopy(donor)
+    abstract.set(qn("w:abstractNumId"), str(new_id))
+    nsid = abstract.find(qn("w:nsid"))
+    if nsid is not None:                      # уникальный, иначе Word склеит списки
+        nsid.set(qn("w:val"), f"{0x7A000000 + new_id:08X}")
+    tmpl = abstract.find(qn("w:tmpl"))
+    if tmpl is not None:
+        tmpl.set(qn("w:val"), f"{0x5B000000 + new_id:08X}")
+
+    lvl = abstract.find(qn("w:lvl"))
+    start_el = lvl.find(qn("w:start"))
+    if start_el is not None:
+        start_el.set(qn("w:val"), str(start))
+
+    pPr = lvl.find(qn("w:pPr"))
+    if pPr is None:
+        pPr = OxmlElement("w:pPr")
+        lvl.append(pPr)
+    tabs = pPr.find(qn("w:tabs"))
+    if tabs is not None:
+        for tab in tabs.findall(qn("w:tab")):
+            tab.set(qn("w:pos"), str(left_tw))
+    ind = pPr.find(qn("w:ind"))
+    if ind is None:
+        ind = OxmlElement("w:ind")
+        pPr.append(ind)
+    ind.set(qn("w:left"), str(left_tw))
+    ind.set(qn("w:hanging"), str(hanging_tw))
+
+    rPr = lvl.find(qn("w:rPr"))
+    if rPr is None:
+        rPr = OxmlElement("w:rPr")
+        lvl.append(rPr)
+    rf = rPr.find(qn("w:rFonts"))
+    if rf is None:
+        rf = OxmlElement("w:rFonts")
+        rPr.insert(0, rf)
+    for attr in ("w:ascii", "w:hAnsi", "w:cs"):
+        rf.set(qn(attr), font or FONT_BODY)
+    rf.set(qn("w:hint"), "default")
+
+    root.findall(qn("w:abstractNum"))[-1].addnext(abstract)
+
+    num = OxmlElement("w:num")
+    num.set(qn("w:numId"), str(new_id))
+    ref = OxmlElement("w:abstractNumId")
+    ref.set(qn("w:val"), str(new_id))
+    num.append(ref)
+    root.append(num)
+    return new_id
+
+
+def _apply_num(paragraph, num_id):
+    pPr = paragraph._p.get_or_add_pPr()
+    numPr = OxmlElement("w:numPr")
+    ilvl = OxmlElement("w:ilvl")
+    ilvl.set(qn("w:val"), "0")
+    numId = OxmlElement("w:numId")
+    numId.set(qn("w:val"), str(num_id))
+    numPr.append(ilvl)
+    numPr.append(numId)
+    # numPr в w:pPr идет сразу после pStyle — порядок задан схемой
+    style = pPr.find(qn("w:pStyle"))
+    if style is not None:
+        style.addnext(numPr)
+    else:
+        pPr.insert(0, numPr)
+    return paragraph
+
+
+_MANUAL_NUM = __import__("re").compile(r"^\s*\d{1,2}\s*[.)]\s+")
+
+
+def _strip_manual_number(text):
+    """Снять номер, набранный руками: теперь его ставит Word.
+
+    Вызовы вида add_request_item("1. Взыскать...") остаются рабочими — иначе
+    в документе получилось бы «1. 1. Взыскать».
+    """
+    return _MANUAL_NUM.sub("", text, count=1)
+
 class DocBuilder:
     """Построитель судебного документа по эталону шаблон.docx."""
 
@@ -98,6 +292,19 @@ class DocBuilder:
         # Удалить дефолтный пустой параграф
         for p in self.doc.paragraphs:
             p._element.getparent().remove(p._element)
+        # Определения нумерации создаются при первом обращении: документ без
+        # приложений не должен тащить лишние записи в numbering.xml.
+        self._num = {}
+
+    def _num_id(self, kind):
+        if kind not in self._num:
+            spec = {
+                "request":  dict(left_tw=709, hanging_tw=340),
+                "appendix": dict(left_tw=709, hanging_tw=340),
+                "body":     dict(left_tw=624, hanging_tw=624),
+            }[kind]
+            self._num[kind] = _new_num_def(self.doc, **spec)
+        return self._num[kind]
 
     def add_empty(self):
         """Пустой параграф-разделитель."""
@@ -109,7 +316,8 @@ class DocBuilder:
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p.paragraph_format.space_before = Pt(6)
         p.paragraph_format.space_after  = Pt(4)
-        _set_font(p.add_run(text), 14, bold=True, family=FONT_DISPLAY)
+        _set_font(p.add_run(text), 14, bold=True, family=FONT_TITLE)
+        _track(p, TRACK_TITLE_PT)
         return p
 
     def add_subtitle(self, text):
@@ -117,7 +325,8 @@ class DocBuilder:
         p = self.doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p.paragraph_format.space_after = Pt(4)
-        _set_font(p.add_run(text), 13, bold=True, family=FONT_DISPLAY)
+        _set_font(p.add_run(text), 13, bold=True, family=FONT_TITLE)
+        _track(p, TRACK_SUBTITLE_PT)
         return p
 
     def add_header_date(self, text):
@@ -167,6 +376,28 @@ class DocBuilder:
         """Текст после маркированного списка: sb=6 sa=6 fi=1.25cm."""
         p = self.add_body(parts)
         p.paragraph_format.space_before = Pt(6)
+        return p
+
+    def add_numbered_body(self, parts):
+        """Абзац тела со СКВОЗНЫМ номером, который ведет Word.
+
+        Дает точную ссылку «пункт 14» вместо «страница 6»: страница едет от
+        любой правки, номер пункта — нет. Нумерация сквозная по всему
+        документу и продолжается через заголовки разделов и таблицы.
+        Удаление, вставка и перестановка пункта пересчитываются программой.
+
+        parts: str либо list[(text, bold)] — как в add_body.
+        Отступы задает определение нумерации, вручную их не трогать.
+        """
+        p = self.doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        p.paragraph_format.space_after = Pt(6)
+        _apply_num(p, self._num_id("body"))
+        if isinstance(parts, str):
+            parts = [(parts, False)]
+        for item in parts:
+            text, bold = (item if isinstance(item, (tuple, list)) else (item, False))
+            _set_font(p.add_run(text), 12, bold=bold)
         return p
 
     def add_bullet(self, text):
@@ -302,12 +533,18 @@ class DocBuilder:
         return p
 
     def add_request_item(self, text):
-        """Пункт просительной части: List Paragraph, JUSTIFY, sb=2, sa=2."""
+        """Пункт просительной части: автонумерация Word, JUSTIFY, sb=2, sa=2.
+
+        Номер ставит Word (w:numPr), а не составитель: удаление или вставка
+        пункта пересчитывает остальные сама. Номер, набранный в тексте
+        («1. Взыскать...»), снимается — иначе задвоится.
+        """
         p = self.doc.add_paragraph(style="List Paragraph")
         p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p.paragraph_format.space_before = Pt(2)
         p.paragraph_format.space_after  = Pt(2)
-        _set_font(p.add_run(text), 12)
+        _apply_num(p, self._num_id("request"))
+        _set_font(p.add_run(_strip_manual_number(text)), 12)
         return p
 
     def add_appendices(self):
@@ -320,12 +557,18 @@ class DocBuilder:
         return p
 
     def add_appendix_item(self, text):
-        """Пункт приложений: List Paragraph, JUSTIFY, sa=12."""
+        """Пункт приложений: автонумерация Word, JUSTIFY, sa=12.
+
+        Приложения правятся чаще всего — здесь ручной пересчет болел сильнее
+        всего. Номер ведет Word; ссылки в тексте («Приложение 3») остаются
+        на совести составителя, их сверяет document_guard.py.
+        """
         p = self.doc.add_paragraph(style="List Paragraph")
         p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p.paragraph_format.space_before = Pt(0)
         p.paragraph_format.space_after  = Pt(12)
-        _set_font(p.add_run(text), 12)
+        _apply_num(p, self._num_id("appendix"))
+        _set_font(p.add_run(_strip_manual_number(text)), 12)
         return p
 
     def add_signature(self, name, date, gap_spaces=40):
@@ -511,7 +754,7 @@ class DocBuilder:
         c.paragraphs[0].clear()
         p = c.paragraphs[0]
         p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-        _set_font(p.add_run(court_name), 12, bold=True, family=FONT_DISPLAY)
+        _set_font(p.add_run(court_name), 12, bold=True, family=FONT_TITLE)
         if court_route:
             p2 = c.add_paragraph()
             p2.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
