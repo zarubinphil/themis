@@ -31,6 +31,7 @@
 | document_guard.py | формат `.docx` и согласованность с `.md` | `python3 scripts/document_guard.py ДОК.docx --md ДОК.md [--l3]` |
 | registry_check.py | сверка `_index.md` / `_clients.md` / `_client.md` с диском | `python3 scripts/registry_check.py [--fix]` |
 | gosposhlina.py | госпошлина по ст. 333.19/333.21 НК из корпуса, с датой редакции | `python3 scripts/gosposhlina.py --cena N` либо `--neimushchestvennyy --status fiz\|org` |
+| practice_search.py --partition | честная выборка практики: обход выдачи по 85 регионам с каскадом по инстанциям | техника портирована из `mynka999/sudact-mcp-server` (MIT), см. шапку раздела в скрипте |
 | practice_harvest.py | практика из дел, которой нет в базе; аудит базы | `python3 scripts/practice_harvest.py [--audit]` |
 
 ## Разрешено без спроса — внешнее, в пределах включенной подписки

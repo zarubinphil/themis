@@ -210,7 +210,6 @@ def build():
         widths=[50, 50], aligns=["l", "l"], font_size=11, borders=False)
     ld.shade_header_row(st, "F2F2F2")
 
-    ld.set_document_font(b, "Arial")
     ld.add_footer_note(b, "Образец. Фактура вымышлена, реквизиты недействительны.")
     b.add_final_empty()
     b.save(str(OUT))

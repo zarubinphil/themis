@@ -25,11 +25,25 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
 
-FONT = "Times New Roman"
+# Шрифты утверждены владельцем 03.08.2026. Все три — свободные (SIL OFL),
+# кириллица проектировалась первой, а не досыпалась к латинице. Выбор
+# закрывает и требование ГОСТ Р 7.0.97-2016 п. 3.3: «необходимо использовать
+# свободно распространяемые бесплатные шрифты» (Times New Roman —
+# проприетарный Monotype).
+#   FONT_BODY    PT Serif   — тело, цитаты, просительная, приложения, подпись
+#   FONT_DISPLAY Golos Text — шапка, заголовки, ПРОШУ, ПРИЛОЖЕНИЯ, шапки таблиц
+#   FONT_MONO    PT Mono    — числовые колонки таблиц
+# Менять только новым решением владельца: документы практики обязаны быть
+# неотличимы друг от друга по оформлению.
+FONT_BODY = "PT Serif"
+FONT_DISPLAY = "Golos Text"
+FONT_MONO = "PT Mono"
+
+FONT = FONT_BODY  # обратная совместимость
 
 
-def _set_font(run, size_pt, bold=False):
-    run.font.name = FONT
+def _set_font(run, size_pt, bold=False, family=None):
+    run.font.name = family or FONT_BODY
     run.font.size = Pt(size_pt)
     run.font.bold = bold
 
@@ -95,7 +109,7 @@ class DocBuilder:
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p.paragraph_format.space_before = Pt(6)
         p.paragraph_format.space_after  = Pt(4)
-        _set_font(p.add_run(text), 14, bold=True)
+        _set_font(p.add_run(text), 14, bold=True, family=FONT_DISPLAY)
         return p
 
     def add_subtitle(self, text):
@@ -103,7 +117,7 @@ class DocBuilder:
         p = self.doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p.paragraph_format.space_after = Pt(4)
-        _set_font(p.add_run(text), 13, bold=True)
+        _set_font(p.add_run(text), 13, bold=True, family=FONT_DISPLAY)
         return p
 
     def add_header_date(self, text):
@@ -111,7 +125,7 @@ class DocBuilder:
         p = self.doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p.paragraph_format.space_after = Pt(12)
-        _set_font(p.add_run(text), 13, bold=True)
+        _set_font(p.add_run(text), 13, bold=True, family=FONT_DISPLAY)
         return p
 
     def add_section(self, text):
@@ -120,7 +134,7 @@ class DocBuilder:
         p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p.paragraph_format.space_before = Pt(12)
         p.paragraph_format.space_after  = Pt(6)
-        _set_font(p.add_run(text), 12, bold=True)
+        _set_font(p.add_run(text), 12, bold=True, family=FONT_DISPLAY)
         return p
 
     def add_subsection(self, text):
@@ -129,7 +143,7 @@ class DocBuilder:
         p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p.paragraph_format.space_before = Pt(6)
         p.paragraph_format.space_after  = Pt(3)
-        _set_font(p.add_run(text), 12, bold=True)
+        _set_font(p.add_run(text), 12, bold=True, family=FONT_DISPLAY)
         return p
 
     def add_body(self, parts):
@@ -243,7 +257,15 @@ class DocBuilder:
             p.paragraph_format.space_after       = Pt(2)
             p.paragraph_format.first_line_indent = Cm(0)
             text, bold = (value if isinstance(value, tuple) else (value, bold_default))
-            _set_font(p.add_run(text), font_size, bold=bold)
+            # Шапка — Golos Text; числовые колонки (выравнивание вправо) —
+            # PT Mono: цифры одной ширины, разряды выстраиваются столбиком.
+            if bold_default:
+                family = FONT_DISPLAY
+            elif aligns[col_idx] == "r":
+                family = FONT_MONO
+            else:
+                family = FONT_BODY
+            _set_font(p.add_run(text), font_size, bold=bold, family=family)
 
         for j, head in enumerate(headers):
             _fill(table.rows[0].cells[j], head, j, bold_default=True)
@@ -276,7 +298,7 @@ class DocBuilder:
         p = self.doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p.paragraph_format.space_after = Pt(6)
-        _set_font(p.add_run("ПРОШУ:"), 12, bold=True)
+        _set_font(p.add_run("ПРОШУ:"), 12, bold=True, family=FONT_DISPLAY)
         return p
 
     def add_request_item(self, text):
@@ -294,7 +316,7 @@ class DocBuilder:
         p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p.paragraph_format.space_before = Pt(12)
         p.paragraph_format.space_after  = Pt(6)
-        _set_font(p.add_run("ПРИЛОЖЕНИЯ:"), 12, bold=True)
+        _set_font(p.add_run("ПРИЛОЖЕНИЯ:"), 12, bold=True, family=FONT_DISPLAY)
         return p
 
     def add_appendix_item(self, text):
@@ -422,7 +444,7 @@ class DocBuilder:
             lc.paragraphs[0].clear()
             lp = lc.paragraphs[0]
             lp.alignment = WD_ALIGN_PARAGRAPH.LEFT
-            _set_font(lp.add_run(block["label"]), 12, bold=True)
+            _set_font(lp.add_run(block["label"]), 12, bold=True, family=FONT_DISPLAY)
             rc = row.cells[1]
             rc.paragraphs[0].clear()
             first = True
@@ -489,7 +511,7 @@ class DocBuilder:
         c.paragraphs[0].clear()
         p = c.paragraphs[0]
         p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-        _set_font(p.add_run(court_name), 12, bold=True)
+        _set_font(p.add_run(court_name), 12, bold=True, family=FONT_DISPLAY)
         if court_route:
             p2 = c.add_paragraph()
             p2.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
@@ -503,7 +525,7 @@ class DocBuilder:
             lc.paragraphs[0].clear()
             lp = lc.paragraphs[0]
             lp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-            _set_font(lp.add_run(party["label"]), 12, bold=True)
+            _set_font(lp.add_run(party["label"]), 12, bold=True, family=FONT_DISPLAY)
             # Реквизиты справа
             rc = row.cells[1]
             rc.paragraphs[0].clear()
@@ -551,7 +573,7 @@ class DocBuilder:
         p = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         probe = p.add_run("")
-        _set_font(probe, 12)
+        _set_font(probe, 12, family=FONT_DISPLAY)
         rPr = probe._r.find(qn("w:rPr"))
 
         fld = OxmlElement("w:fldSimple")

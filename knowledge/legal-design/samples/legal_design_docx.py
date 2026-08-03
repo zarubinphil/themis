@@ -29,7 +29,9 @@ TCPR_ORDER = [
     "noWrap", "tcMar", "textDirection", "tcFitText", "vAlign", "hideMark",
 ]
 
-FONT = "Times New Roman"
+from scripts.create_docx import FONT_BODY, FONT_DISPLAY, FONT_MONO  # noqa: E402
+
+FONT = FONT_BODY
 
 
 def _ordered_insert(parent, element, order):
@@ -44,12 +46,12 @@ def _ordered_insert(parent, element, order):
     parent.append(element)
 
 
-def _rpr(size_pt=12, bold=False, color=None, underline=False):
+def _rpr(size_pt=12, bold=False, color=None, underline=False, family=None):
     """Готовый w:rPr для ручной сборки run в поле или гиперссылке."""
     rPr = OxmlElement("w:rPr")
     rf = OxmlElement("w:rFonts")
     for attr in ("w:ascii", "w:hAnsi", "w:cs"):
-        rf.set(qn(attr), FONT)
+        rf.set(qn(attr), family or FONT_BODY)
     rPr.append(rf)
     if bold:
         rPr.append(OxmlElement("w:b"))
@@ -70,8 +72,8 @@ def _rpr(size_pt=12, bold=False, color=None, underline=False):
     return rPr
 
 
-def _set_font(run, size_pt, bold=False):
-    run.font.name = FONT
+def _set_font(run, size_pt, bold=False, family=None):
+    run.font.name = family or FONT_BODY
     run.font.size = Pt(size_pt)
     run.font.bold = bold
 
@@ -168,7 +170,7 @@ def add_static_toc(b, entries, title="СОДЕРЖАНИЕ", linked=False):
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p.paragraph_format.space_before = Pt(6)
     p.paragraph_format.space_after = Pt(6)
-    _set_font(p.add_run(title), 12, bold=True)
+    _set_font(p.add_run(title), 12, bold=True, family=FONT_DISPLAY)
     for anchor, text in entries:
         ip = b.doc.add_paragraph()
         ip.alignment = WD_ALIGN_PARAGRAPH.LEFT
@@ -256,7 +258,7 @@ def timeline_png(path, events, width_in=6.3, height_in=1.9):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib import rcParams
-    rcParams["font.family"] = "Times New Roman"
+    rcParams["font.family"] = FONT_BODY
 
     fig, ax = plt.subplots(figsize=(width_in, height_in), dpi=300)
     xs = list(range(len(events)))
@@ -290,7 +292,7 @@ def parties_png(path, center, links, width_in=6.3, wrap_at=20):
     import matplotlib.pyplot as plt
     from matplotlib import rcParams
     from matplotlib.patches import FancyBboxPatch
-    rcParams["font.family"] = "Times New Roman"
+    rcParams["font.family"] = FONT_BODY
 
     left_lines = _wrap(center, wrap_at)
     right_blocks = [_wrap(label, wrap_at) for label, _ in links]

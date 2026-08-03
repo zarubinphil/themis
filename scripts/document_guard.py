@@ -6,9 +6,11 @@
 регулярно давая ложные тревоги. Здесь то же сравнение делает код.
 
 Проверяет по .claude/skills/doc-drafter/DOCX_FORMATTING.md:
-  поля 20/30/30/15 мм (L3 и кассация ВС — левое 35), Times New Roman,
-  кегли 14/13/12/11, межстрочный 1.15, абзацный отступ 1.25 см, тело JUSTIFY,
-  отсутствие курсива и подчеркивания, нумерация страниц у документа 2+ страниц.
+  поля 20/30/30/15 мм (L3 и кассация ВС — левое 35); шрифты PT Serif (тело),
+  Golos Text (заголовки и шапка), PT Mono (числовые колонки) — набор утвержден
+  владельцем 03.08.2026, иные гарнитуры недопустимы; кегли 14/13/12/11,
+  межстрочный 1.15, абзацный отступ 1.25 см, тело JUSTIFY, отсутствие курсива
+  и подчеркивания, нумерация страниц — БЕЗУСЛОВНО в каждом документе.
 Плюс: текст .docx совпадает с .md, приложения пронумерованы сквозно и каждое
 упомянуто в тексте, запрещенная буква «ё», даты в формате ДД.ММ.ГГГГ.
 
@@ -26,7 +28,13 @@ import sys
 
 SPEC_MARGINS_MM = {"top": 20, "bottom": 30, "left": 30, "right": 15}
 SPEC_MARGINS_MM_L3 = {**SPEC_MARGINS_MM, "left": 35}
-SPEC_FONT = "Times New Roman"
+# Утверждено владельцем 03.08.2026. Три свободные гарнитуры (SIL OFL) с родной
+# кириллицей; заодно закрывают ГОСТ Р 7.0.97-2016 п. 3.3 о бесплатных шрифтах.
+SPEC_FONT_BODY = "PT Serif"
+SPEC_FONT_DISPLAY = "Golos Text"
+SPEC_FONT_MONO = "PT Mono"
+SPEC_FONTS = {SPEC_FONT_BODY, SPEC_FONT_DISPLAY, SPEC_FONT_MONO}
+SPEC_FONT = SPEC_FONT_BODY  # обратная совместимость
 SPEC_SIZES = {11.0, 12.0, 13.0, 14.0}
 SPEC_LINE_SPACING = 1.15
 SPEC_INDENT_CM = 1.25
@@ -59,9 +67,10 @@ def check_docx(path: str, l3: bool = False) -> list[str]:
                 italic += 1
             if r.font.underline:
                 underline += 1
-    alien_fonts = fonts - {SPEC_FONT}
+    alien_fonts = fonts - SPEC_FONTS
     if alien_fonts:
-        problems.append(f"чужие шрифты: {', '.join(sorted(alien_fonts))} (нужен {SPEC_FONT})")
+        problems.append(f"чужие шрифты: {', '.join(sorted(alien_fonts))} "
+                        f"(допустимы только {', '.join(sorted(SPEC_FONTS))})")
     alien_sizes = sizes - SPEC_SIZES
     if alien_sizes:
         problems.append(f"кегли вне спецификации: {sorted(alien_sizes)} "
@@ -84,22 +93,50 @@ def check_docx(path: str, l3: bool = False) -> list[str]:
     if bad_spacing:
         problems.append(f"межстрочный интервал {sorted(bad_spacing)} вместо {SPEC_LINE_SPACING}")
 
-    indents = {round(p.paragraph_format.first_line_indent.cm, 2) for p in body
-               if p.paragraph_format.first_line_indent}
-    bad_indent = {i for i in indents if abs(i - SPEC_INDENT_CM) > 0.05}
+    # Отрицательный отступ первой строки — не ошибка, если это висячий отступ
+    # нумерованного абзаца: left_indent положителен и гасит его ровно. Такой
+    # абзац дает точную ссылку «пункт 14» и введен протоколом 03.08.2026.
+    bad_indent = set()
+    for par in body:
+        fi = par.paragraph_format.first_line_indent
+        if fi is None:
+            continue
+        fi_cm = round(fi.cm, 2)
+        li = par.paragraph_format.left_indent
+        li_cm = round(li.cm, 2) if li is not None else 0.0
+        if fi_cm < 0 and abs(li_cm + fi_cm) <= 0.05 and li_cm > 0:
+            continue  # корректный висячий отступ
+        if abs(fi_cm - SPEC_INDENT_CM) > 0.05:
+            bad_indent.add(fi_cm)
     if bad_indent:
-        problems.append(f"абзацный отступ {sorted(bad_indent)} см вместо {SPEC_INDENT_CM} см")
+        problems.append(f"абзацный отступ {sorted(bad_indent)} см вместо {SPEC_INDENT_CM} см "
+                        "(висячий отступ нумерованного абзаца засчитывается, если "
+                        "левый отступ гасит его ровно)")
 
     text = "\n".join(p.text for p in doc.paragraphs)
     problems += check_text(text, os.path.basename(path))
 
-    # Нумерация страниц обязательна с двух страниц. Точного числа страниц из
-    # python-docx не получить, поэтому идем по объему текста и наличию поля PAGE.
-    xml = doc.element.xml
-    has_page_field = "PAGE" in xml
-    if len(text) > 2500 and not has_page_field:
-        problems.append("документ объемный, но поля номера страницы нет "
-                        "(ГОСТ Р 7.0.97: нумерация с двух страниц)")
+    # Нумерация страниц — безусловное требование протокола (решение владельца
+    # 03.08.2026). Порога по объему больше нет: короткий документ тоже может
+    # разойтись на две страницы после правки, а незамеченная потеря нумерации
+    # обнаруживается уже в суде. DocBuilder.save() ставит поле сам — отсутствие
+    # поля означает, что документ собран мимо DocBuilder.
+    # Поле живет в колонтитуле — это ОТДЕЛЬНАЯ часть пакета .docx, и в
+    # doc.element.xml его нет никогда. Прежняя проверка искала только там,
+    # поэтому на корректном документе давала ложную тревогу, а на собранном
+    # мимо DocBuilder — не давала никакой (баг найден 03.08.2026).
+    parts = [doc.element.xml]
+    for sec in doc.sections:
+        for area in (sec.header, sec.footer, sec.first_page_header,
+                     sec.first_page_footer, sec.even_page_header,
+                     sec.even_page_footer):
+            try:
+                parts.append(area._element.xml)
+            except Exception:
+                pass
+    if not any("PAGE" in x for x in parts):
+        problems.append("нет поля номера страницы — нумерация обязательна в каждом "
+                        "документе без исключений (протокол 03.08.2026)")
     return problems
 
 
@@ -167,6 +204,19 @@ def check_md_vs_docx(md_path: str, docx_path: str) -> list[str]:
     return problems
 
 
+def _add_page_field(doc):
+    """Поле PAGE в верхнем колонтитуле — как это делает DocBuilder."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    header = doc.sections[0].header
+    header.is_linked_to_previous = False
+    p = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
+    fld = OxmlElement("w:fldSimple")
+    fld.set(qn("w:instr"), " PAGE ")
+    p._p.append(fld)
+    return p
+
+
 def selftest() -> int:
     import tempfile
     from docx import Document
@@ -175,8 +225,9 @@ def selftest() -> int:
 
     tmp = tempfile.mkdtemp()
 
-    def build(path, *, font=SPEC_FONT, size=12, left=30, italic=False, spacing=1.15,
-              indent=1.25, text="Текст документа, достаточно длинный абзац для проверки выравнивания."):
+    def build(path, *, font=SPEC_FONT_BODY, size=12, left=30, italic=False, spacing=1.15,
+              indent=1.25, pages=True,
+              text="Текст документа, достаточно длинный абзац для проверки выравнивания."):
         d = Document()
         s = d.sections[0]
         s.top_margin, s.bottom_margin = Mm(20), Mm(30)
@@ -187,10 +238,13 @@ def selftest() -> int:
         p.paragraph_format.first_line_indent = Cm(indent)
         r = p.add_run(text * 2)
         r.font.name, r.font.size, r.font.italic = font, Pt(size), italic
+        if pages:
+            _add_page_field(d)
         d.save(path)
         return path
 
     good = build(os.path.join(tmp, "good.docx"))
+    no_pages = build(os.path.join(tmp, "nopage.docx"), pages=False)
     bad_font = build(os.path.join(tmp, "font.docx"), font="Arial")
     bad_margin = build(os.path.join(tmp, "margin.docx"), left=25)
     l3_ok = build(os.path.join(tmp, "l3.docx"), left=35)
@@ -215,6 +269,8 @@ def selftest() -> int:
         ("L3-поле без флага считается ошибкой", any("поле left" in p for p in check_docx(l3_ok))),
         ("курсив пойман", any("курсив" in p for p in check_docx(with_italic))),
         ("буква ё поймана", any("«ё»" in p for p in check_docx(with_yo))),
+        ("отсутствие нумерации страниц поймано",
+         any("номера страницы" in p for p in check_docx(no_pages))),
         ("совпадающие md и docx проходят", check_md_vs_docx(md_ok, good) == []),
         ("разошедшиеся md и docx пойманы", check_md_vs_docx(md_other, good) != []),
         ("сквозная нумерация приложений проходит", check_attachments(att_ok) == []),

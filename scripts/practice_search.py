@@ -383,6 +383,78 @@ def get_document(url):
     return doc
 
 
+# ─────────── Партиционирование выдачи по регионам ───────────
+# Техника взята из mynka999/sudact-mcp-server (MIT, 30.07.2026) и переписана под
+# наш поиск. Суть, которую сами мы не увидели: sudact отдаёт ограниченное число
+# результатов на ОДИН запрос, поэтому широкий запрос показывает верхушку выдачи и
+# ничего больше. Замер 03.08.2026: «раздел совместно нажитого имущества» —
+# «более 100 000 документов» в счётчике, достать можно десятки. Фильтр по региону
+# режет корпус на 85 частей, у каждой свой предел, и охват растёт на порядок.
+#
+# Для охотника это не про объём, а про смещение: выборка из верхушки одной выдачи
+# выдаётся за «практику по вопросу». Партиционирование делает выборку честной, а
+# то, что всё равно не достали, попадает в отчёт явно — как непокрытое.
+CAP_HINT = 500  # практический предел одной выдачи sudact
+
+
+def _total_num(total_str):
+    digits = re.sub(r"[^\d]", "", total_str or "")
+    return int(digits) if digits else 0
+
+
+def partitioned_search(text, section="regular", per_region=30, max_regions=0,
+                       cascade=True, log=lambda s: None, **kw):
+    """Обойти выдачу по регионам. Возвращает (акты, отчёт о покрытии)."""
+    regions = sorted((_load_dicts(section).get("area") or {}))
+    if not regions:
+        return [], {"error": f"у раздела «{section}» нет справочника регионов"}
+    scanned = regions[:max_regions] if max_regions else regions
+
+    # Пользователь мог сам задать инстанцию — тогда дробить по ней бессмысленно
+    # и вдобавок падало на дубле аргумента.
+    user_instance = kw.pop("instance", "") or ""
+    if user_instance:
+        cascade = False
+    seen, out, capped, done = set(), [], [], 0
+    for i, reg in enumerate(scanned, 1):
+        got, total = search(text, section=section, limit=per_region, area=reg,
+                            instance=user_instance, **kw)
+        fresh = [r for r in got if r["url"] not in seen]
+        seen.update(r["url"] for r in fresh)
+        out += fresh
+        done += 1
+        hit_cap = _total_num(total) > len(got) >= min(per_region, CAP_HINT)
+        log(f"  [{i}/{len(scanned)}] {reg}: в счётчике {total or '—'}, взято {len(fresh)}"
+            + (" — УПЁРЛОСЬ В ПРЕДЕЛ" if hit_cap else ""))
+        if not (hit_cap and cascade):
+            if hit_cap:
+                capped.append(reg)
+            continue
+        # регион всё равно упёрся — дробим его по инстанциям
+        split_ok = False
+        for inst in ("первая инстанция", "апелляция", "кассация"):
+            sub, sub_total = search(text, section=section, limit=per_region,
+                                    area=reg, instance=inst, **kw)
+            fresh = [r for r in sub if r["url"] not in seen]
+            seen.update(r["url"] for r in fresh)
+            out += fresh
+            if _total_num(sub_total) > len(sub) >= min(per_region, CAP_HINT):
+                capped.append(f"{reg} / {inst}")
+            else:
+                split_ok = True
+        if not split_ok:
+            capped.append(reg)
+
+    report = {
+        "актов": len(out),
+        "регионов обойдено": done,
+        "регионов всего": len(regions),
+        "регионов пропущено лимитом обхода": len(regions) - done,
+        "непокрытые части": capped,
+    }
+    return out, report
+
+
 def selftest():
     """Разбор выдачи и сборка запроса — БЕЗ СЕТИ.
 
@@ -453,6 +525,51 @@ def selftest():
             ("limit 5 одной страницей", len(few) == PAGE_SIZE and pages_asked == [1]),
             ("повтор той же выдачи не дублируется", len(dup) == PAGE_SIZE),
         ]
+
+        # Партиционирование: упёршийся регион дробится, непокрытое попадает в отчёт
+        real_search, real_dicts2 = search, _load_dicts
+        _load_dicts = lambda section="regular": {
+            "workflow_stage": {"апелляция": "20"},
+            "area": {"москва": "1077", "татарстан": "1060"}}
+        seen_calls = []
+
+        def part_fake(text, section="regular", limit=20, max_wait=25.0, **kw):
+            seen_calls.append((kw.get("area"), kw.get("instance")))
+            if kw.get("area") == "москва" and not kw.get("instance"):
+                # регион упёрся в предел выдачи
+                return ([{"url": f"m{i}"} for i in range(limit)], "Найдено 9 000 документов")
+            if kw.get("area") == "москва":
+                # после дробления по инстанциям предел уже не достигается
+                return ([{"url": f"m-{kw.get('instance')}-{i}"} for i in range(4)],
+                        "Найдено 4 документа")
+            return ([{"url": f"t{i}"} for i in range(3)], "Найдено 3 документа")
+
+        globals()["search"] = part_fake
+        acts, rep = partitioned_search("иск", per_region=20)
+        # Второй случай: дробление НЕ помогает — предел обязан попасть в отчёт,
+        # иначе агент примет верхушку выдачи за полную практику по вопросу.
+        def always_capped(text, section="regular", limit=20, max_wait=25.0, **kw):
+            return ([{"url": f"c-{kw.get('area')}-{kw.get('instance')}-{i}"}
+                     for i in range(limit)], "Найдено 9 000 документов")
+
+        globals()["search"] = always_capped
+        _, hard = partitioned_search("иск", per_region=20)
+
+        def _unsolvable_reported():
+            return "москва" in hard["непокрытые части"]
+
+        globals()["search"], _load_dicts = real_search, real_dicts2
+
+        checks += [
+            ("обойдены все регионы справочника", rep["регионов обойдено"] == 2),
+            ("упёршийся регион раздроблен по инстанциям",
+             sum(1 for c in seen_calls if c[0] == "москва" and c[1]) == 3),
+            ("не упёршийся регион не дробится",
+             sum(1 for c in seen_calls if c[0] == "татарстан") == 1),
+            ("дубли между партициями сняты", len(acts) == len({a["url"] for a in acts})),
+            ("дробление сняло предел — непокрытого нет", rep["непокрытые части"] == []),
+            ("нерешаемый предел не замалчивается", _unsolvable_reported()),
+        ]
     finally:
         _load_dicts, _search_page, search_allowed = real_dicts, real_page, real_allowed
     for name, ok in checks:
@@ -481,6 +598,11 @@ def main():
     ap.add_argument("--doc", default="", help="URL акта — выдать полный текст")
     ap.add_argument("--json", action="store_true", help="машинный вывод")
     ap.add_argument("--selftest", action="store_true", help="проверка разбора без сети")
+    ap.add_argument("--partition", action="store_true",
+                    help="обойти выдачу по регионам: широкий запрос показывает только "
+                         "верхушку, партиционирование даёт честную выборку")
+    ap.add_argument("--per-region", type=int, default=20, help="актов с региона (с --partition)")
+    ap.add_argument("--max-regions", type=int, default=0, help="ограничить обход (0 — все 85)")
     ap.add_argument("--i-accept-robots-risk", action="store_true",
                     help="включить поиск, запрещенный robots.txt источника (решение владельца)")
     args = ap.parse_args()
@@ -501,6 +623,26 @@ def main():
 
     if not args.query and not args.law and not args.case_doc:
         ap.error("нужен текст запроса, --law или --case-doc")
+
+    if args.partition:
+        acts, rep = partitioned_search(
+            args.query, section=args.section, per_region=args.per_region,
+            max_regions=args.max_regions, log=lambda m: print(m, file=sys.stderr),
+            instance=args.instance, court=args.court, law=args.law,
+            date_from=args.date_from, date_to=args.date_to)
+        if args.json:
+            print(json.dumps({"results": acts, "coverage": rep}, ensure_ascii=False, indent=2))
+            return 0
+        print(f"\nСобрано актов: {rep.get('актов', 0)} "
+              f"(регионов {rep.get('регионов обойдено')} из {rep.get('регионов всего')})")
+        if rep.get("непокрытые части"):
+            print(f"⚠ НЕ ПОКРЫТО ПОЛНОСТЬЮ: {len(rep['непокрытые части'])} частей — "
+                  f"{', '.join(rep['непокрытые части'][:6])}"
+                  f"{'…' if len(rep['непокрытые части']) > 6 else ''}. "
+                  f"Выборка по ним неполная, сузить запрос или добавить фильтры.")
+        for i, r in enumerate(acts[:args.limit], 1):
+            print(f"\n{i}. {r['title']}\n   {r['court']}\n   {r['url']}")
+        return 0
 
     results, total = search(
         args.query, section=args.section, limit=args.limit, instance=args.instance,
