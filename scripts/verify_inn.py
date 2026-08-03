@@ -51,6 +51,13 @@ API = "https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/party"
 INN_RE = re.compile(r"\b(\d{10}|\d{12})\b")
 OGRN_RE = re.compile(r"\b(\d{13}|\d{15})\b")
 
+# С МЕТКОЙ: число прямо названо реквизитом. Голое 10-значное число в тексте — чаще
+# сумма или счёт, поэтому невалидное среди них молчаливо отбрасывается. Но если рядом
+# стоит слово «ИНН», невалидность — это находка, а не шум: прецедент 02.08.2026, когда
+# в карте таможенного дела и ИНН, и ОГРН оказались несуществующими, а --scan промолчал.
+INN_LABELED_RE = re.compile(r"ИНН[^\d]{0,12}(\d{12}|\d{10})\b", re.I)
+OGRN_LABELED_RE = re.compile(r"ОГРН(?:ИП)?[^\d]{0,12}(\d{15}|\d{13})\b", re.I)
+
 
 def inn_valid(inn: str) -> bool:
     """Контрольные цифры ИНН по алгоритму ФНС. 10 знаков — юрлицо, 12 — ИП/физлицо."""
@@ -234,7 +241,12 @@ def check(inn: str) -> dict:
 def scan_case(path: str) -> list[dict]:
     """Собрать ИНН/ОГРН из артефактов дела и проверить каждый."""
     found_inn, found_ogrn = set(), set()
-    for root, _dirs, files in os.walk(path):
+    labeled_inn, labeled_ogrn = set(), set()
+    # Путь может указывать и на одиночный файл (карта дела, отчёт) — os.walk по файлу
+    # молча обходит ноль элементов и выдаёт «ничего не найдено» вместо проверки.
+    walker = ([(os.path.dirname(path) or ".", [], [os.path.basename(path)])]
+              if os.path.isfile(path) else os.walk(path))
+    for root, _dirs, files in walker:
         if "00_intake" in root:
             continue
         for f in files:
@@ -248,18 +260,30 @@ def scan_case(path: str) -> list[dict]:
                 found_inn.add(m)
             for m in OGRN_RE.findall(t):
                 found_ogrn.add(m)
+            for m in INN_LABELED_RE.findall(t):
+                labeled_inn.add(m)
+            for m in OGRN_LABELED_RE.findall(t):
+                labeled_ogrn.add(m)
 
     out = []
     for i in sorted(found_inn):
         if inn_valid(i):
             out.append(check(i))
+        elif i in labeled_inn:
+            out.append({"inn": i, "checksum": "НЕВАЛИДЕН",
+                        "verdict": "ОШИБКА: ИНН не проходит контрольную сумму — в карту "
+                                   "дела не вносить, искать верный по названию (--find)"})
         else:
-            # 10/12-значных чисел в тексте много (суммы, счета) — сообщаем только
-            # то, что похоже на ИНН по контексту, иначе утонем в ложных тревогах.
+            # Голых 10/12-значных чисел в тексте много (суммы, счета) — о них молчим,
+            # иначе утонем в ложных тревогах.
             continue
     for o in sorted(found_ogrn):
         if ogrn_valid(o):
             out.append({"ogrn": o, "checksum": "валиден"})
+        elif o in labeled_ogrn:
+            out.append({"ogrn": o, "checksum": "НЕВАЛИДЕН",
+                        "verdict": "ОШИБКА: ОГРН не проходит контрольную сумму — в карту "
+                                   "дела не вносить, сверить по ЕГРЮЛ"})
     return out
 
 
@@ -274,7 +298,13 @@ def selftest() -> None:
     assert ogrn_valid("1027700132195"), "ОГРН Сбербанка"
     assert not ogrn_valid("1027700132196"), "подменённая цифра ОГРН"
     assert not inn_valid("123"), "короткое число не ИНН"
-    print("selftest: контрольные суммы ИНН и ОГРН считаются верно")
+    # Реквизит С МЕТКОЙ обязан извлекаться: невалидный «ИНН 1657246601» в карте дела —
+    # находка, а не шум. Раньше scan_case молча его отбрасывал.
+    txt = "Ответчик ООО «Пример», ИНН 1657246601, ОГРН 1161690019502. Сумма 1234567890 руб."
+    assert INN_LABELED_RE.findall(txt) == ["1657246601"], "ИНН с меткой обязан извлекаться"
+    assert OGRN_LABELED_RE.findall(txt) == ["1161690019502"], "ОГРН с меткой обязан извлекаться"
+    assert "1234567890" not in INN_LABELED_RE.findall(txt), "голое число не считается ИНН"
+    print("selftest: контрольные суммы ИНН и ОГРН считаются верно, метки распознаются")
 
 
 def main() -> int:
@@ -334,6 +364,13 @@ def main() -> int:
     res += [{"ogrn": o, "checksum": "валиден" if ogrn_valid(o) else "НЕВАЛИДЕН"}
             for o in (a.ogrn or [])]
     if not res:
+        if a.scan:
+            # Пустой результат сканирования — не повод показывать usage: это
+            # осмысленный ответ «реквизитов не нашлось», и он не равен ошибке ввода.
+            print(f"в {a.scan} не найдено ни одного ИНН/ОГРН с меткой. "
+                  "Если реквизиты в деле есть — проверить, не лежат ли они только "
+                  "в 00_intake/ (сканирование его не читает) или в бинарных файлах.")
+            return 0
         ap.error("нужен ИНН, --ogrn, --scan или --selftest")
 
     if a.json:
@@ -347,7 +384,7 @@ def main() -> int:
                       "egrul_note"):
                 if r.get(k):
                     print(f"    {k[6:]}: {r[k]}")
-    bad = [r for r in res if r["checksum"] != "валиден"
+    bad = [r for r in res if r.get("checksum") != "валиден"
            or (r.get("verdict") or "").startswith(("ОШИБКА", "ВНИМАНИЕ"))]
     return 1 if bad else 0
 
