@@ -39,7 +39,9 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -166,6 +168,136 @@ def dadata(inn: str) -> dict:
     except OSError:
         pass
     return out
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ЕГРЮЛ напрямую: egrul.nalog.ru. Официально, бесплатно, БЕЗ КЛЮЧА — и, в отличие
+# от DaData, отдаёт ВЫПИСКУ, ПОДПИСАННУЮ УКЭП. Именно её прикладывают к
+# процессуальному документу: распечатка карточки из чужого сервиса доказательством
+# состава участников и полномочий директора не является.
+#
+# Цепочка проверена целиком 04.08.2026 (не предполагается — прогнана curl'ом):
+#   POST /                     query=<ИНН>  → {"t": …, "captchaRequired": false}
+#   GET  /search-result/<t>                 → {"rows":[{n,i,o,k,g,r,t}]}
+#   GET  /vyp-request/<t строки>            → {"t": …}
+#   GET  /vyp-status/<t>                    → {"status":"ready"}
+#   GET  /vyp-download/<t>                  → application/pdf, 425 753 байта,
+#                                             10 страниц, «ДОКУМЕНТ ПОДПИСАН
+#                                             УСИЛЕННОЙ КВАЛИФИЦИРОВАННОЙ
+#                                             ЭЛЕКТРОННОЙ ПОДПИСЬЮ»
+#
+# КАПЧА — ЭТО «ПРИТОРМОЗИ», А НЕ «ОРГАНИЗАЦИЯ НЕ НАЙДЕНА». Источник ставит её по
+# темпу: восьмой запрос подряд в минуту даёт captchaRequired/ERRORS.captchaSearch,
+# через минуту доступ возвращается. Трактовать это как отрицательный ответ —
+# значит записать существующую организацию в несуществующие. Отсюда пауза между
+# запросами и отдельный статус.
+EGRUL = "https://egrul.nalog.ru"
+EGRUL_PAUSE = 5.0        # секунд между обращениями; решение владельца 04.08.2026
+EGRUL_TIMEOUT = 40
+_last_egrul_call = [0.0]
+
+
+def _egrul_curl(url: str, post_query: str | None = None) -> tuple[int, bytes]:
+    """(HTTP-код, тело). Сеть через curl: у системного python нет корневых сертификатов."""
+    wait = EGRUL_PAUSE - (time.monotonic() - _last_egrul_call[0])
+    if wait > 0:
+        time.sleep(wait)
+    _last_egrul_call[0] = time.monotonic()
+    marker = b"__HTTP__"
+    cmd = ["curl", "-sL", "--max-time", str(EGRUL_TIMEOUT),
+           "-H", "X-Requested-With: XMLHttpRequest",
+           "-w", "__HTTP__%{http_code}"]
+    if post_query is not None:
+        cmd += ["-X", "POST",
+                "-H", "Content-Type: application/x-www-form-urlencoded; charset=UTF-8",
+                "--data-urlencode", f"query={post_query}"]
+    cmd.append(url)
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=EGRUL_TIMEOUT + 10)
+    except (subprocess.TimeoutExpired, OSError):
+        return 0, b""
+    if r.returncode != 0:
+        return 0, b""
+    body, _, code = r.stdout.rpartition(marker)
+    try:
+        return int(code.decode("ascii", "replace").strip() or 0), body
+    except ValueError:
+        return 0, body
+
+
+def egrul_captcha(payload: dict) -> bool:
+    """Капча в ответе. Это темп обращений, а не отсутствие организации."""
+    if payload.get("captchaRequired"):
+        return True
+    err = payload.get("ERRORS") or payload.get("errors") or {}
+    return bool(isinstance(err, dict) and any("captcha" in str(k).lower() for k in err))
+
+
+def egrul_find(inn: str) -> dict:
+    """Карточка организации из ЕГРЮЛ по ИНН. Без ключа, официальный источник."""
+    code, body = _egrul_curl(EGRUL + "/", post_query=inn)
+    if code != 200 or not body:
+        return {"status": "КАНАЛ НЕДОСТУПЕН", "note": f"ЕГРЮЛ ответил HTTP {code or '—'}"}
+    try:
+        d = json.loads(body.decode("utf-8", "replace"))
+    except ValueError:
+        return {"status": "КАНАЛ НЕДОСТУПЕН", "note": "ответ ЕГРЮЛ не разобран как JSON"}
+    if egrul_captcha(d):
+        return {"status": "КАПЧА",
+                "note": "источник просит притормозить (капча ставится по темпу, "
+                        "не по существу запроса). Это НЕ «организация не найдена»: "
+                        "повторить через минуту"}
+    token = d.get("t")
+    if not token:
+        return {"status": "КАНАЛ НЕДОСТУПЕН", "note": "ЕГРЮЛ не выдал токен поиска"}
+    code, body = _egrul_curl(f"{EGRUL}/search-result/{token}")
+    if code != 200 or not body:
+        return {"status": "КАНАЛ НЕДОСТУПЕН", "note": f"выдача поиска: HTTP {code or '—'}"}
+    try:
+        res = json.loads(body.decode("utf-8", "replace"))
+    except ValueError:
+        return {"status": "КАНАЛ НЕДОСТУПЕН", "note": "выдача ЕГРЮЛ не разобрана"}
+    if egrul_captcha(res):
+        return {"status": "КАПЧА", "note": "капча на выдаче — повторить через минуту"}
+    rows = res.get("rows") or []
+    if not rows:
+        return {"status": "НЕ НАЙДЕН В ЕГРЮЛ",
+                "note": "ИНН прошёл контрольную сумму, но организации с ним нет"}
+    r0 = rows[0]
+    return {"status": "НАЙДЕН", "name": r0.get("n"), "inn": r0.get("i"),
+            "ogrn": r0.get("o"), "kind": r0.get("k"), "manager": r0.get("g"),
+            "registered": r0.get("r"), "token": r0.get("t"),
+            "source": "ЕГРЮЛ, egrul.nalog.ru"}
+
+
+def egrul_extract(row_token: str, dest: str) -> dict:
+    """Скачать выписку, ПОДПИСАННУЮ УКЭП. dest — куда положить .pdf."""
+    code, body = _egrul_curl(f"{EGRUL}/vyp-request/{row_token}")
+    if code != 200 or not body:
+        return {"status": "КАНАЛ НЕДОСТУПЕН", "note": f"заявка на выписку: HTTP {code or '—'}"}
+    try:
+        d = json.loads(body.decode("utf-8", "replace"))
+    except ValueError:
+        return {"status": "КАНАЛ НЕДОСТУПЕН", "note": "ответ на заявку не разобран"}
+    if egrul_captcha(d):
+        return {"status": "КАПЧА", "note": "капча на заявке — повторить через минуту"}
+    token = d.get("t") or row_token
+    for _ in range(8):
+        code, body = _egrul_curl(f"{EGRUL}/vyp-status/{token}")
+        if code == 200 and b'"ready"' in body:
+            break
+    else:
+        return {"status": "НЕ ГОТОВО", "note": "выписка не собралась за восемь опросов"}
+    code, pdf = _egrul_curl(f"{EGRUL}/vyp-download/{token}")
+    if code != 200 or not pdf.startswith(b"%PDF"):
+        return {"status": "КАНАЛ НЕДОСТУПЕН",
+                "note": f"загрузка выписки: HTTP {code or '—'}, ответ не PDF"}
+    os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
+    with open(dest, "wb") as f:
+        f.write(pdf)
+    return {"status": "ВЫПИСКА ПОЛУЧЕНА", "path": dest, "bytes": len(pdf),
+            "note": "подписана УКЭП налогового органа — прикладывается к "
+                    "процессуальному документу как есть, в .pdf"}
 
 
 SUGGEST = "https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/party"
@@ -304,7 +436,18 @@ def selftest() -> None:
     assert INN_LABELED_RE.findall(txt) == ["1657246601"], "ИНН с меткой обязан извлекаться"
     assert OGRN_LABELED_RE.findall(txt) == ["1161690019502"], "ОГРН с меткой обязан извлекаться"
     assert "1234567890" not in INN_LABELED_RE.findall(txt), "голое число не считается ИНН"
-    print("selftest: контрольные суммы ИНН и ОГРН считаются верно, метки распознаются")
+    # ЕГРЮЛ напрямую: разбор ответов БЕЗ СЕТИ, на слепках живых ответов
+    # источника от 04.08.2026.
+    assert egrul_captcha({"captchaRequired": True}), "капча по флагу"
+    assert egrul_captcha({"ERRORS": {"captchaSearch": "введите код"}}), "капча в ERRORS"
+    assert not egrul_captcha({"captchaRequired": False, "t": "ABC"}), "чистый ответ не капча"
+    assert not egrul_captcha({}), "пустой ответ не капча"
+    # Капча — это «притормози», отдельный статус, а НЕ «организация не найдена»:
+    # спутать их значит записать существующую организацию в несуществующие.
+    assert EGRUL_PAUSE >= 5.0, "троттлинг обязателен: капча ставится по темпу"
+    assert EGRUL.startswith("https://egrul.nalog.ru"), "источник — только официальный"
+
+    print("selftest: контрольные суммы ИНН и ОГРН считаются верно, метки распознаются, разбор ЕГРЮЛ верен")
 
 
 def main() -> int:
@@ -316,12 +459,47 @@ def main() -> int:
     ap.add_argument("--find", metavar="НАЗВАНИЕ", help="найти организацию по названию")
     ap.add_argument("--md", action="store_true",
                     help="выдать готовый блок для карты дела с пометкой источника")
+    ap.add_argument("--egrul", action="store_true",
+                    help="сверить с ЕГРЮЛ напрямую (egrul.nalog.ru, без ключа)")
+    ap.add_argument("--vypiska", metavar="КУДА",
+                    help="скачать выписку ЕГРЮЛ, ПОДПИСАННУЮ УКЭП, в указанный .pdf "
+                         "(её прикладывают к процессуальному документу)")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
 
     if a.selftest:
         selftest()
         return 0
+
+    if a.egrul or a.vypiska:
+        if not a.inn:
+            print("нужен ИНН", file=sys.stderr)
+            return 2
+        rc = 0
+        for i in a.inn:
+            if not inn_valid(i):
+                print(f"ИНН {i}: НЕВАЛИДЕН по контрольной сумме — в ЕГРЮЛ не идём, "
+                      "реквизит искажён", file=sys.stderr)
+                rc = 1
+                continue
+            r = egrul_find(i)
+            print(json.dumps(r, ensure_ascii=False, indent=2) if a.json
+                  else f"{i}: {r['status']} — {r.get('name') or r.get('note', '')}")
+            if r["status"] == "КАПЧА":
+                rc = max(rc, 4)      # «притормози», а НЕ «не найден»
+                continue
+            if r["status"] != "НАЙДЕН":
+                rc = max(rc, 1)
+                continue
+            if a.vypiska:
+                dest = a.vypiska if len(a.inn) == 1 else \
+                    os.path.join(a.vypiska, f"egrul-{i}.pdf")
+                v = egrul_extract(r["token"], dest)
+                print(json.dumps(v, ensure_ascii=False, indent=2) if a.json
+                      else f"   выписка: {v['status']} {v.get('path', v.get('note', ''))}")
+                if v["status"] != "ВЫПИСКА ПОЛУЧЕНА":
+                    rc = max(rc, 1)
+        return rc
 
     if a.md:
         # Готовый блок в knowledge-map.md / _client.md. Пометка источника
