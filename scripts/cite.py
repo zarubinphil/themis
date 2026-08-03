@@ -134,6 +134,35 @@ def extract_section(text: str, heading_line: str) -> str | None:
     return None
 
 
+def part_meta(text: str, pos: int) -> dict:
+    """Метаданные ТОЙ ЧАСТИ кодекса, в которой лежит найденная статья.
+
+    Многочастный кодекс (ГК — четыре части) хранит источник и дату редакции списками:
+    по элементу на часть. Раньше бралcя первый элемент всегда, и ст. 1229 из части
+    четвёртой подписывалась редакцией части первой. Дата под цитатой уходит в судебный
+    документ, поэтому ошибка не косметическая.
+    """
+    heads = [(m.start(), m.group(1)) for m in re.finditer(r"^# (Часть [а-яё]+)\s*$", text, re.M)]
+    if not heads:
+        return {}
+    idx = sum(1 for start, _ in heads if start < pos) - 1
+    if idx < 0:
+        return {}
+    out = {"часть": heads[idx][1]}
+    for field, key in (("даты_частей", "redaction_date"), ("источник", "source")):
+        items = frontmatter_list(text, field)
+        if items and idx < len(items):
+            out[key] = items[idx]
+    return out
+
+
+def frontmatter_list(text: str, field: str) -> list[str]:
+    m = re.search(rf"^{field}:\n((?:  - .*\n)+)", text, re.M)
+    if not m:
+        return []
+    return [ln[4:].strip().strip('"') for ln in m.group(1).splitlines()]
+
+
 def find_article(num: str, codex_word: str) -> dict:
     slug = CODEX_SLUGS.get(codex_word.lower())
     result = {"query": f"ст. {num} {codex_word.upper()}", "found": False}
@@ -165,14 +194,18 @@ def find_article(num: str, codex_word: str) -> dict:
             f"запросить конкретную статью из перечня либо сверить по первоисточнику")
         return result
     section = extract_section(text, heading_line)
+    part = part_meta(text, m.start())
     result.update({
         "found": True,
         "file": os.path.relpath(path, ROOT),
-        "redaction_date": frontmatter_field(text, "дата_редакции"),
-        "redaction_status": redaction_status(frontmatter_field(text, "дата_редакции"))[0],
-        "redaction_note": redaction_status(frontmatter_field(text, "дата_редакции"))[1],
+        "часть": part.get("часть"),
+        "redaction_date": part.get("redaction_date") or frontmatter_field(text, "дата_редакции"),
+        "redaction_status": redaction_status(
+            part.get("redaction_date") or frontmatter_field(text, "дата_редакции"))[0],
+        "redaction_note": redaction_status(
+            part.get("redaction_date") or frontmatter_field(text, "дата_редакции"))[1],
         "integrity": integrity_ok(text),
-        "source": frontmatter_field(text, "источник"),
+        "source": part.get("source") or frontmatter_field(text, "источник"),
         "text": section,
         "cite_tag": f"[ст. {num} {codex_word.upper()} РФ]",
     })
@@ -347,6 +380,14 @@ def selftest() -> int:
     open(os.path.join(PLENUMY_DIR, "2012-06-19-13.md"), "w", encoding="utf-8").write(
         "# Постановление Пленума ВС РФ от 19.06.2012 N 13\n\n### п. 21\n\nСуд апелляционной инстанции.\n")
 
+    multipart = ("---\nисточник:\n  - \"src-part-1\"\n  - \"src-part-4\"\n"
+                 "даты_частей:\n  - \"01.02.2026\"\n  - \"05.06.2026\"\n---\n"
+                 "# Кодекс\n\n# Часть первая\n\n### Статья 1. Первая\n\nТекст один.\n\n"
+                 "# Часть четвертая\n\n### Статья 1229. Исключительное право\n\nТекст четыре.\n")
+    open(os.path.join(KODEKSY_DIR, "apk-rf.md"), "w", encoding="utf-8").write(multipart)
+    r_p1 = resolve("ст. 1 АПК")
+    r_p4 = resolve("ст. 1229 АПК")
+
     r_ok = resolve("ст. 683 ГК")
     r_idx = resolve("ст. 152.1 ГК")
     r_ch = resolve("глава 25.3 ГК")
@@ -374,6 +415,13 @@ def selftest() -> int:
         ("пункт Пленума найден", r_plenum["found"] and "апелляционной" in r_plenum["text"]),
         ("нераспознанный запрос не даёт ложного попадания", not r_junk["found"]),
         ("тег для вставки собран", r_ok["cite_tag"] == "[ст. 683 ГК РФ]"),
+        # Многочастный кодекс: дата и источник берутся ТОЙ части, где лежит статья.
+        # Раньше всегда брался первый элемент, и ст. 1229 из части четвёртой
+        # подписывалась редакцией части первой — эта дата уходит в судебный документ.
+        ("часть первая: своя дата", r_p1.get("redaction_date") == "01.02.2026"),
+        ("часть четвёртая: своя дата", r_p4.get("redaction_date") == "05.06.2026"),
+        ("часть четвёртая: свой источник", r_p4.get("source") == "src-part-4"),
+        ("часть определена по заголовку", r_p4.get("часть") == "Часть четвертая"),
         ("длинный текст режется", clip("x" * 50_000, False)[1] is True),
         ("короткий текст не режется", clip("x" * 100, False) == ("x" * 100, False)),
         ("--full не режет", clip("x" * 50_000, True)[1] is False),
@@ -452,7 +500,8 @@ def main() -> int:
     short_red = re.match(r"[^:;]*?:\s*([\d.]{10})", red)
     if short_red:
         red = short_red.group(1)
-    print(f"Источник: {result['file']} ({result.get('source', '?')}, ред. от {red})")
+    part_note = f", {result['часть'].lower()}" if result.get("часть") else ""
+    print(f"Источник: {result['file']}{part_note} ({result.get('source', '?')}, ред. от {red})")
     print(f"Для вставки: {result['cite_tag']}")
 
     rc = 0

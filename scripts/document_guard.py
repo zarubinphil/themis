@@ -47,6 +47,36 @@ SPEC_INDENT_CM = 1.25
 TOLERANCE_MM = 1.0
 
 
+def iter_paragraphs(doc):
+    """Все абзацы документа: тело, таблицы (рекурсивно) и колонтитулы.
+
+    `doc.paragraphs` возвращает ТОЛЬКО абзацы верхнего уровня. Шапка процессуального
+    документа по нашему же стандарту — плавающая таблица, поэтому проверка шрифтов,
+    кеглей и дат её не видела, а сверка .md/.docx давала ложное «числа из .md
+    отсутствуют в .docx»: числа лежали в ячейках. Найдено аудитом 03.08.2026.
+    """
+    def walk_container(container):
+        for par in getattr(container, "paragraphs", []):
+            yield par
+        for table in getattr(container, "tables", []):
+            for row in table.rows:
+                for cell in row.cells:
+                    yield from walk_container(cell)
+
+    yield from walk_container(doc)
+    for sec in doc.sections:
+        for area in (sec.header, sec.footer, sec.first_page_header,
+                     sec.first_page_footer, sec.even_page_header, sec.even_page_footer):
+            try:
+                yield from walk_container(area)
+            except (AttributeError, ValueError):
+                continue
+
+
+def doc_text(doc) -> str:
+    return "\n".join(p.text for p in iter_paragraphs(doc))
+
+
 def check_docx(path: str, l3: bool = False, dogovor: bool = False) -> list[str]:
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -65,7 +95,7 @@ def check_docx(path: str, l3: bool = False, dogovor: bool = False) -> list[str]:
                             + (" (профиль договора)" if dogovor else ""))
 
     fonts, sizes, italic, underline = set(), set(), 0, 0
-    for p in doc.paragraphs:
+    for p in iter_paragraphs(doc):
         for r in p.runs:
             if r.font.name:
                 fonts.add(r.font.name)
@@ -137,7 +167,7 @@ def check_docx(path: str, l3: bool = False, dogovor: bool = False) -> list[str]:
                         "(висячий отступ нумерованного абзаца засчитывается, если "
                         "левый отступ гасит его ровно)")
 
-    text = "\n".join(p.text for p in doc.paragraphs)
+    text = doc_text(doc)
     problems += check_text(text, os.path.basename(path))
 
     # Нумерация страниц — безусловное требование протокола (решение владельца
@@ -276,7 +306,7 @@ def check_md_vs_docx(md_path: str, docx_path: str) -> list[str]:
         return re.sub(r"\s+", " ", s).strip().lower()
 
     md = norm(open(md_path, encoding="utf-8", errors="replace").read())
-    dx = norm("\n".join(p.text for p in Document(docx_path).paragraphs))
+    dx = norm(doc_text(Document(docx_path)))
     problems = []
     ratio = len(dx) / max(len(md), 1)
     if not 0.7 <= ratio <= 1.4:

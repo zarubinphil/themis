@@ -52,6 +52,12 @@ INSTANCE_ITEM = {
 }
 
 
+def order_floor(text: str) -> int:
+    """Нижний предел пошлины по судебному приказу, если статья его устанавливает."""
+    m = re.search(r"судебного приказа[^\n]*?но не менее\s+([\d\s]+)\s*рубл", text)
+    return num(m.group(1)) if m else 0
+
+
 def appeal_rates(text: str, item: str) -> dict:
     """Фиксированные ставки подпункта 19/20/21 из текста статьи."""
     m = re.search(rf"^{item}\)\s", text, re.M)
@@ -233,6 +239,13 @@ def main() -> int:
     if a.prikaz:
         total = int(round(base * 0.5))
         note = "Судебный приказ — 50% от пошлины по исковому заявлению."
+        # В арбитраже у половины есть НИЖНИЙ ПРЕДЕЛ: подп. 3 п. 1 ст. 333.21 НК —
+        # «но не менее 8000 рублей». Минимум читаем из текста статьи, не зашиваем.
+        floor = order_floor(text)
+        if floor and total < floor:
+            note += (f" Применён минимум подп. 3 п. 1 ст. {art_num}: "
+                     f"{floor:,} руб. вместо {total:,} руб.".replace(",", " "))
+            total = floor
     print(f"Цена иска: {a.cena:,} руб.".replace(",", " "))
     print(f"Пошлина по шкале (исковое заявление): {base:,} руб.".replace(",", " "))
     if note:
@@ -325,6 +338,10 @@ def selftest() -> int:
              _cli_total(["--status", "fiz", "--instanciya", "apellyaciya", "--cena", "450000"]) == 3000),
             ("CLI: первая инстанция считает по шкале",
              _cli_total(["--cena", "450000"]) == 13750),
+            ("CLI: арбитражный приказ не ниже минимума статьи",
+             _cli_total(["--cena", "100000", "--sud", "arbitrazh", "--prikaz"]) == 8000),
+            ("CLI: приказ в СОЮ минимума не имеет",
+             _cli_total(["--cena", "100000", "--prikaz"]) == 2000),
             ("CLI: жалоба без --status отвергается внятно, а не падением",
              _cli_refuses(["--instanciya", "apellyaciya"], "--status")),
         ]
