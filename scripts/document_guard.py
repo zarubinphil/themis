@@ -105,7 +105,9 @@ def check_docx(path: str, l3: bool = False) -> list[str]:
         li = par.paragraph_format.left_indent
         li_cm = round(li.cm, 2) if li is not None else 0.0
         if fi_cm < 0 and abs(li_cm + fi_cm) <= 0.05 and li_cm > 0:
-            continue  # корректный висячий отступ
+            continue  # корректный висячий отступ нумерованного абзаца
+        if abs(fi_cm) <= 0.05 and li_cm > 0:
+            continue  # блок-цитата: отступ слева есть, первой строки нет
         if abs(fi_cm - SPEC_INDENT_CM) > 0.05:
             bad_indent.add(fi_cm)
     if bad_indent:
@@ -167,7 +169,17 @@ def check_attachments(text: str) -> list[str]:
         return []
     tail = text[m.end():]
     body = text[:m.start()]
-    nums = [int(x) for x in re.findall(r"(?m)^\s*(\d{1,2})[.)]\s+\S", tail)]
+    items = re.findall(r"(?m)^\s*(\d{1,2})[.)]\s+(.+)$", tail)
+    nums = [int(n) for n, _ in items]
+    # Приложения по ст. 126 АПК и ст. 132 ГПК подаются в силу закона, а не в
+    # подтверждение довода: госпошлина, выписка ЕГРЮЛ, доказательства
+    # направления копии, доверенность, диплом. Требовать ссылку на них в
+    # мотивировочной части бессмысленно — это была ложная тревога.
+    PROCEDURAL = ("пошлин", "егрюл", "егрип", "направлени", "вручени",
+                  "почтов", "квитанц", "опись", "доверенност", "диплом",
+                  "ордер", "выписка из един")
+    procedural_nums = {int(n) for n, title in items
+                       if any(k in title.lower() for k in PROCEDURAL)}
     problems = []
     if not nums:
         return ["раздел «Приложения» есть, но перечень пуст или не пронумерован"]
@@ -175,7 +187,7 @@ def check_attachments(text: str) -> list[str]:
     if nums != expected:
         problems.append(f"нумерация приложений не сквозная: {nums} (ожидалось {expected})")
     mentioned = set(int(x) for x in re.findall(r"(?:приложени[ияюе]\s*№?\s*(\d{1,2}))", body, re.I))
-    missing = [n for n in nums if n not in mentioned]
+    missing = [n for n in nums if n not in mentioned and n not in procedural_nums]
     if missing and mentioned:
         problems.append(f"приложения {missing} не упомянуты в тексте документа")
     return problems
