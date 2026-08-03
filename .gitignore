@@ -56,3 +56,6 @@ knowledge/plenumy/
 knowledge/_corpus_archive/
 .cache/practice/
 knowledge/legal-design/_council/_mapping_SECRET.md
+
+# сырые логи прогонов агентов — не публиковать
+knowledge/legal-design/_raw/
