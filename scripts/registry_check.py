@@ -74,10 +74,15 @@ def check(cases: str) -> dict:
     index_txt = rows_of(os.path.join(cases, "_index.md"))
     clients_txt = rows_of(os.path.join(cases, "_clients.md"))
 
+    # Ключи первой колонки таблицы реестра клиентов — точными значениями.
+    clients_keys = {m.group(1).strip()
+                    for m in re.finditer(r"(?m)^\|\s*([^|]+?)\s*\|", clients_txt)}
     missing_in_index, missing_in_clients = [], []
     for client, case_dirs in clients.items():
-        if not re.search(rf"(?m)^\|\s*{re.escape(client)}\s*\|", clients_txt) \
-                and client not in clients_txt:
+        # Раньше был подстрочный фолбэк «client not in clients_txt»: папка ivanov
+        # «находилась» в строке про ivanov-petr, и пропуск клиента маскировался.
+        # Ключ ищем только точной ячейкой таблицы.
+        if client not in clients_keys:
             missing_in_clients.append(client)
         for c in case_dirs:
             if f"{client}/{c}" not in index_txt:
@@ -148,6 +153,7 @@ def selftest() -> int:
     tmp = tempfile.mkdtemp()
     cases = os.path.join(tmp, "cases")
     for rel in ["ivanov/dolg-2026/01_context", "petrov/razvod-2026/00_intake",
+                "ivan/spor-2026/01_context",
                 "_templates/x", "_logs/y", "node_modules/pako", "ivanov/node_modules"]:
         os.makedirs(os.path.join(cases, rel))
     open(os.path.join(cases, "ivanov", "_client.md"), "w").write("# профиль")
@@ -157,12 +163,17 @@ def selftest() -> int:
         "| Призрак | Нет такого | sidorov/net-2020 | \n")
     open(os.path.join(cases, "_clients.md"), "w", encoding="utf-8").write(
         "| Папка | ФИО |\n|---|---|\n| ivanov | Иванов |\n")
+    open(os.path.join(cases, "ivan", "_client.md"), "w").write("# профиль")
 
     res = check(cases)
     checks = [
-        ("служебные папки не считаются делами", set(res["clients"]) == {"ivanov", "petrov"}),
-        ("пропущенное дело найдено", res["missing_in_index"] == ["petrov/razvod-2026"]),
-        ("пропущенный клиент найден", res["missing_in_clients"] == ["petrov"]),
+        ("служебные папки не считаются делами",
+         set(res["clients"]) == {"ivanov", "petrov", "ivan"}),
+        ("пропущенное дело найдено",
+         res["missing_in_index"] == ["ivan/spor-2026", "petrov/razvod-2026"]),
+        # Коллизия префикса: папка ivan НЕ покрыта строкой про ivanov.
+        ("пропущенный клиент найден", res["missing_in_clients"] == ["ivan", "petrov"]),
+        ("префикс чужой строки не засчитывается", "ivan" in res["missing_in_clients"]),
         ("клиент без профиля найден", res["no_profile"] == ["petrov"]),
         ("строка-призрак найдена", res["ghost"] == ["sidorov/net-2020"]),
         ("чужие папки отделены от дел",

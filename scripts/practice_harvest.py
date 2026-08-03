@@ -62,6 +62,17 @@ def harvest(cases_dir: str) -> dict[str, dict]:
             case_dir = os.path.join(cdir, case)
             if not os.path.isdir(case_dir) or case.startswith((".", "_")):
                 continue
+            # Номер САМОГО дела встречается в его же материалах на каждой странице —
+            # и попадал в кандидаты как «практика». Собираем и исключаем.
+            own = set()
+            for probe in ("_case.md", "01_context/knowledge-map.md"):
+                try:
+                    head = open(os.path.join(case_dir, probe), encoding="utf-8",
+                                errors="replace").read()
+                except OSError:
+                    continue
+                own |= set(PATTERNS["СОЮ"].findall(head))
+                own |= set(PATTERNS["Арбитраж"].findall(head))
             for pattern in SOURCE_GLOBS:
                 for path in glob.glob(os.path.join(case_dir, pattern)):
                     try:
@@ -71,6 +82,8 @@ def harvest(cases_dir: str) -> dict[str, dict]:
                     for kind, rx in PATTERNS.items():
                         for m in rx.finditer(text):
                             key = act_key(kind, m)
+                            if key in own:
+                                continue
                             rec = found[key]
                             rec["count"] += 1
                             rec["cases"].add(f"{client}/{case}")
@@ -92,7 +105,10 @@ def candidates(cases_dir: str, index_path: str) -> list[tuple[str, dict]]:
     out = []
     for key, rec in harvest(cases_dir).items():
         probe = re.sub(r"^Постановление (Пленума ВС РФ|КС РФ) ", "", key)
-        if probe in idx or key in idx:
+        # Подстрочная проверка «поглощала» кандидатов: 81-КГ19-2 находился внутри
+        # 81-КГ19-20, А65-1234/2024 — внутри А65-12345/2024, и акт молча терялся.
+        # Границы токена: слева и справа не должно быть цифры, буквы, дефиса и слеша.
+        if re.search(rf"(?<![\w/-]){re.escape(probe)}(?![\w/-])", idx):
             continue
         out.append((key, rec))
     out.sort(key=lambda kv: (-len(kv[1]["cases"]), -kv[1]["count"], kv[0]))
@@ -189,14 +205,15 @@ def to_markdown(items: list[tuple[str, dict]]) -> str:
              "",
              f"Собрано механически из дел, {len(items)} актов не найдено в базе.",
              "Проверить применимость и внести через archivist. Реквизиты — сверить `verify_act.py`.",
+             "Пути дел и цитаты-контекст намеренно не выводятся: имя папки — фамилия "
+             "доверителя. Нужен контекст — грепнуть реквизит по `cases/` локально.",
              ""]
     for key, rec in items:
         lines.append(f"## {key}")
         lines.append(f"- **Тип:** {rec.get('kind', '?')}")
-        lines.append(f"- **Встречается:** {rec['count']} раз в {len(rec['cases'])} делах "
-                     f"({', '.join(sorted(rec['cases'])[:5])}"
-                     f"{'…' if len(rec['cases']) > 5 else ''})")
-        lines.append(f"- **Контекст:** …{rec['context']}…")
+        # Ни путей дел, ни сырого контекста: имя папки — это фамилия доверителя,
+        # а контекст берётся из материалов дела. Обещание «без ПД» должно быть правдой.
+        lines.append(f"- **Встречается:** {rec['count']} раз в {len(rec['cases'])} делах")
         lines.append("")
     return "\n".join(lines)
 
@@ -208,7 +225,8 @@ def selftest() -> int:
     ctx = os.path.join(cases, "ivanov", "dolg-2026", "01_context")
     os.makedirs(ctx)
     open(os.path.join(ctx, "practice.md"), "w", encoding="utf-8").write(
-        "Постановление Пленума ВС РФ от 23.06.2015 № 25, п. 86. Также 81-КГ19-2 и дело А65-12345/2024. "
+        "Постановление Пленума ВС РФ от 23.06.2015 № 25, п. 86. Также 81-КГ19-2, 81-КГ19-20 "
+        "и дело А65-12345/2024. "
         "Постановление КС РФ № 35-П. Суд рассмотрел дело и удовлетворил.")
     ctx2 = os.path.join(cases, "petrov", "razdel-2026", "01_context")
     os.makedirs(ctx2)
@@ -218,7 +236,7 @@ def selftest() -> int:
     index = os.path.join(tmp, "practice_index.md")
     open(index, "w", encoding="utf-8").write(
         "_Обновлено: 01.01.2026 | Записей: 5_\n## ГК РФ\n"
-        "### Мнимые сделки\n- **Источник:** hunter\n- **Позиция:** текст\n"
+        "### Мнимые сделки\n- **Источник:** hunter\n- **Позиция:** текст 81-КГ19-2\n"
         "Пленума ВС РФ от 23.06.2015 № 25\n"
         "### Дубль\n- **Источник:** из памяти\n- **Позиция:** текст\n"
         "### Дубль\n- **Позиция:** текст\n")
@@ -227,10 +245,15 @@ def selftest() -> int:
     aud = audit_index(index)
     checks = [
         ("уже внесённый Пленум не предлагается", "Постановление Пленума ВС РФ от 23.06.2015 № 25" not in cands),
-        ("определение ВС найдено", "81-КГ19-2" in cands),
+        ("внесённое определение ВС не предлагается повторно", "81-КГ19-2" not in cands),
         ("арбитражное дело найдено", "А65-12345/2024" in cands),
         ("постановление КС найдено", "Постановление КС РФ № 35-П" in cands),
         ("«суд рассмотрел» без номера не попадает", all("рассмотрел" not in k for k in cands)),
+        # Подстрочное поглощение: 81-КГ19-2 внесён, 81-КГ19-20 — другой акт и обязан
+        # остаться кандидатом. Раньше он молча исчезал.
+        ("похожий номер не поглощается внесённым", "81-КГ19-20" in cands),
+        ("выгрузка не содержит путей дел",
+         "ivanov" not in to_markdown(list(cands.items()))),
         ("расхождение счётчика записей поймано", any("обещает 5" in p for p in aud)),
         ("дубль заголовка пойман", any("дубли заголовков" in p for p in aud)),
         ("источник «из памяти» пойман", any("из памяти" in p for p in aud)),
