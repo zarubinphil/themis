@@ -88,12 +88,16 @@ def edit_distance_le1(a: str, b: str) -> bool:
 def near_twins(clients: dict[str, list[str]], cases: str) -> list[str]:
     """Пары папок-двойников: имена почти совпадают, а материалы есть у одной.
 
-    Прецедент 03.08.2026: на диске одновременно `klient-anon-1` (1191 файл) и
-    `nadeew-lf` (0 файлов), обе перечислены в обоих реестрах. Каждая по
+    Прецедент 03.08.2026: на диске одновременно лежали две папки одного дела,
+    имена которых различались одной буквой (`…v-lf` и `…w-lf`); в первой 1191
+    файл, во второй ноль, и обе были перечислены в обоих реестрах. Каждая по
     отдельности выглядит законной, расхождения реестра с диском нет — поэтому
     ни одна проверка «строка ↔ папка» такого не видит. Опознаётся только
-    сравнением имён между собой: `v`/`w` — одна правка, и это опечатка при
+    сравнением имён между собой: одна правка в имени — это опечатка при
     заведении дела, а не второй доверитель.
+
+    Имена реальных папок здесь намеренно не приводятся: имя папки дела — фамилия
+    доверителя, то есть персональные данные, а файл лежит в публичном репозитории.
     """
     names = sorted(clients)
     weight = {n: sum(len(files) for _, _, files in os.walk(os.path.join(cases, n)))
@@ -213,7 +217,7 @@ def selftest() -> int:
     for rel in ["ivanov/dolg-2026/01_context", "petrov/razvod-2026/00_intake",
                 "ivan/spor-2026/01_context",
                 # Двойник по одной правке: petrow — опечатка при заведении дела,
-                # материалов нет. Прецедент klient-anon-1 / nadeew-lf, 03.08.2026.
+                # материалов нет. Так выглядела пара папок из прецедента 03.08.2026.
                 "petrow/razvod-2026/00_intake",
                 "_templates/x", "_logs/y", "node_modules/pako", "ivanov/node_modules"]:
         os.makedirs(os.path.join(cases, rel))
@@ -225,8 +229,8 @@ def selftest() -> int:
     open(os.path.join(cases, "_clients.md"), "w", encoding="utf-8").write(
         "| Папка | ФИО |\n|---|---|\n| ivanov | Иванов |\n")
     open(os.path.join(cases, "ivan", "_client.md"), "w").write("# профиль")
-    # У petrov материалы есть, у двойника petrow — ноль. Именно так выглядела
-    # пара klient-anon-1 (1191 файл) / nadeew-lf (0 файлов) на диске 03.08.2026.
+    # У petrov материалы есть, у двойника petrow — ноль. Ровно так выглядела
+    # реальная пара папок на диске 03.08.2026: 1191 файл против нуля.
     open(os.path.join(cases, "petrov", "razvod-2026", "_case.md"),
          "w", encoding="utf-8").write("# дело")
 
@@ -251,9 +255,9 @@ def selftest() -> int:
          any("petrov (файлов 1)" in t for t in res["twins"])),
         ("несвязанные имена двойниками не считаются",
          not any("ivanov" in t and "petrov" in t for t in res["twins"])),
-        ("одна правка опознаётся", edit_distance_le1("klient-anon-1", "nadeew-lf")),
+        ("одна правка опознаётся", edit_distance_le1("primerov-ab", "primerow-ab")),
         ("две правки двойником не считаются", not edit_distance_le1("ivanov", "petrov")),
-        ("вставка знака опознаётся", edit_distance_le1("klient-anon-2", "klient-anon-2a")),
+        ("вставка знака опознаётся", edit_distance_le1("obraztsova", "obraztsovaa")),
         ("клиент без профиля найден", res["no_profile"] == ["petrov", "petrow"]),
         ("строка-призрак найдена", res["ghost"] == ["sidorov/net-2020"]),
         ("чужие папки отделены от дел",
