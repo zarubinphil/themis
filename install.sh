@@ -15,7 +15,7 @@ fi
 
 # ── 1. Python-зависимости ────────────────────────────────────────────────────
 echo ""
-echo "[1/6] Python-пакеты…"
+echo "[1/7] Python-пакеты…"
 PIP="pip3"
 $PIP install --quiet --upgrade \
   pymupdf Pillow markitdown python-docx markitdown-mcp \
@@ -27,7 +27,7 @@ echo "      ✓ медиа:      openai-whisper (расшифровка ауди
 
 # ── 2. Apple Vision OCR (сборка из исходника) ────────────────────────────────
 echo ""
-echo "[2/6] Apple Vision OCR…"
+echo "[2/7] Apple Vision OCR…"
 if [ "$(uname)" = "Darwin" ] && command -v swiftc >/dev/null 2>&1; then
   mkdir -p bin
   swiftc -O bin/vision-ocr.swift -o bin/vision-ocr && chmod +x bin/vision-ocr
@@ -39,7 +39,7 @@ fi
 
 # ── 3. ffmpeg (для whisper) ──────────────────────────────────────────────────
 echo ""
-echo "[3/6] ffmpeg (для расшифровки медиа)…"
+echo "[3/7] ffmpeg (для расшифровки медиа)…"
 if command -v ffmpeg >/dev/null 2>&1; then
   echo "      ✓ ffmpeg есть"
 elif command -v brew >/dev/null 2>&1; then
@@ -50,19 +50,19 @@ fi
 
 # ── 4. Права на скрипты ──────────────────────────────────────────────────────
 echo ""
-echo "[4/6] Права на скрипты…"
+echo "[4/7] Права на скрипты…"
 chmod +x scripts/*.py 2>/dev/null || true
 echo "      ✓ scripts/*.py исполняемы"
 
 # ── 5. Директории рантайма ───────────────────────────────────────────────────
 echo ""
-echo "[5/6] Директории…"
+echo "[5/7] Директории…"
 mkdir -p cases/_logs cases/_assets knowledge "$HOME/Desktop/inbox"
 echo "      ✓ cases/_logs, cases/_assets, knowledge, ~/Desktop/inbox"
 
 # ── 6. Проверка Claude Code CLI ──────────────────────────────────────────────
 echo ""
-echo "[6/6] Claude Code CLI…"
+echo "[6/7] Claude Code CLI…"
 if command -v claude >/dev/null 2>&1; then
   echo "      ✓ claude найден: $(command -v claude)"
 else
@@ -70,9 +70,22 @@ else
   echo "        Themis работает поверх него (агенты, протокол, cockpit запускает claude -p)."
 fi
 
+# ── 7. Проверка фактом ───────────────────────────────────────────────────────
+# Установщик не имеет права печатать «готово», не проверив. Доктор гоняет
+# КОМАНДЫ (версии, импорты, запуск движка OCR, шрифты, каналы, десять selftest),
+# а не предположения, и возвращает 1, если чего-то критичного нет.
+echo ""
+echo "[7/7] Проверка окружения…"
+python3 scripts/setup_doctor.py || DOCTOR_RC=$?
+
 echo ""
 echo "════════════════════════════════════════════"
-echo "  Готово. Дальше:"
+if [ "${DOCTOR_RC:-0}" = "1" ]; then
+  echo "  УСТАНОВКА НЕ ЗАВЕРШЕНА: доктор нашёл критичное (список выше)."
+  echo "  Каждая красная строка несёт готовую команду починки."
+else
+  echo "  Готово. Дальше:"
+fi
 echo "  • Cockpit (UI):   python3 cockpit/app.py  → http://localhost:8800"
 echo "  • Или в Claude Code: открой проект, скажи «новое дело …»"
 echo "  • Обновление:     /themis-update  (тянет последнюю версию логики)"
