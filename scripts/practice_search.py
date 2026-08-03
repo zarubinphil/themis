@@ -121,9 +121,17 @@ def _resolve(field, value, section="regular"):
 
 
 def _curl(url, cookie_jar, referer=None, ajax=False, timeout=30):
-    """GET через curl. Возвращает тело ответа строкой либо None."""
+    """GET через curl. Возвращает тело ответа строкой либо None.
+
+    HTTP-код проверяется ОБЯЗАТЕЛЬНО. Без этого страница ошибки приходит как обычный
+    ответ: 03.08.2026 запрос несуществующего акта отдавал HTTP 500, а скрипт
+    возвращал «500. Произошла ошибка» как ТЕКСТ СУДЕБНОГО АКТА с кодом 0 и клал его
+    в кеш на две недели. Такой текст уходит в документ дословно.
+    """
+    marker = "__HTTPSTATUS__"
     cmd = ["curl", "-s", "-A", UA, "-b", cookie_jar, "-c", cookie_jar,
-           "--max-time", str(timeout), "-H", "Accept-Language: ru,en;q=0.8"]
+           "--max-time", str(timeout), "-H", "Accept-Language: ru,en;q=0.8",
+           "-w", f"{marker}%{{http_code}}"]
     if ajax:
         cmd += ["-H", "X-Requested-With: XMLHttpRequest"]
     if referer:
@@ -133,7 +141,27 @@ def _curl(url, cookie_jar, referer=None, ajax=False, timeout=30):
         r = subprocess.run(cmd, capture_output=True, timeout=timeout + 10)
     except subprocess.TimeoutExpired:
         return None
-    return r.stdout.decode("utf-8", "replace") if r.returncode == 0 else None
+    if r.returncode != 0:
+        return None
+    body, code = split_status(r.stdout.decode("utf-8", "replace"), marker)
+    if http_failed(code):
+        print(f"ВНИМАНИЕ: {url} ответил HTTP {code} — ответ отброшен, не кеширую.",
+              file=sys.stderr)
+        return None
+    return body
+
+
+def split_status(raw: str, marker: str = "__HTTPSTATUS__"):
+    """Отделить тело ответа от кода, дописанного curl -w."""
+    if marker in raw:
+        body, _, code = raw.rpartition(marker)
+        return body, code.strip()
+    return raw, ""
+
+
+def http_failed(code: str) -> bool:
+    """Ответ считать неудачей. Пустой код — старое поведение curl, не трогаем."""
+    return bool(code) and code.isdigit() and int(code) >= 400
 
 
 def _strip(s):
@@ -365,8 +393,13 @@ def get_document(url):
     if not page:
         return {"url": url, "error": "документ не получен"}
     # Страница ошибки/капчи отдаётся с кодом 200 и выглядит как обычный HTML.
-    if re.search(r"(?i)<title>[^<]*(404|не найдена|ошибка|captcha|доступ огранич)", page):
-        return {"url": url, "error": "страница не является актом (ошибка, капча либо заглушка)"}
+    # Маркер ищем и в <title>, и в <h1>: у sudact страница сбоя несёт родовой
+    # заголовок «500. Произошла ошибка», по одному <title> он ловился не всегда.
+    head = " ".join(re.findall(r"(?is)<(?:title|h1)[^>]*>(.*?)</(?:title|h1)>", page)[:3])
+    if _error_page(page):
+        return {"url": url,
+                "error": f"страница не является актом: заголовок «{_strip(head)[:80]}» — "
+                         "ошибка, капча либо заглушка. Цитировать нельзя"}
     # Тело акта лежит между <hr class="hr-h1"> и блоком «поделиться» в подвале.
     # Отдельного контейнера у него нет — рамки установлены по разметке страницы.
     start = page.find('<hr class="hr-h1">')
@@ -487,6 +520,12 @@ def partitioned_search(text, section="regular", per_region=30, max_regions=0,
         "части с неполным охватом": thin,
     }
     return out, report
+
+
+def _error_page(head_html: str) -> bool:
+    """Тот же детектор страницы-заглушки, что в get_document, — вынесен для проверки."""
+    head = " ".join(re.findall(r"(?is)<(?:title|h1)[^>]*>(.*?)</(?:title|h1)>", head_html)[:3])
+    return bool(re.search(r"(?i)\b[45]\d\d\b|не найдена|произошла ошибка|captcha|доступ огранич", head))
 
 
 def selftest():
@@ -622,6 +661,20 @@ def selftest():
             ("пустая выдача при нулевом счётчике кешируется",
              cacheable([], "Ничего не найдено")),
             ("непустая выдача кешируется", cacheable([{"url": "x"}], "Найдено 5 документов")),
+            # Страница сбоя источника не должна становиться «текстом акта»: она уходит
+            # в судебный документ дословно. Проверяем детектор на живых заголовках sudact.
+            ("страница 500 опознана как не-акт", _error_page("<title>500. Произошла ошибка</title>")),
+            ("страница 404 опознана как не-акт", _error_page("<h1>404. Страница не найдена</h1>")),
+            ("капча опознана как не-акт", _error_page("<title>Captcha</title>")),
+            ("нормальный заголовок акта не отбрасывается",
+             not _error_page("<h1>Решение № 2-45/2026 от 25 февраля 2026 г.</h1>")),
+            ("код 500 считается неудачей", http_failed("500")),
+            ("код 404 считается неудачей", http_failed("404")),
+            ("код 200 проходит", not http_failed("200")),
+            ("код 302 проходит", not http_failed("302")),
+            ("тело отделяется от кода",
+             split_status("<html>тело</html>__HTTPSTATUS__500") == ("<html>тело</html>", "500")),
+            ("ответ без маркера не портится", split_status("<html>тело</html>")[0] == "<html>тело</html>"),
         ]
     finally:
         _load_dicts, _search_page, search_allowed = real_dicts, real_page, real_allowed
