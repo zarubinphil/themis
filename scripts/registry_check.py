@@ -62,6 +62,61 @@ def scan_disk(cases: str) -> tuple[dict[str, list[str]], list[str], list[str]]:
     return clients, no_profile, alien
 
 
+def edit_distance_le1(a: str, b: str) -> bool:
+    """Имена различаются не больше чем одной правкой (замена, вставка, удаление)."""
+    if a == b:
+        return True
+    la, lb = len(a), len(b)
+    if abs(la - lb) > 1:
+        return False
+    if la == lb:
+        return sum(1 for x, y in zip(a, b) if x != y) == 1
+    short, long = (a, b) if la < lb else (b, a)
+    i = j = 0
+    skipped = False
+    while i < len(short) and j < len(long):
+        if short[i] == long[j]:
+            i += 1
+            j += 1
+        elif skipped:
+            return False
+        else:
+            skipped, j = True, j + 1
+    return True
+
+
+def near_twins(clients: dict[str, list[str]], cases: str) -> list[str]:
+    """Пары папок-двойников: имена почти совпадают, а материалы есть у одной.
+
+    Прецедент 03.08.2026: на диске одновременно `klient-anon-1` (1191 файл) и
+    `nadeew-lf` (0 файлов), обе перечислены в обоих реестрах. Каждая по
+    отдельности выглядит законной, расхождения реестра с диском нет — поэтому
+    ни одна проверка «строка ↔ папка» такого не видит. Опознаётся только
+    сравнением имён между собой: `v`/`w` — одна правка, и это опечатка при
+    заведении дела, а не второй доверитель.
+    """
+    names = sorted(clients)
+    weight = {n: sum(len(files) for _, _, files in os.walk(os.path.join(cases, n)))
+              for n in names}
+    out = []
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            twin = edit_distance_le1(a, b) or a.startswith(b) or b.startswith(a)
+            if not twin:
+                continue
+            # Двойник опасен, когда одна из папок пуста: система не знает, какая
+            # каноническая, и дело доверителя живёт рядом с пустышкой.
+            if weight[a] == 0 or weight[b] == 0:
+                empty, full = (a, b) if weight[a] == 0 else (b, a)
+                out.append(f"{empty} (файлов 0) и {full} (файлов {weight[full]}) — "
+                           "имена различаются одним знаком; пустая папка почти "
+                           "наверняка опечатка при заведении дела")
+            else:
+                out.append(f"{a} (файлов {weight[a]}) и {b} (файлов {weight[b]}) — "
+                           "имена почти совпадают, проверить, не одно ли это лицо")
+    return out
+
+
 def rows_of(path: str) -> str:
     try:
         return open(path, encoding="utf-8", errors="replace").read()
@@ -98,6 +153,7 @@ def check(cases: str) -> dict:
             ghost.append(rel)
 
     return {"clients": clients, "no_profile": no_profile, "alien": alien,
+            "twins": near_twins(clients, cases),
             "missing_in_index": missing_in_index,
             "missing_in_clients": sorted(set(missing_in_clients)),
             "ghost": sorted(set(ghost))}
@@ -133,6 +189,8 @@ def report(res: dict) -> int:
         ("строк без папки на диске", res["ghost"], "реестр показывает несуществующее дело"),
         ("чужие папки внутри cases/", res.get("alien", []),
          "код и зависимости в папке доверителей — вынести из cases/"),
+        ("папки-двойники", res.get("twins", []),
+         "дело доверителя рядом с пустышкой; какая каноническая — решает владелец"),
     ]:
         if items:
             problems += len(items)
@@ -154,6 +212,9 @@ def selftest() -> int:
     cases = os.path.join(tmp, "cases")
     for rel in ["ivanov/dolg-2026/01_context", "petrov/razvod-2026/00_intake",
                 "ivan/spor-2026/01_context",
+                # Двойник по одной правке: petrow — опечатка при заведении дела,
+                # материалов нет. Прецедент klient-anon-1 / nadeew-lf, 03.08.2026.
+                "petrow/razvod-2026/00_intake",
                 "_templates/x", "_logs/y", "node_modules/pako", "ivanov/node_modules"]:
         os.makedirs(os.path.join(cases, rel))
     open(os.path.join(cases, "ivanov", "_client.md"), "w").write("# профиль")
@@ -164,17 +225,36 @@ def selftest() -> int:
     open(os.path.join(cases, "_clients.md"), "w", encoding="utf-8").write(
         "| Папка | ФИО |\n|---|---|\n| ivanov | Иванов |\n")
     open(os.path.join(cases, "ivan", "_client.md"), "w").write("# профиль")
+    # У petrov материалы есть, у двойника petrow — ноль. Именно так выглядела
+    # пара klient-anon-1 (1191 файл) / nadeew-lf (0 файлов) на диске 03.08.2026.
+    open(os.path.join(cases, "petrov", "razvod-2026", "_case.md"),
+         "w", encoding="utf-8").write("# дело")
 
     res = check(cases)
     checks = [
         ("служебные папки не считаются делами",
-         set(res["clients"]) == {"ivanov", "petrov", "ivan"}),
+         set(res["clients"]) == {"ivanov", "petrov", "ivan", "petrow"}),
         ("пропущенное дело найдено",
-         res["missing_in_index"] == ["ivan/spor-2026", "petrov/razvod-2026"]),
+         res["missing_in_index"] == ["ivan/spor-2026", "petrov/razvod-2026",
+                                     "petrow/razvod-2026"]),
         # Коллизия префикса: папка ivan НЕ покрыта строкой про ivanov.
-        ("пропущенный клиент найден", res["missing_in_clients"] == ["ivan", "petrov"]),
+        ("пропущенный клиент найден",
+         res["missing_in_clients"] == ["ivan", "petrov", "petrow"]),
         ("префикс чужой строки не засчитывается", "ivan" in res["missing_in_clients"]),
-        ("клиент без профиля найден", res["no_profile"] == ["petrov"]),
+        # Двойники. Каждая папка по отдельности законна, расхождения реестра с
+        # диском нет — ловится только сравнением имён между собой.
+        ("пустой двойник по одной правке найден",
+         any("petrow" in t and "petrov" in t for t in res["twins"])),
+        ("пустой двойник назван первым и объявлен опечаткой",
+         any(t.startswith("petrow (файлов 0)") and "опечатка" in t for t in res["twins"])),
+        ("полная папка названа с числом файлов",
+         any("petrov (файлов 1)" in t for t in res["twins"])),
+        ("несвязанные имена двойниками не считаются",
+         not any("ivanov" in t and "petrov" in t for t in res["twins"])),
+        ("одна правка опознаётся", edit_distance_le1("klient-anon-1", "nadeew-lf")),
+        ("две правки двойником не считаются", not edit_distance_le1("ivanov", "petrov")),
+        ("вставка знака опознаётся", edit_distance_le1("klient-anon-2", "klient-anon-2a")),
+        ("клиент без профиля найден", res["no_profile"] == ["petrov", "petrow"]),
         ("строка-призрак найдена", res["ghost"] == ["sidorov/net-2020"]),
         ("чужие папки отделены от дел",
          set(res["alien"]) == {"node_modules", "ivanov/node_modules"}),

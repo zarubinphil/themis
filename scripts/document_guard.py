@@ -333,6 +333,22 @@ def _add_page_field(doc):
     return p
 
 
+def _add_fake_hyperlink(doc):
+    """Гиперссылка как её ставит Word: runs внутри w:hyperlink, в p.runs не видны."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    p = doc.add_paragraph()
+    link = OxmlElement("w:hyperlink")
+    link.set(qn("w:anchor"), "toc1")
+    run = OxmlElement("w:r")
+    text = OxmlElement("w:t")
+    text.text = "к разделу 1"
+    run.append(text)
+    link.append(run)
+    p._p.append(link)
+    return p
+
+
 def selftest() -> int:
     import tempfile
     from docx import Document
@@ -341,19 +357,43 @@ def selftest() -> int:
 
     tmp = tempfile.mkdtemp()
 
-    def build(path, *, font=SPEC_FONT_BODY, size=12, left=30, italic=False, spacing=1.15,
-              indent=1.25, pages=True,
+    def build(path, *, font=SPEC_FONT_BODY, size=12, left=30, top=20, bottom=30,
+              right=15, italic=False, underline=False, spacing=1.15,
+              indent=1.25, pages=True, align=WD_ALIGN_PARAGRAPH.JUSTIFY,
+              table=None, hyperlink=False, paragraphs=1,
               text="Текст документа, достаточно длинный абзац для проверки выравнивания."):
+        """Фикстура документа. КАЖДЫЙ параметр обязан быть покрыт проверкой.
+
+        Прежняя версия объявляла spacing= и indent=, но ни одна фикстура их не
+        передавала, таблиц не строила вовсе (`grep -c add_table` → 0), и восемь
+        ветвей сторожа можно было молча удалить при зелёном selftest (аудит
+        03.08.2026). Шапка процессуального документа — плавающая таблица, то есть
+        непокрытой оставалась ровно та часть, ради которой сторож и написан.
+        """
         d = Document()
-        s = d.sections[0]
-        s.top_margin, s.bottom_margin = Mm(20), Mm(30)
-        s.left_margin, s.right_margin = Mm(left), Mm(15)
-        p = d.add_paragraph()
-        p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-        p.paragraph_format.line_spacing = spacing
-        p.paragraph_format.first_line_indent = Cm(indent)
-        r = p.add_run(text * 2)
-        r.font.name, r.font.size, r.font.italic = font, Pt(size), italic
+        sec = d.sections[0]
+        sec.top_margin, sec.bottom_margin = Mm(top), Mm(bottom)
+        sec.left_margin, sec.right_margin = Mm(left), Mm(right)
+        if table is not None:
+            t = d.add_table(rows=len(table), cols=len(table[0]))
+            for row, cells in zip(t.rows, table):
+                for cell, spec in zip(row.cells, cells):
+                    cp = cell.paragraphs[0]
+                    cr = cp.add_run(spec["text"])
+                    cr.font.name = spec.get("font", font)
+                    cr.font.size = Pt(spec.get("size", size))
+                    if spec.get("underline"):
+                        cr.font.underline = True
+        for _ in range(paragraphs):
+            p = d.add_paragraph()
+            p.alignment = align
+            p.paragraph_format.line_spacing = spacing
+            p.paragraph_format.first_line_indent = Cm(indent)
+            r = p.add_run(text * 2)
+            r.font.name, r.font.size = font, Pt(size)
+            r.font.italic, r.font.underline = italic, underline
+        if hyperlink:
+            _add_fake_hyperlink(d)
         if pages:
             _add_page_field(d)
         d.save(path)
@@ -377,8 +417,70 @@ def selftest() -> int:
               "1. Договор\n2. Квитанция\n")
     att_gap = "Прошу приобщить приложение 1.\n\nПриложения:\n1. Договор\n3. Квитанция\n"
 
+    # Шапка процессуального документа — плавающая таблица. До 04.08.2026 ни одна
+    # фикстура таблиц не строила, и весь обход iter_paragraphs был не покрыт.
+    head_ok = [[{"text": "В Вахитовский районный суд города Казани"}],
+               [{"text": "Истец: Иванов Иван Иванович"}]]
+    head_alien_font = [[{"text": "В Вахитовский районный суд",
+                         "font": "Times New Roman"}]]
+    head_alien_size = [[{"text": "В Вахитовский районный суд", "size": 9}]]
+    head_underline = [[{"text": "В Вахитовский районный суд", "underline": True}]]
+    head_numbers = [[{"text": "Цена иска: 1 250 000 руб."}]]
+
+    with_table = build(os.path.join(tmp, "table.docx"), table=head_ok)
+    tbl_font = build(os.path.join(tmp, "tblfont.docx"), table=head_alien_font)
+    tbl_size = build(os.path.join(tmp, "tblsize.docx"), table=head_alien_size)
+    tbl_underline = build(os.path.join(tmp, "tblund.docx"), table=head_underline)
+    tbl_numbers = build(os.path.join(tmp, "tblnum.docx"), table=head_numbers)
+    bad_spacing = build(os.path.join(tmp, "spacing.docx"), spacing=2.0)
+    bad_indent = build(os.path.join(tmp, "indent.docx"), indent=0.5)
+    bad_size = build(os.path.join(tmp, "size.docx"), size=9)
+    with_underline = build(os.path.join(tmp, "und.docx"), underline=True)
+    with_link = build(os.path.join(tmp, "link.docx"), hyperlink=True)
+    left_aligned = build(os.path.join(tmp, "left.docx"),
+                         align=WD_ALIGN_PARAGRAPH.LEFT, paragraphs=5)
+    mostly_justified = build(os.path.join(tmp, "mostly.docx"), paragraphs=5)
+    dogovor_ok = build(os.path.join(tmp, "dog.docx"), top=20, bottom=20, left=25, right=20)
+
+    md_table = os.path.join(tmp, "table.md")
+    open(md_table, "w", encoding="utf-8").write(
+        "Цена иска: 1 250 000 руб.\n\n"
+        + "Текст документа, достаточно длинный абзац для проверки выравнивания." * 2)
+
     checks = [
         ("корректный документ проходит", check_docx(good) == []),
+        # Обход таблиц. Каждая ветвь проверки обязана видеть содержимое ячейки —
+        # иначе шапка документа не проверяется вообще ничем.
+        ("документ с таблицей-шапкой проходит", check_docx(with_table) == []),
+        ("чужой шрифт В ЯЧЕЙКЕ шапки пойман",
+         any("шрифт" in p for p in check_docx(tbl_font))),
+        ("чужой кегль В ЯЧЕЙКЕ шапки пойман",
+         any("кегли" in p for p in check_docx(tbl_size))),
+        ("подчёркивание В ЯЧЕЙКЕ шапки поймано",
+         any("подчеркивание" in p for p in check_docx(tbl_underline))),
+        ("число из .md найдено в ЯЧЕЙКЕ таблицы, а не объявлено пропавшим",
+         check_md_vs_docx(md_table, tbl_numbers) == []),
+        # Интервал и отступ: параметры build() существовали, но не передавались.
+        ("межстрочный интервал 2.0 пойман",
+         any("интервал" in p for p in check_docx(bad_spacing))),
+        ("абзацный отступ 0.5 см пойман",
+         any("отступ" in p for p in check_docx(bad_indent))),
+        ("кегль 9 пт пойман", any("кегли" in p for p in check_docx(bad_size))),
+        ("подчёркивание в теле поймано",
+         any("подчеркивание" in p for p in check_docx(with_underline))),
+        ("гиперссылка поймана", any("гиперссыл" in p for p in check_docx(with_link))),
+        # Порог JUSTIFY: доля, а не факт. Один абзац из пяти — терпимо, все пять — нет.
+        ("сплошное выравнивание влево поймано",
+         any("не по ширине" in p for p in check_docx(left_aligned))),
+        ("документ по ширине порога не превышает",
+         not any("не по ширине" in p for p in check_docx(mostly_justified))),
+        # Профиль договора: свои поля 20/20/25/20.
+        ("договор со своими полями проходит при --dogovor",
+         check_docx(dogovor_ok, dogovor=True) == []),
+        ("поля договора без флага считаются нарушением",
+         any("поле" in p for p in check_docx(dogovor_ok))),
+        ("судебные поля под флагом договора считаются нарушением",
+         any("поле" in p for p in check_docx(good, dogovor=True))),
         ("чужой шрифт пойман", any("шрифт" in p for p in check_docx(bad_font))),
         ("поле не по спецификации поймано", any("поле left" in p for p in check_docx(bad_margin))),
         ("L3 с полем 35 проходит при --l3", check_docx(l3_ok, l3=True) == []),
