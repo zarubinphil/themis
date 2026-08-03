@@ -29,6 +29,77 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
+# Порог доли непохожих на русские слов. Замер по 87 страницам живого OCR-кеша
+# 03.08.2026: медиана 0,0%, худшая страница 3,3%. Порог 15% отделяет порченый
+# лист от чистого с большим запасом и не даёт ложных тревог на нашем материале.
+GARBLED_MAX_SHARE = 15.0
+# Доля слов, где кириллица и латиница смешаны ВНУТРИ одного слова. Именно так
+# выглядит чужой OCR, запечённый в PDF: «Рссn)'6л~1кс». Общая доля латиницы для
+# этого не годится — «Volvo XC60» и «KTM 390» в отчёте оценщика законны, и по ней
+# страница с марками машин давала 42% и ложную тревогу (замер 03.08.2026).
+MIXED_MAX_SHARE = 8.0
+_CYR = re.compile(r"[А-Яа-яЁё]")
+_LAT = re.compile(r"[A-Za-z]")
+_VOWELS = set("аеёиоуыэюя")
+
+
+def word_is_odd(word: str) -> bool | None:
+    """Слово непохоже на русское. None — слово не оценивается (цифры, латиница целиком)."""
+    w = word.strip("«»\"'()[].,;:!?—-–№")
+    if len(w) < 4 or not re.fullmatch(r"[А-Яа-яЁё]+", w):
+        return None
+    lw = w.lower()
+    if not (set(lw) & _VOWELS):
+        return True                                    # ни одной гласной
+    if re.search(r"[бвгджзйклмнпрстфхцчшщ]{5,}", lw):
+        return True                                    # пять согласных подряд
+    if re.search(r"[а-яё][А-ЯЁ]", w[1:]):
+        return True                                    # заглавная в середине слова
+    if re.search(r"(.)\1{3,}", lw):
+        return True                                    # четыре одинаковых подряд
+    return False
+
+
+def mixed_script_share(text: str) -> tuple[float, int]:
+    """(доля слов со смешением алфавитов, сколько слов оценено)."""
+    words = [w.strip("«»\"'()[].,;:!?—-–№") for w in text.split()]
+    words = [w for w in words if len(w) >= 4 and (_CYR.search(w) or _LAT.search(w))]
+    if not words:
+        return 0.0, 0
+    mixed = sum(1 for w in words if _CYR.search(w) and _LAT.search(w))
+    return mixed / len(words) * 100, len(words)
+
+
+def garbled_share(text: str) -> tuple[float, int]:
+    """(доля непохожих слов в процентах, сколько слов оценено)."""
+    marks = [word_is_odd(w) for w in text.split()]
+    marks = [m for m in marks if m is not None]
+    if not marks:
+        return 0.0, 0
+    return sum(marks) / len(marks) * 100, len(marks)
+
+
+def page_text_bad(text: str) -> str:
+    """Пусто — страница в порядке. Иначе причина, по которой её нельзя читать как текст.
+
+    Две разные поломки, и одна метрика их не ловит:
+      • латиница внутри кириллицы — чужой OCR, запечённый в PDF («Рссn)'6л~1кс»);
+      • ломаная кириллица — слабый скан, гильош, печать поверх текста.
+    Прежний гейт не проверял НИ ОДНУ из них: единственная проверка страницы была
+    про таблицы, и флаг «бледная сетка» глушил даже её.
+    """
+    mixed, words = mixed_script_share(text)
+    if words >= 20 and mixed > MIXED_MAX_SHARE:
+        return (f"{mixed:.0f}% слов смешивают кириллицу с латиницей (порог "
+                f"{MIXED_MAX_SHARE:.0f}%, оценено {words}) — признак чужого OCR, "
+                "запечённого в файл; страницу перераспознать")
+    share, counted = garbled_share(text)
+    if counted >= 20 and share > GARBLED_MAX_SHARE:
+        return (f"{share:.0f}% слов непохожи на русские (порог {GARBLED_MAX_SHARE:.0f}%, "
+                f"оценено {counted}) — распознавание испорчено, читать нельзя")
+    return ""
+
+
 def check_ocr(ocr_dir: str) -> list[str]:
     """Каждая отрисованная страница дошла до текста; таблицы не потеряны."""
     problems: list[str] = []
@@ -48,7 +119,7 @@ def check_ocr(ocr_dir: str) -> list[str]:
             problems.append(f"манифест не читается ({e}) — полнота OCR не подтверждена")
 
     from table_guard import grid_signals, text_has_structure
-    lost, empty = [], []
+    lost, empty, faint_lost = [], [], []
     for png in pngs:
         txt_path = os.path.splitext(png)[0] + ".txt"
         page = os.path.basename(png)
@@ -59,14 +130,25 @@ def check_ocr(ocr_dir: str) -> list[str]:
         if not txt.strip():
             empty.append(page)
             continue
+        bad = page_text_bad(txt)
+        if bad:
+            problems.append(f"{page}: {bad}")
         g = grid_signals(png)
-        if g["grid"] and not text_has_structure(txt) and not g["faint"]:
-            lost.append(page)
+        if g["grid"] and not text_has_structure(txt):
+            # Бледная сетка больше не глушит сигнал целиком: table_guard.py для той же
+            # страницы даёт TABLE_STRUCTURE_LOST, и два инструмента проекта расходились
+            # в вердикте, причём слабейший стоял на входе.
+            (lost if not g["faint"] else faint_lost).append(page)
     if lost:
         problems.append(
             f"TABLE_STRUCTURE_LOST на {len(lost)} стр. ({', '.join(lost[:6])}"
             f"{'…' if len(lost) > 6 else ''}) — сетка на растре есть, в тексте структуры нет. "
             "Читать эти страницы по .md структурного OCR либо сверять по PNG.")
+    if faint_lost:
+        problems.append(
+            f"бледная сетка без структуры в тексте на {len(faint_lost)} стр. "
+            f"({', '.join(faint_lost[:6])}{'…' if len(faint_lost) > 6 else ''}) — "
+            "слабый сигнал, страницы глянуть глазами либо сверить по PNG.")
     if empty:
         problems.append(
             f"пустой OCR на {len(empty)} стр. ({', '.join(empty[:6])}"
@@ -202,6 +284,22 @@ def selftest() -> int:
         ("битый ИНН ловится", len(check_requisites(req_bad, None)) == 1),
         ("пустая OCR-папка — замечание", len(check_ocr(empty_ocr)) == 1),
         ("нечитаемый requisites не роняет", len(check_requisites(tmp + "/нет.json", None)) == 1),
+        # Качество распознавания страницы. Прежний гейт не проверял его вовсе:
+        # единственной проверкой листа была таблица, и «бледная сетка» глушила её.
+        ("чистый русский текст проходит", page_text_bad(
+            "Суд установил, что ответчик не исполнил обязательство по договору "
+            "подряда в установленный срок и нарушил условия соглашения сторон, "
+            "а также требования действующего законодательства о подряде и сроках") == ""),
+        ("смешение алфавитов ловится", "смешивают" in page_text_bad(
+            " ".join(["Рссn6лкс", "Тcтpстн", "Bepxoвный", "Cyдoм", "ycтaнoвлeнo"] * 6))),
+        ("латинские марки в русском тексте тревоги не дают", page_text_bad(
+            "Таблица 10.10 Марка Volvo XC60 II Год выпуска 2021 Пробег KM 109426 "
+            "Стоимость рублей 3 730 000 Источник анализ Оценщика по данным рынка "
+            "автомобилей марки KTM 390 Duke и прочих транспортных средств") == ""),
+        ("ломаная кириллица ловится", "непохожи" in page_text_bad(
+            " ".join(["стрктр", "првлн", "джквш", "БуКвА", "оооо" ] * 6))),
+        ("короткий обрывок не оценивается", page_text_bad("Суд решил") == ""),
+        ("цифры и реквизиты не считаются словами", garbled_share("7707083893 2-45/2026 №")[1] == 0),
     ]
     for name, ok in checks:
         print(f"  {'✓' if ok else '✗'} {name}")
