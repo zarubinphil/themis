@@ -285,6 +285,20 @@ def search_allowed() -> bool:
     return SUDACT_SEARCH_ALLOWED
 
 
+def apply_risk_flag(env_value: str | None, flag: bool) -> str | None:
+    """Каким станет THEMIS_SUDACT_SEARCH после флага --i-accept-robots-risk.
+
+    Возвращает '1' (разрешить), None (флага нет — ничего не менять) либо строку
+    'ОТКАЗ' (явный запрет перебивать нельзя). Вынесено отдельной функцией, чтобы
+    решение проверялось selftest'ом без сети и argparse.
+    """
+    if not flag:
+        return None
+    if env_value == "0":
+        return "ОТКАЗ"
+    return "1"
+
+
 PAGE_SIZE = 10  # sudact отдает по 10 карточек на страницу
 
 
@@ -713,6 +727,15 @@ def selftest():
              "не обойдено" in (limited.get("error") or "")),
             ("порог охвата назван в тексте ошибки",
              "охват" in (hard.get("error") or "")),
+            # Аварийный выключатель: флаг риска — согласие ЗА молчание проекта,
+            # а не право снять явный запрет владельца.
+            ("флаг риска не перебивает явное выключение",
+             apply_risk_flag("0", True) == "ОТКАЗ"),
+            ("флаг риска включает поиск при молчании переменной",
+             apply_risk_flag(None, True) == "1"),
+            ("флаг риска не мешает уже включённому",
+             apply_risk_flag("1", True) == "1"),
+            ("без флага переменная не трогается", apply_risk_flag("0", False) is None),
         ]
     finally:
         _load_dicts, _search_page, search_allowed = real_dicts, real_page, real_allowed
@@ -754,13 +777,15 @@ def main():
     # безусловная запись env="1" делала аварийный выключатель бесполезным: тот, кто
     # выставил THEMIS_SUDACT_SEARCH=0, получал поиск. Хук claude_guard.py при env=0
     # сырой curl не пускает — скрипт и хук расходились.
-    if getattr(args, "i_accept_robots_risk", False):
-        if os.environ.get("THEMIS_SUDACT_SEARCH") == "0":
-            print("ОТКАЗ: THEMIS_SUDACT_SEARCH=0 — поиск выключен явно. Флаг "
-                  "--i-accept-robots-risk запрет не снимает: снимите переменную "
-                  "или выставьте THEMIS_SUDACT_SEARCH=1.", file=sys.stderr)
-            return 4
-        os.environ["THEMIS_SUDACT_SEARCH"] = "1"
+    decided = apply_risk_flag(os.environ.get("THEMIS_SUDACT_SEARCH"),
+                              getattr(args, "i_accept_robots_risk", False))
+    if decided == "ОТКАЗ":
+        print("ОТКАЗ: THEMIS_SUDACT_SEARCH=0 — поиск выключен явно. Флаг "
+              "--i-accept-robots-risk запрет не снимает: снимите переменную "
+              "или выставьте THEMIS_SUDACT_SEARCH=1.", file=sys.stderr)
+        return 4
+    if decided:
+        os.environ["THEMIS_SUDACT_SEARCH"] = decided
 
     if args.selftest:
         return selftest()
