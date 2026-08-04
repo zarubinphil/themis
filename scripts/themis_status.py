@@ -210,7 +210,11 @@ def main() -> int:
     # так быстро не меняется, 30 дней было необоснованно жёстко. Год.
     PRACTICE_TTL_DAYS = 365
     pr_fresh = s2 and age_days(pr) <= PRACTICE_TTL_DAYS
-    s3 = has_marker(pos, r"СОГЛАСОВАНО СОВЕТОМ")
+    # Позиция закрывается так же двумя путями, как и практика выше: FULL — совет
+    # Ареопага («СОГЛАСОВАНО СОВЕТОМ»), FAST — синтез Фемидой («## FAST-ПОЗИЦИЯ
+    # ФЕМИДЫ»). Без второго маркера FAST-прогон упирался в шаг 3 навсегда: совета
+    # на нём не бывает, а ставить «СОГЛАСОВАНО СОВЕТОМ» без совета — врать прибору.
+    s3 = has_marker(pos, r"СОГЛАСОВАНО СОВЕТОМ") or has_marker(pos, r"## FAST-ПОЗИЦИЯ ФЕМИДЫ")
     s3_skip = has_marker(case_md, r"position-council пропущен")
 
     level = "?"
@@ -256,7 +260,9 @@ def main() -> int:
     elif s3_skip:
         print("Шаг 3 Позиция:   ✓  пропуск зафиксирован в _case.md")
     else:
-        print(f"Шаг 3 Позиция:   {mark(s3)}  positions.md {'СОГЛАСОВАНО СОВЕТОМ' if s3 else '— нет маркера'}")
+        s3_how = ("СОГЛАСОВАНО СОВЕТОМ" if has_marker(pos, r"СОГЛАСОВАНО СОВЕТОМ")
+                  else "FAST-ПОЗИЦИЯ ФЕМИДЫ" if s3 else "— нет маркера")
+        print(f"Шаг 3 Позиция:   {mark(s3)}  positions.md {s3_how}")
     print(f"Шаг 4 Черновики: {mark(bool(drafts))}  {len(drafts)} файл(ов) в 03_drafts")
     print(f"Шаг 5 Кони:      {mark(approved)}  "
           f"{'ГОТОВ К ПОДАЧЕ — ' + approved_in.name if approved else 'вердикта ГОТОВ К ПОДАЧЕ нет'}")
