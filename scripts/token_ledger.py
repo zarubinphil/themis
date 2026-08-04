@@ -94,9 +94,11 @@ STEP_BY_TYPE_FALLBACK = {"workflow-subagent": "система"}
 # бюджетные чекпойнты после шагов 2 и 3 отвечали не про те деньги. Сигнал берём из ПУТИ
 # и КОМАНДЫ, а не из описания: путь пишется всегда, описание — как получится.
 MAIN_SIGNALS = [
-    (r"Desktop/inbox|inbox-watcher|00_intake/", "0 интейк"),
-    (r"knowledge-map\.md|reader_|reconcile_|_working/|markdown_extract|vision-doc|render_tail",
-     "1 карта"),
+    (r"Desktop/inbox|inbox-watcher", "0 интейк"),
+    # 00_intake/ — не интейк, а картирование: шаг 0 это ПЕРЕНОС из инбокса (его делает
+    # inbox-triage и он считается по типу агента), а чтение материалов оттуда — уже карта.
+    (r"knowledge-map\.md|reader_|reconcile_|_working/|00_intake/|markdown_extract|vision-doc|"
+     r"render_tail", "1 карта"),
     (r"practice\.md|hunter_|_practice/|practice_index|practice_search|practice_harvest|cite\.py",
      "2 практика"),
     (r"positions\.md|_council/", "3 позиция"),
