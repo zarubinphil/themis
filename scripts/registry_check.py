@@ -85,6 +85,35 @@ def edit_distance_le1(a: str, b: str) -> bool:
     return True
 
 
+def disambiguated(cases: str, a: str, b: str) -> bool:
+    """Владелец уже разобрал пару и записал ответ в профиль доверителя.
+
+    Однофамильцы — не опечатка: две разные женщины с одной фамилией дают папки
+    `familiya` и `familiya-ab`, и вторая начинается с первой. Спрашивать про них
+    каждый прогон — значит приучить владельца пролистывать предупреждение, а
+    вместе с ним и настоящую опечатку. Поэтому ответ хранится на диске: строка в
+    `_client.md` любой из двух папок, где названа соседняя папка и сказано, что
+    это разные лица. Совпадение ФИО тут не годится: у одного профиля ФИО бывает
+    неполным, у другого стоит девичья фамилия — из строк «Зарипова» и «Зарипова
+    Диана Азатовна» вывод о тождестве не следует ни в одну сторону.
+
+    Само ФИО ни при каком исходе не читается в вывод: файл публичный.
+    """
+    for own, other in ((a, b), (b, a)):
+        path = os.path.join(cases, own, "_client.md")
+        try:
+            with open(path, encoding="utf-8", errors="ignore") as f:
+                text = f.read()
+        except OSError:
+            continue
+        for line in text.splitlines():
+            low = line.lower()
+            if "разные лица" in low and re.search(
+                    rf"(?<![a-z0-9-]){re.escape(other)}(?![a-z0-9-])", low):
+                return True
+    return False
+
+
 def near_twins(clients: dict[str, list[str]], cases: str) -> list[str]:
     """Пары папок-двойников: имена почти совпадают, а материалы есть у одной.
 
@@ -108,6 +137,11 @@ def near_twins(clients: dict[str, list[str]], cases: str) -> list[str]:
             twin = edit_distance_le1(a, b) or a.startswith(b) or b.startswith(a)
             if not twin:
                 continue
+            # Однофамильцы, уже разведённые владельцем в профиле, — не находка.
+            # Пустая папка остаётся находкой при любой пометке: у пустышки нечего
+            # разводить, там нет ни дела, ни доверителя.
+            if weight[a] and weight[b] and disambiguated(cases, a, b):
+                continue
             # Двойник опасен, когда одна из папок пуста: система не знает, какая
             # каноническая, и дело доверителя живёт рядом с пустышкой.
             if weight[a] == 0 or weight[b] == 0:
@@ -128,14 +162,48 @@ def rows_of(path: str) -> str:
         return ""
 
 
+def registry_keys(text: str) -> set[str]:
+    """Имена папок из реестра клиентов — из ЛЮБОЙ колонки, озаглавленной «Папка».
+
+    Физлица держат папку первой колонкой, компании — колонкой «Папка (владелец)»:
+    по правилу маршрутизации дело компании живёт в папке владельца, и имя папки
+    стоит четвёртой ячейкой. Проверка, читавшая только первую ячейку, объявляла
+    пропавшими четырёх зарегистрированных клиентов. Ложная тревога опаснее
+    молчания: владелец приучается пролистывать предупреждение, а вместе с ним
+    пролистает и настоящий пропуск.
+
+    Таблица без колонки «Папка» (связи между клиентами) не читается вовсе:
+    упоминание в графе «Клиент Б» — не регистрация. Подстрочного поиска здесь
+    нет намеренно: `ivanov` не должен находиться внутри строки про `ivanov-petr`.
+    """
+    keys: set[str] = set()
+    cols: list[int] | None = None  # None — заголовка ещё не было
+    for line in text.splitlines():
+        if not line.lstrip().startswith("|"):
+            cols = None
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if any(c.lower().startswith("папка") for c in cells):
+            cols = [i for i, c in enumerate(cells) if c.lower().startswith("папка")]
+            continue
+        if any(c.lower() in ("клиент", "компания", "фио") or c.lower().startswith(
+                ("клиент ", "компания ")) for c in cells):
+            cols = []  # заголовок есть, колонки «Папка» в нём нет — таблица не про папки
+            continue
+        if set("".join(cells)) <= set("-: "):
+            continue
+        for i in (cols if cols is not None else [0]):
+            if i < len(cells) and cells[i]:
+                keys.add(cells[i])
+    return keys
+
+
 def check(cases: str) -> dict:
     clients, no_profile, alien = scan_disk(cases)
     index_txt = rows_of(os.path.join(cases, "_index.md"))
     clients_txt = rows_of(os.path.join(cases, "_clients.md"))
 
-    # Ключи первой колонки таблицы реестра клиентов — точными значениями.
-    clients_keys = {m.group(1).strip()
-                    for m in re.finditer(r"(?m)^\|\s*([^|]+?)\s*\|", clients_txt)}
+    clients_keys = registry_keys(clients_txt)
     missing_in_index, missing_in_clients = [], []
     for client, case_dirs in clients.items():
         # Раньше был подстрочный фолбэк «client not in clients_txt»: папка ivanov
@@ -227,7 +295,20 @@ def selftest() -> int:
         "| Иванов | Долг | ivanov/dolg-2026 | \n"
         "| Призрак | Нет такого | sidorov/net-2020 | \n")
     open(os.path.join(cases, "_clients.md"), "w", encoding="utf-8").write(
-        "| Папка | ФИО |\n|---|---|\n| ivanov | Иванов |\n")
+        "| Папка | ФИО |\n|---|---|\n| ivanov | Иванов |\n"
+        "\n## Компании → Владельцы\n\n"
+        # Дело компании живёт в папке владельца: имя папки — в четвёртой ячейке.
+        "| Компания | Тип | ИНН | Папка (владелец) |\n|---|---|---|---|\n"
+        "| ООО «Пример» | ООО | 1 | petrov |\n"
+        "\n## Связи между клиентами\n\n"
+        # Упоминание клиента в графе связей регистрацией не считается.
+        # `ivan` стоит здесь ПЕРВОЙ ячейкой и больше нигде: строка про связь не
+        # регистрирует клиента ни в какой колонке, включая первую.
+        "| Клиент А | Клиент Б | Связь |\n|---|---|---|\n| ivanov | petrow | семья |\n"
+        "| ivan | ivanov | семья |\n"
+        # Как в живом файле: последним идёт раздел правил, а не таблица. Именно
+        # поэтому дописанные `--fix` строки читаются как таблица папок.
+        "\n## Правила маршрутизации\n\n1. Поиск по ФИО.\n")
     open(os.path.join(cases, "ivan", "_client.md"), "w").write("# профиль")
     # У petrov материалы есть, у двойника petrow — ноль. Ровно так выглядела
     # реальная пара папок на диске 03.08.2026: 1191 файл против нуля.
@@ -243,8 +324,14 @@ def selftest() -> int:
                                      "petrow/razvod-2026"]),
         # Коллизия префикса: папка ivan НЕ покрыта строкой про ivanov.
         ("пропущенный клиент найден",
-         res["missing_in_clients"] == ["ivan", "petrov", "petrow"]),
+         res["missing_in_clients"] == ["ivan", "petrow"]),
         ("префикс чужой строки не засчитывается", "ivan" in res["missing_in_clients"]),
+        # Компании: папка владельца стоит не первой ячейкой, а колонкой «Папка».
+        ("папка из колонки владельца засчитана", "petrov" not in res["missing_in_clients"]),
+        ("упоминание в связях регистрацией не считается",
+         "petrow" in res["missing_in_clients"]),
+        ("заголовок таблицы папкой не считается", "Папка" not in registry_keys(
+            rows_of(os.path.join(cases, "_clients.md")))),
         # Двойники. Каждая папка по отдельности законна, расхождения реестра с
         # диском нет — ловится только сравнением имён между собой.
         ("пустой двойник по одной правке найден",
@@ -263,6 +350,42 @@ def selftest() -> int:
         ("чужие папки отделены от дел",
          set(res["alien"]) == {"node_modules", "ivanov/node_modules"}),
     ]
+    # Однофамильцы. Своя песочница: пара «familiya» / «familiya-ab» — это две
+    # разные женщины, а не опечатка, и владелец записал это в профиль. Прибор
+    # обязан прочитать ответ с диска, иначе он спрашивает одно и то же вечно.
+    tw = os.path.join(tmp, "twins")
+    for rel in ("sestrova/delo-2026", "sestrova-ab/delo-2026",
+                "odnofam/delo-2026", "odnofam-cd/delo-2026",
+                "pustysh-xy/delo-2026", "pustysh"):
+        os.makedirs(os.path.join(tw, rel))
+    for c in ("sestrova", "sestrova-ab", "odnofam", "odnofam-cd", "pustysh-xy"):
+        open(os.path.join(tw, c, "delo-2026", "_case.md"), "w", encoding="utf-8").write("# дело")
+    open(os.path.join(tw, "sestrova-ab", "_client.md"), "w", encoding="utf-8").write(
+        "> Не путать с клиентом `sestrova` — это разные лица.\n")
+    # Пустышка с такой же пометкой: разводить нечего, находка обязана остаться.
+    open(os.path.join(tw, "pustysh-xy", "_client.md"), "w", encoding="utf-8").write(
+        "> Не путать с клиентом `pustysh` — это разные лица.\n")
+    # Пометка называет ЧУЖУЮ папку с тем же началом — пару она не закрывает.
+    open(os.path.join(tw, "odnofam-cd", "_client.md"), "w", encoding="utf-8").write(
+        "> Не путать с клиентом `odnofam-cdef` — это разные лица.\n")
+    # Простая перекрёстная ссылка на соседа — не ответ на вопрос о тождестве.
+    # Родственники и оппоненты ссылаются друг на друга сплошь и рядом.
+    open(os.path.join(tw, "odnofam", "_client.md"), "w", encoding="utf-8").write(
+        "> Смежное дело: см. `odnofam-cd`.\n")
+    twins = near_twins({c: [] for c in sorted(os.listdir(tw))}, tw)
+    checks += [
+        ("разведённые владельцем однофамильцы не всплывают",
+         not any("sestrova" in t for t in twins)),
+        ("пометка в профиле опознана", disambiguated(tw, "sestrova", "sestrova-ab")),
+        ("однофамильцы без пометки остаются вопросом",
+         any("odnofam" in t and "odnofam-cd" in t for t in twins)),
+        ("пометка про чужую папку пару не закрывает",
+         not disambiguated(tw, "odnofam", "odnofam-cd")),
+        ("пустой двойник всплывает даже с пометкой",
+         any(t.startswith("pustysh (файлов 0)") for t in twins)),
+        ("нет профиля — нет и пометки", not disambiguated(tw, "sestrova", "odnofam")),
+    ]
+
     append_rows(cases, res)
     after = check(cases)
     checks.append(("после --fix пропусков нет",
