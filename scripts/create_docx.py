@@ -25,25 +25,22 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
 
-# Шрифты утверждены владельцем 03.08.2026. Все три — свободные (SIL OFL),
-# кириллица проектировалась первой, а не досыпалась к латинице. Выбор
-# закрывает и требование ГОСТ Р 7.0.97-2016 п. 3.3: «необходимо использовать
-# свободно распространяемые бесплатные шрифты» (Times New Roman —
+# ОДНА гарнитура на весь документ — PT Serif. Решение владельца 04.08.2026,
+# отменяет четырехгарнитурный набор от 03.08.2026 (Playfair Display + PT Serif +
+# Golos Text + PT Mono). PT Serif — свободный (SIL OFL), кириллица проектировалась
+# первой; выбор закрывает требование ГОСТ Р 7.0.97-2016 п. 3.3 «необходимо
+# использовать свободно распространяемые бесплатные шрифты» (Times New Roman —
 # проприетарный Monotype).
-#   FONT_BODY    PT Serif   — тело, цитаты, просительная, приложения, подпись
-#   FONT_DISPLAY Golos Text — шапка, заголовки, ПРОШУ, ПРИЛОЖЕНИЯ, шапки таблиц
-#   FONT_MONO    PT Mono    — числовые колонки таблиц
+#
+# Имена констант оставлены: их читают полсотни мест кода, а роль — «титул»,
+# «заголовок», «числовая колонка» — от смены гарнитуры никуда не делась.
+# Иерархия теперь держится кеглем, начертанием и разрядкой, а не сменой шрифта.
 # Менять только новым решением владельца: документы практики обязаны быть
 # неотличимы друг от друга по оформлению.
 FONT_BODY = "PT Serif"
-FONT_DISPLAY = "Golos Text"
-FONT_MONO = "PT Mono"
-# Титульный блок: высококонтрастная антиква вразрядку — прием оформления
-# указов Президента РФ. Решение владельца 03.08.2026, вариант «Б»: гарнитура
-# работает ТОЛЬКО на наименовании суда, заголовке и подзаголовке документа.
-# Заголовки разделов остаются на Golos Text, тело на PT Serif: Playfair —
-# дисплейная антиква, в мелких кеглях она тонкая и разваливается.
-FONT_TITLE = "Playfair Display"
+FONT_DISPLAY = FONT_BODY
+FONT_MONO = FONT_BODY
+FONT_TITLE = FONT_BODY
 
 # Разрядка титульного блока в пунктах (межбуквенный интервал).
 TRACK_TITLE_PT = 3.0
@@ -488,8 +485,9 @@ class DocBuilder:
             p.paragraph_format.space_after       = Pt(2)
             p.paragraph_format.first_line_indent = Cm(0)
             text, bold = (value if isinstance(value, tuple) else (value, bold_default))
-            # Шапка — Golos Text; числовые колонки (выравнивание вправо) —
-            # PT Mono: цифры одной ширины, разряды выстраиваются столбиком.
+            # Гарнитура одна на всё (решение владельца 04.08.2026). Роли
+            # различаются начертанием: шапка таблицы — полужирный, числовые
+            # колонки идут вправо и держат разряды выравниванием, а не моноширинностью.
             if bold_default:
                 family = FONT_DISPLAY
             elif aligns[col_idx] == "r":
@@ -802,9 +800,12 @@ class DocBuilder:
 
     def add_page_numbers(self, hide_on_first=True):
         """
-        Номера страниц: арабские цифры, центр верхнего поля, первая страница
-        без номера (ГОСТ Р 7.0.97-2016). Обязательно для документов 2+ страниц.
-        Правый нижний угол остается свободным под штампы суда.
+        Номера страниц: арабские цифры, центр НИЖНЕГО поля, первая страница без
+        номера. Решение владельца 04.08.2026 — номер переехал из верхнего поля
+        вниз. Обязательно для документов 2+ страниц.
+
+        Штамп суда о приеме ставят в правом нижнем углу — центр нижнего поля
+        его не занимает.
 
         Вручную звать не обязательно: `save()` вызывает сам, если не вызвали.
         """
@@ -814,9 +815,9 @@ class DocBuilder:
 
         section = self.doc.sections[0]
         section.different_first_page_header_footer = hide_on_first
-        header = section.header
-        header.is_linked_to_previous = False
-        p = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
+        footer = section.footer
+        footer.is_linked_to_previous = False
+        p = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         probe = p.add_run("")
         _set_font(probe, 12, family=FONT_DISPLAY)

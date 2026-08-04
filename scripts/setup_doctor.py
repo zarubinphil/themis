@@ -58,9 +58,10 @@ NET_CHECKS = [
      "http://publication.pravo.gov.ru/document/0001202411300011", False),
 ]
 
-# Шрифты стандарта оформления (DOCX_FORMATTING.md §1). Без них .docx соберётся,
-# но Word подставит свои — документ уйдёт в суд не в том виде, в каком проверялся.
-FONTS = ["Playfair Display", "PT Serif", "Golos Text", "PT Mono"]
+# Шрифт стандарта оформления (DOCX_FORMATTING.md §1) — ОДИН, решение владельца
+# 04.08.2026. Без него .docx соберётся, но Word подставит свой — документ уйдёт
+# в суд не в том виде, в каком проверялся.
+FONTS = ["PT Serif"]
 
 
 def run(cmd: list[str], timeout: int = 20) -> tuple[int, str]:
@@ -170,11 +171,11 @@ def check_fonts(plat: str) -> dict:
                      "проверить вручную наличие: " + ", ".join(FONTS))
     missing = [f for f in FONTS if f.lower() not in haystack.lower()]
     if missing:
-        return check("шрифты .docx", WARN, "не установлены: " + ", ".join(missing),
-                     "поставить шрифты (Playfair Display, PT Serif, Golos Text, PT Mono — "
-                     "все бесплатные, fonts.google.com и paratype.ru); без них Word "
-                     "подставит свои, и документ уйдёт в суд не в том виде, в каком проверялся")
-    return check("шрифты .docx", OK, "все четыре на месте")
+        return check("шрифты .docx", WARN, "не установлен: " + ", ".join(missing),
+                     "поставить PT Serif (бесплатный, SIL OFL: fonts.google.com или "
+                     "paratype.ru); без него Word подставит свой, и документ уйдёт "
+                     "в суд не в том виде, в каком проверялся")
+    return check("шрифты .docx", OK, "PT Serif на месте")
 
 
 def check_net(offline: bool) -> list[dict]:
@@ -362,7 +363,7 @@ def selftest() -> int:
          all(any("КИРИЛЛИЦЕЙ" in n for n in platform_notes(p))
              for p in ("windows", "linux"))),
         ("порог версии Python не ниже 3.10", PY_MIN >= (3, 10)),
-        ("шрифты стандарта перечислены все четыре", len(FONTS) == 4),
+        ("стандарт держится на одной гарнитуре", FONTS == ["PT Serif"]),
     ]
     for name, ok in checks:
         print(f"  {'✓' if ok else '✗'} {name}")

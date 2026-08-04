@@ -272,6 +272,11 @@ def main_step_signal(name: str, inp: dict) -> str | None:
         return None if step == "прочее" else step
     text = " ".join(str(inp.get(k) or "")
                     for k in ("file_path", "command", "path", "pattern", "description"))
+    # ПРАВКА прибора — работа над системой, а не шаг дела. Запуск того же файла
+    # (`python3 scripts/quality_gate.py`) — наоборот, шаг. Различает не путь, а
+    # инструмент: Edit/Write по scripts/ и .claude/ чинят Фемиду, Bash её применяет.
+    if name in ("Edit", "Write", "NotebookEdit") and re.search(r"scripts/|\.claude/", text):
+        return "система"
     for pattern, step in MAIN_SIGNALS:
         if re.search(pattern, text, re.I):
             return step
@@ -542,6 +547,14 @@ def selftest() -> int:
                 == "4 составление"),
             ("посторонний файл сигналом не считается",
              main_step_signal("Read", {"file_path": "README.md"}) is None),
+            # Правка прибора и его запуск — разные вещи: первое чинит систему,
+            # второе исполняет шаг дела. Иначе вечер за починкой document_guard
+            # ложится в отчёт как «шаг 5 проверка».
+            ("правка прибора — работа над системой",
+             main_step_signal("Edit", {"file_path": "scripts/quality_gate.py"}) == "система"),
+            ("запуск того же прибора — шаг дела", main_step_signal(
+                "Bash", {"command": "python3 scripts/quality_gate.py --case cases/К/Д"})
+                == "5 проверка"),
             ("агент воркфлоу не валится в «прочее»",
              step_of("workflow-subagent", "You are an epistemics specialist") == "система"),
             ("модели разнесены",

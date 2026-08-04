@@ -6,12 +6,11 @@
 регулярно давая ложные тревоги. Здесь то же сравнение делает код.
 
 Проверяет по .claude/skills/doc-drafter/DOCX_FORMATTING.md:
-  поля 20/30/30/15 мм (L3 и кассация ВС — левое 35); шрифты PT Serif (тело),
-  Golos Text (заголовки), PT Mono (числовые колонки), Playfair Display
-  (титульный блок вразрядку) — набор утвержден владельцем 03.08.2026,
-  иные гарнитуры недопустимы; кегли 14/13/12/11,
-  межстрочный 1.15, абзацный отступ 1.25 см, тело JUSTIFY, отсутствие курсива
-  и подчеркивания, нумерация страниц — БЕЗУСЛОВНО в каждом документе.
+  поля 20/30/30/15 мм (L3 и кассация ВС — левое 35); ОДНА гарнитура PT Serif на
+  весь документ (решение владельца 04.08.2026, иные гарнитуры недопустимы);
+  кегли 14/13/12/11, межстрочный 1.15, абзацный отступ 1.25 см, тело JUSTIFY,
+  отсутствие курсива и подчеркивания, номер страницы — БЕЗУСЛОВНО в каждом
+  документе и БЕЗУСЛОВНО в нижнем колонтитуле.
 Плюс: текст .docx совпадает с .md, приложения пронумерованы сквозно и каждое
 упомянуто в тексте, запрещенная буква «ё», даты в формате ДД.ММ.ГГГГ.
 
@@ -33,13 +32,15 @@ SPEC_MARGINS_MM_L3 = {**SPEC_MARGINS_MM, "left": 35}
 # штампа экспедиции суда там ни при чем, а поля симметричнее и читать удобнее.
 # Шрифты, кегли, интервалы и нумерация страниц остаются общими для всего.
 SPEC_MARGINS_MM_DOGOVOR = {"top": 20, "bottom": 20, "left": 25, "right": 20}
-# Утверждено владельцем 03.08.2026. Три свободные гарнитуры (SIL OFL) с родной
-# кириллицей; заодно закрывают ГОСТ Р 7.0.97-2016 п. 3.3 о бесплатных шрифтах.
+# ОДНА гарнитура на документ — PT Serif. Решение владельца 04.08.2026, отменяет
+# набор из четырех гарнитур от 03.08.2026. PT Serif свободен (SIL OFL), кириллица
+# родная; закрывает ГОСТ Р 7.0.97-2016 п. 3.3 о бесплатных шрифтах. Любая другая
+# гарнитура в документе — нарушение: практика обязана выглядеть одинаково.
 SPEC_FONT_BODY = "PT Serif"
-SPEC_FONT_DISPLAY = "Golos Text"
-SPEC_FONT_MONO = "PT Mono"
-SPEC_FONT_TITLE = "Playfair Display"
-SPEC_FONTS = {SPEC_FONT_BODY, SPEC_FONT_DISPLAY, SPEC_FONT_MONO, SPEC_FONT_TITLE}
+SPEC_FONT_DISPLAY = SPEC_FONT_BODY
+SPEC_FONT_MONO = SPEC_FONT_BODY
+SPEC_FONT_TITLE = SPEC_FONT_BODY
+SPEC_FONTS = {SPEC_FONT_BODY}
 SPEC_FONT = SPEC_FONT_BODY  # обратная совместимость
 SPEC_SIZES = {11.0, 12.0, 13.0, 14.0}
 SPEC_LINE_SPACING = 1.15
@@ -179,18 +180,27 @@ def check_docx(path: str, l3: bool = False, dogovor: bool = False) -> list[str]:
     # doc.element.xml его нет никогда. Прежняя проверка искала только там,
     # поэтому на корректном документе давала ложную тревогу, а на собранном
     # мимо DocBuilder — не давала никакой (баг найден 03.08.2026).
-    parts = [doc.element.xml]
-    for sec in doc.sections:
-        for area in (sec.header, sec.footer, sec.first_page_header,
-                     sec.first_page_footer, sec.even_page_header,
-                     sec.even_page_footer):
+    def xml_of(areas):
+        out = []
+        for area in areas:
             try:
-                parts.append(area._element.xml)
+                out.append(area._element.xml)
             except Exception:
                 pass
-    if not any("PAGE" in x for x in parts):
-        problems.append("нет поля номера страницы — нумерация обязательна в каждом "
-                        "документе без исключений (протокол 03.08.2026)")
+        return out
+
+    footers, headers = [], []
+    for sec in doc.sections:
+        footers += xml_of((sec.footer, sec.first_page_footer, sec.even_page_footer))
+        headers += xml_of((sec.header, sec.first_page_header, sec.even_page_header))
+    if not any("PAGE" in x for x in footers):
+        if any("PAGE" in x for x in headers):
+            # Место номера — тоже часть стандарта, и проверять его должна машина.
+            problems.append("номер страницы стоит в ВЕРХНЕМ колонтитуле — с 04.08.2026 "
+                            "он ставится в нижнем, по центру")
+        else:
+            problems.append("нет поля номера страницы — нумерация обязательна в каждом "
+                            "документе без исключений (протокол 03.08.2026)")
     return problems
 
 
@@ -320,13 +330,18 @@ def check_md_vs_docx(md_path: str, docx_path: str) -> list[str]:
     return problems
 
 
-def _add_page_field(doc):
-    """Поле PAGE в верхнем колонтитуле — как это делает DocBuilder."""
+def _add_page_field(doc, top=False):
+    """Поле PAGE в нижнем колонтитуле — как это делает DocBuilder.
+
+    top=True — заведомо неверное место (верх): фикстура для проверки, что
+    сторож это ловит.
+    """
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
-    header = doc.sections[0].header
-    header.is_linked_to_previous = False
-    p = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
+    sec = doc.sections[0]
+    area = sec.header if top else sec.footer
+    area.is_linked_to_previous = False
+    p = area.paragraphs[0] if area.paragraphs else area.add_paragraph()
     fld = OxmlElement("w:fldSimple")
     fld.set(qn("w:instr"), " PAGE ")
     p._p.append(fld)
@@ -359,7 +374,7 @@ def selftest() -> int:
 
     def build(path, *, font=SPEC_FONT_BODY, size=12, left=30, top=20, bottom=30,
               right=15, italic=False, underline=False, spacing=1.15,
-              indent=1.25, pages=True, align=WD_ALIGN_PARAGRAPH.JUSTIFY,
+              indent=1.25, pages=True, pages_top=False, align=WD_ALIGN_PARAGRAPH.JUSTIFY,
               table=None, hyperlink=False, paragraphs=1,
               text="Текст документа, достаточно длинный абзац для проверки выравнивания."):
         """Фикстура документа. КАЖДЫЙ параметр обязан быть покрыт проверкой.
@@ -395,12 +410,13 @@ def selftest() -> int:
         if hyperlink:
             _add_fake_hyperlink(d)
         if pages:
-            _add_page_field(d)
+            _add_page_field(d, top=pages_top)
         d.save(path)
         return path
 
     good = build(os.path.join(tmp, "good.docx"))
     no_pages = build(os.path.join(tmp, "nopage.docx"), pages=False)
+    pages_up = build(os.path.join(tmp, "pageup.docx"), pages_top=True)
     bad_font = build(os.path.join(tmp, "font.docx"), font="Arial")
     bad_margin = build(os.path.join(tmp, "margin.docx"), left=25)
     l3_ok = build(os.path.join(tmp, "l3.docx"), left=35)
@@ -489,6 +505,11 @@ def selftest() -> int:
         ("буква ё поймана", any("«ё»" in p for p in check_docx(with_yo))),
         ("отсутствие нумерации страниц поймано",
          any("номера страницы" in p for p in check_docx(no_pages))),
+        # Место номера — часть стандарта: с 04.08.2026 он внизу по центру.
+        ("номер страницы наверху пойман",
+         any("ВЕРХНЕМ" in p for p in check_docx(pages_up))),
+        ("номер страницы внизу претензий не вызывает",
+         not any("номер страницы" in p for p in check_docx(good))),
         ("совпадающие md и docx проходят", check_md_vs_docx(md_ok, good) == []),
         ("разошедшиеся md и docx пойманы", check_md_vs_docx(md_other, good) != []),
         ("сквозная нумерация приложений проходит", check_attachments(att_ok) == []),
