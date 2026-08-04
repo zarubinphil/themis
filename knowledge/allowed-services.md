@@ -35,6 +35,7 @@
 | practice_search.py --find-court | каноническое название суда для фильтра `--court` | у источника нет ни автокомплита, ни справочника судов: фильтр срабатывает только на точное название, канон добывается из поля `b-justice` выдачи |
 | practice_harvest.py | практика из дел, которой нет в базе; аудит базы | `python3 scripts/practice_harvest.py [--audit]` |
 | sroki.py | процессуальные сроки (ГПК/ГК) и УИД дела по ISO 7064 | `python3 scripts/sroki.py --ot ДД.ММ.ГГГГ --mesyacev 1` либо `--uid …` |
+| retro.py | разбор работы: куда ушли токены, почему именно туда, и гейт на запись урока | `python3 scripts/retro.py --track FAST\|FULL`; `--lesson "…"` записывает урок. Код 1 — урок за сегодня не записан, задача не закрыта |
 | pd_guard.py | фамилия доверителя не уходит в публичный репозиторий (git-хуки pre-commit и commit-msg) | `python3 scripts/pd_guard.py --install` ставит хуки; `--tree` проверяет всё дерево. Обход — только осознанный: `PD_GUARD=0` |
 | setup_doctor.py | проверка окружения ФАКТОМ (версии, импорты, движок OCR, шрифты, каналы, 10 selftest) и платформенные особенности | `python3 scripts/setup_doctor.py [--json] [--offline]`; код 1 — система не готова |
 
