@@ -35,11 +35,23 @@ TEXT_EXT = {".docx", ".xlsx", ".pptx", ".rtf", ".txt", ".md", ".html", ".csv"}
 FLAGS = ("[ОБНОВИТЬ КЛИЕНТА]", "[ОБНОВИТЬ ИНДЕКС]")
 
 
+# Маркер, названный в отрицании, — не маркер. Прежняя проверка искала вхождение
+# подстроки по всему файлу, поэтому строка «Статус: зафиксировано, без маркера
+# "СОГЛАСОВАНО СОВЕТОМ"» засчитывалась как пройденный шаг: гейт открывался ровно
+# там, где обязан держать (дело 04.08.2026 — positions.md прямо писал «без
+# маркера», прибор показывал ✓, а claude_guard.py пускал запись черновиков).
+# Проверка идёт построчно, потому что все маркеры однострочные.
+NEGATED_MARKER_RE = re.compile(r"\b(?:без|нет|не)\s+маркера", re.I)
+
+
 def has_marker(f: Path, pattern: str) -> bool:
     try:
-        return bool(re.search(pattern, f.read_text(encoding="utf-8")))
+        text = f.read_text(encoding="utf-8")
     except OSError:
         return False
+    rx = re.compile(pattern)
+    return any(rx.search(line) and not NEGATED_MARKER_RE.search(line)
+               for line in text.splitlines())
 
 
 def age_days(f: Path) -> int:
@@ -327,6 +339,16 @@ def selftest() -> int:
     sha = hashlib.sha256((case / "00_intake" / "a.pdf").read_bytes()).hexdigest()
     (cache / f"{sha}.md").write_text("уже извлечено", encoding="utf-8")
 
+    # Три варианта записи маркера позиции — ровно те, что встречаются на диске.
+    neg = case / "01_context" / "pos_neg.md"
+    neg.write_text('Статус: зафиксировано, без маркера «СОГЛАСОВАНО СОВЕТОМ» '
+                   '(исключение по срокам).', encoding="utf-8")
+    pos_ok = case / "01_context" / "pos_ok.md"
+    pos_ok.write_text("СОГЛАСОВАНО СОВЕТОМ", encoding="utf-8")
+    mixed = case / "01_context" / "pos_mixed.md"
+    mixed.write_text('# позиция\nРаунд 1 шёл без маркера «СОГЛАСОВАНО СОВЕТОМ».\n'
+                     'СОГЛАСОВАНО СОВЕТОМ\n', encoding="utf-8")
+
     import io
     import contextlib
     buf = io.StringIO()
@@ -355,6 +377,11 @@ def selftest() -> int:
         # Два скана, извлечён один — по объёму это ещё не FAST.
         ("трек не занижается при нераспознанных сканах", "FULL по объёму" in out),
         ("машина не молчит о правовом вопросе", "practice_index" in out),
+        # Гейт обязан падать закрытым: маркер, названный в отрицании, не маркер.
+        ("маркер в отрицании не засчитан", not has_marker(neg, r"СОГЛАСОВАНО СОВЕТОМ")),
+        ("настоящий маркер по-прежнему виден", has_marker(pos_ok, r"СОГЛАСОВАНО СОВЕТОМ")),
+        ("отрицание не глушит маркер в других строках",
+         has_marker(mixed, r"СОГЛАСОВАНО СОВЕТОМ")),
     ]
     for name, ok in checks:
         print(f"  {'✓' if ok else '✗'} {name}")

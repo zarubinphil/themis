@@ -27,12 +27,23 @@ def block(msg: str) -> None:
     sys.exit(2)
 
 
+# Маркер, названный в отрицании, — не маркер. Поиск вхождением по всему файлу
+# засчитывал строку «в practice.md нет маркера «## FAST-СИНТЕЗ ФЕМИДЫ»» как
+# пройденный шаг: хук пропускал запись, которую обязан блокировать. Та же дыра
+# найдена и закрыта в scripts/themis_status.py (дело 04.08.2026). Проверка
+# построчная — все маркеры конвейера однострочные.
+_NEGATED_MARKER_RE = re.compile(r"\b(?:без|нет|не)\s+маркера", re.I)
+
+
 def _has_marker(path, pattern: str) -> bool:
     try:
         with open(path, encoding="utf-8") as f:
-            return bool(re.search(pattern, f.read()))
+            text = f.read()
     except OSError:
         return False
+    rx = re.compile(pattern)
+    return any(rx.search(line) and not _NEGATED_MARKER_RE.search(line)
+               for line in text.splitlines())
 
 
 # Практика считается закрытой ДВУМЯ путями, и они не равны по силе:
