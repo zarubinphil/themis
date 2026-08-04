@@ -82,10 +82,38 @@ STEP_BY_DESCRIPTION = [
      r"промпт|фабрик|синтезатор|рецензент|верификатор|migrat|рефактор", "система"),
 ]
 
+# Тип агента, когда описание ничего не сказало. Агенты воркфлоу (`workflow-subagent`)
+# получают задание английским промптом и мимо русских шаблонов проходят целиком;
+# по делу они не работают — конвейер дела идёт поимёнными агентами из STEP_BY_AGENT.
+# Замер 04.08.2026: 8,4 млн токенов «прочего» — это они и были.
+STEP_BY_TYPE_FALLBACK = {"workflow-subagent": "система"}
+
+# Шаг протокола по одному вызову инструмента ИЗ ГЛАВНОГО ПОТОКА. Главный поток —
+# самая дорогая статья: замер 04.08.2026 по 33 сессиям дал 59,8 % расхода, и весь он
+# лежал одной строкой «основной поток». Разбивка по шагам покрывала 22 % денег, то есть
+# бюджетные чекпойнты после шагов 2 и 3 отвечали не про те деньги. Сигнал берём из ПУТИ
+# и КОМАНДЫ, а не из описания: путь пишется всегда, описание — как получится.
+MAIN_SIGNALS = [
+    (r"Desktop/inbox|inbox-watcher|00_intake/", "0 интейк"),
+    (r"knowledge-map\.md|reader_|reconcile_|_working/|markdown_extract|vision-doc|render_tail",
+     "1 карта"),
+    (r"practice\.md|hunter_|_practice/|practice_index|practice_search|practice_harvest|cite\.py",
+     "2 практика"),
+    (r"positions\.md|_council/", "3 позиция"),
+    (r"03_drafts/|create_docx|md_to_docx|gosposhlina|calc395|make_playfair", "4 составление"),
+    (r"quality_gate|document_guard|table_guard|verify_inn|verify_act|crosscheck_numbers|"
+     r"sroki|02_hearings/", "5 проверка"),
+    (r"_index\.md|_clients\.md|_client\.md|registry_check|redline", "6 архив"),
+    (r"themis_status|token_ledger|retro\.py|setup_doctor|pd_guard|claude_guard|preflight_search|"
+     r"update_legal_corpus|lessons-log|_logs/|scripts/|\.claude/", "система"),
+]
+
 # Доля нераспределённого расхода, выше которой цифры по шагам нельзя считать
 # основанием для решений. Замер 03.08.2026 на живой сессии: 16,3% в «прочее».
 OTHER_ALERT_SHARE = 5.0
 
+# «основной поток» больше не шаг: его расход распределён по шагам через MAIN_SIGNALS,
+# а сам он остался строкой в разрезе агентов. Ключ сохранён в порядке ради старых --json.
 STEP_ORDER = ["основной поток", "0 интейк", "1 карта", "2 практика", "3 позиция",
               "4 составление", "5 проверка", "6 архив", "система", "прочее"]
 
@@ -163,11 +191,16 @@ def read_jsonl(path: str):
 
 
 def scan_file(path: str):
-    """Вернуть (usage по моделям, спавны субагентов) из одного jsonl.
+    """Вернуть (usage по моделям, спавны субагентов, свой тип, реплики по шагам).
 
     Дедупликация по requestId: одна реплика пишется в jsonl несколько раз.
+    Четвёртый элемент — реплики в порядке файла с уже проставленным шагом: шаг
+    «липкий», реплика без своего сигнала относится к последнему объявленному шагу,
+    потому что поток остаётся в шаге, пока не начнёт следующий.
     """
     seen: dict[str, tuple[dict, str]] = {}
+    step_at: dict[str, str | None] = {}
+    cur_step: str | None = None
     spawns: list[dict] = []
     descriptions: dict[str, str] = {}  # tool_use id -> description
     own_type = ""   # attributionAgent — тип самого агента, чей это транскрипт
@@ -190,6 +223,9 @@ def scan_file(path: str):
                 desc = (block.get("input") or {}).get("description")
                 if desc:
                     descriptions[block.get("id", "")] = desc
+                sig = main_step_signal(block.get("name") or "", block.get("input") or {})
+                if sig:
+                    cur_step = sig
 
         res = entry.get("toolUseResult")
         if isinstance(res, dict) and res.get("agentId"):
@@ -205,11 +241,13 @@ def scan_file(path: str):
         if u:
             key = entry.get("requestId") or entry.get("uuid")
             seen[key] = (u, msg.get("model") or "?")
+            step_at[key] = cur_step
 
     per_model: dict[str, dict] = defaultdict(blank)
     for u, model in seen.values():
         add(per_model[model], u)
-    return per_model, spawns, {"type": own_type, "desc": own_desc}
+    turns = [(u, model, step_at.get(key)) for key, (u, model) in seen.items()]
+    return per_model, spawns, {"type": own_type, "desc": own_desc}, turns
 
 
 def step_of(agent_type: str, description: str) -> str:
@@ -219,14 +257,30 @@ def step_of(agent_type: str, description: str) -> str:
     for pattern, step in STEP_BY_DESCRIPTION:
         if re.search(pattern, text):
             return step
-    return "прочее"
+    return STEP_BY_TYPE_FALLBACK.get(agent_type, "прочее")
+
+
+def main_step_signal(name: str, inp: dict) -> str | None:
+    """Шаг протокола по вызову инструмента из главного потока. None — сигнала нет."""
+    if name in ("Agent", "Task"):
+        step = step_of(inp.get("subagent_type") or "", inp.get("description") or "")
+        return None if step == "прочее" else step
+    if name == "Skill":
+        step = step_of("", f"{inp.get('skill') or ''} {inp.get('args') or ''}")
+        return None if step == "прочее" else step
+    text = " ".join(str(inp.get(k) or "")
+                    for k in ("file_path", "command", "path", "pattern", "description"))
+    for pattern, step in MAIN_SIGNALS:
+        if re.search(pattern, text, re.I):
+            return step
+    return None
 
 
 def collect(session_path: str) -> dict:
     """Собрать полный реестр по сессии: основной поток + все субагенты."""
     session_dir = os.path.join(os.path.dirname(session_path),
                                os.path.basename(session_path)[:-len(".jsonl")])
-    main_models, spawns, _ = scan_file(session_path)
+    _, spawns, _, main_turns = scan_file(session_path)
 
     agents: dict[str, dict] = {}
     for s in spawns:
@@ -241,7 +295,7 @@ def collect(session_path: str) -> dict:
                                             "agent-*.jsonl")))
     for path in sorted(transcripts):
         agent_id = os.path.basename(path)[len("agent-"):-len(".jsonl")]
-        models, child_spawns, own = scan_file(path)
+        models, child_spawns, own, _ = scan_file(path)
         rec = agents.setdefault(agent_id, {"type": "?", "desc": "", "parent": None,
                                            "models": defaultdict(blank)})
         # транскрипт агента знает свой тип сам — вызов родителя мог не попасть в разбор
@@ -269,8 +323,8 @@ def collect(session_path: str) -> dict:
     by_model: dict[str, dict] = defaultdict(blank)
     money = 0.0
 
-    for model, u in main_models.items():
-        add(by_step["основной поток"], u)
+    for u, model, step in main_turns:
+        add(by_step[step or "прочее"], u)
         add(by_agent["основной поток"], u)
         add(by_model[model_key(model)], u)
         money += cost(u, model)
@@ -329,6 +383,8 @@ def render(rep: dict, track: str | None) -> int:
     for step in known + sorted(extra):
         u = rep["by_step"][step]
         print(f"{step:<18}{tokens(u):>14,}{tokens(u)/total_tok*100:>7.1f}%{u['calls']:>9}")
+    print("  расход главного потока разнесён по шагам (сигнал — путь и команда вызова); "
+          "сам он виден строкой в разрезе агентов")
 
     print(f"\n{'агент':<26}{'токенов':>14}{'вызовов':>9}")
     for name, u in sorted(rep["by_agent"].items(), key=lambda kv: -tokens(kv[1]))[:15]:
@@ -340,8 +396,9 @@ def render(rep: dict, track: str | None) -> int:
         print(f"\n⚠ в «прочее» упало {other_share:.1f}% расхода ({other:,} токенов) — "
               f"порог {OTHER_ALERT_SHARE}%.".replace(",", " "))
         print("  Атрибуция по шагам протокола дырявая: выводы «шаг N стоит столько» "
-              "по этому прогону занижены. Пополнить STEP_BY_DESCRIPTION под реальные "
-              "описания вызовов либо передавать шаг явно при запуске агента.")
+              "по этому прогону занижены. Смотреть, чего не хватает: субагентам — "
+              "STEP_BY_DESCRIPTION и STEP_BY_TYPE_FALLBACK, главному потоку — MAIN_SIGNALS "
+              "(сигнал берётся из пути файла и команды).")
 
     print(f"\n{'модель':<34}{'токенов':>14}{'доля':>8}")
     for name, u in sorted(rep["by_model"].items(), key=lambda kv: -tokens(kv[1])):
@@ -407,16 +464,27 @@ def selftest() -> int:
                                           "cache_creation_input_tokens": cw,
                                           "cache_read_input_tokens": cr}})
 
+        def with_tool(model, i, o, cw, cr, rid, name, inp, tu_id="tu"):
+            return line(type="assistant", requestId=rid, message={
+                "model": model, "usage": {"input_tokens": i, "output_tokens": o,
+                                          "cache_creation_input_tokens": cw,
+                                          "cache_read_input_tokens": cr},
+                "content": [{"type": "tool_use", "id": tu_id, "name": name, "input": inp}]})
+
         with open(main, "w", encoding="utf-8") as fh:
             # одна реплика записана трижды с одним requestId — считается один раз
             for _ in range(3):
                 fh.write(assistant("claude-opus-5", 10, 20, 30, 40, "req_a"))
-            fh.write(assistant("claude-opus-5", 1, 2, 3, 4, "req_b"))
             # Модель вне тарифной таблицы. В логах проекта это claude-fable-5:
             # 1356 вызовов, 73,1 млн токенов — и все они молча считались «opus».
             fh.write(assistant("claude-fable-5", 5, 6, 7, 8, "req_f"))
             # синтетическая строка не считается вовсе
             fh.write(assistant("<synthetic>", 999, 999, 999, 999, "req_syn"))
+            # прибор дела из главного потока — это шаг протокола, а не «прочее»
+            fh.write(with_tool("claude-opus-5", 1, 2, 3, 4, "req_b", "Bash",
+                               {"command": "python3 scripts/registry_check.py"}))
+            # реплика без своего сигнала остаётся в текущем шаге
+            fh.write(assistant("claude-opus-5", 1, 1, 1, 1, "req_h"))
             fh.write(line(type="user", message={"content": [
                 {"type": "tool_use", "id": "tu1", "name": "Agent",
                  "input": {"description": "Картирую дело"}}]}))
@@ -442,19 +510,45 @@ def selftest() -> int:
             fh.write(assistant("claude-opus-5", 7, 8, 9, 10, "req_e"))
 
         rep = collect(main)
+        # Через .get: сломанная атрибуция должна давать НАЗВАННЫЙ провал проверки,
+        # а не KeyError — иначе непонятно, что именно отвалилось.
+        def st(step: str) -> dict:
+            return rep["by_step"].get(step, blank())
+
         checks = [
-            ("дубли по requestId схлопнуты", rep["by_step"]["основной поток"]["in"] == 16),
-            ("synthetic отброшен", rep["by_step"]["основной поток"]["out"] == 28),
-            ("субагент учтён один раз", rep["by_step"]["1 карта"]["in"] == 1100),
-            ("вложенный агент свёрнут в шаг родителя", rep["by_step"]["1 карта"]["cr"] == 4400),
-            ("шагов ровно три", set(rep["by_step"]) == {"основной поток", "1 карта", "5 проверка"}),
+            ("дубли по requestId схлопнуты", st("прочее")["in"] == 15),
+            ("synthetic отброшен", st("прочее")["out"] == 26),
+            ("субагент учтён один раз", st("1 карта")["in"] == 1100),
+            ("вложенный агент свёрнут в шаг родителя", st("1 карта")["cr"] == 4400),
+            ("шагов ровно четыре",
+             set(rep["by_step"]) == {"прочее", "6 архив", "1 карта", "5 проверка"}),
+            # Главный поток — самая дорогая статья; строкой «основной поток» он
+            # съедал 59,8 % расхода мимо всякой разбивки по шагам.
+            ("главный поток разнесён по шагам", "основной поток" not in rep["by_step"]),
+            ("вызов прибора дела привязан к своему шагу", st("6 архив")["in"] == 2),
+            ("реплика без сигнала наследует текущий шаг", st("6 архив")["cr"] == 5),
+            ("главный поток виден в разрезе агентов",
+             rep["by_agent"]["основной поток"]["in"] == 17),
+            ("до первого сигнала расход честно в «прочем»", st("прочее")["cr"] == 48),
+            ("сигнал по команде прибора", main_step_signal(
+                "Bash", {"command": "python3 scripts/quality_gate.py --case cases/X/Y"})
+                == "5 проверка"),
+            ("сигнал по пути файла дела", main_step_signal(
+                "Read", {"file_path": "cases/К/дело/01_context/practice.md"}) == "2 практика"),
+            ("сигнал по запуску агента", main_step_signal(
+                "Agent", {"subagent_type": "doc-drafter", "description": "документ"})
+                == "4 составление"),
+            ("посторонний файл сигналом не считается",
+             main_step_signal("Read", {"file_path": "README.md"}) is None),
+            ("агент воркфлоу не валится в «прочее»",
+             step_of("workflow-subagent", "You are an epistemics specialist") == "система"),
             ("модели разнесены",
              {"opus", "sonnet", "haiku"} <= set(rep["by_model"])),
             # Неизвестная модель обязана быть ВИДНА, а не растворяться в opus.
             ("неизвестная модель — отдельная строка разреза",
              any(k.startswith(UNKNOWN_PREFIX) and "fable" in k for k in rep["by_model"])),
             ("неизвестная модель не приписана opus",
-             rep["by_model"]["opus"]["in"] == 18),
+             rep["by_model"]["opus"]["in"] == 19),
             ("токены неизвестной модели не потеряны",
              sum(v["in"] for k, v in rep["by_model"].items()
                  if k.startswith(UNKNOWN_PREFIX)) == 5),
@@ -463,8 +557,8 @@ def selftest() -> int:
              rate_key("claude-fable-5") == "opus"),
             ("известная модель тариф не меняет",
              rate_key("claude-sonnet-5") == "sonnet" and rate_key("claude-haiku-4-5") == "haiku"),
-            ("агент воркфлоу учтён", rep["by_step"].get("5 проверка", {}).get("out") == 8),
-            ("итог сходится", tokens(rep["total"]) == 110 + 11000 + 34 + 26),
+            ("агент воркфлоу учтён", st("5 проверка")["out"] == 8),
+            ("итог сходится", tokens(rep["total"]) == 100 + 26 + 10 + 4 + 11000 + 34),
             ("деньги посчитаны", rep["money"] > 0),
             ("шаг по описанию", step_of("general-purpose", "Ареопаг раунд 2") == "3 позиция"),
             ("неизвестный агент → прочее", step_of("general-purpose", "чинить сборку") == "прочее"),

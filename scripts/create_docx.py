@@ -522,6 +522,9 @@ class DocBuilder:
         p.paragraph_format.space_before      = Pt(6)
         p.paragraph_format.space_after       = Pt(6)
         _set_font(p.add_run(text), 11)
+        if not hasattr(self, "_quote_paragraphs"):
+            self._quote_paragraphs = set()
+        self._quote_paragraphs.add(p._p)
         return p
 
     def add_proshyu(self):
@@ -849,12 +852,25 @@ class DocBuilder:
     )
 
     def _document_text(self):
-        """Весь видимый текст документа: параграфы плюс ячейки таблиц."""
-        parts = [p.text for p in self.doc.paragraphs]
+        """Весь видимый текст документа: параграфы плюс ячейки таблиц.
+
+        Блок-цитаты отдаются с markdown-префиксом «> ». Без него гейт читает
+        дословную норму закона как авторский текст и бракует документ за чужие
+        слова: scan_legal.sh выводит цитаты из авторских категорий именно по
+        этому префиксу, а в .docx разметки нет — цитату задает отступ.
+        Прецедент 04.08.2026: ч. 3 ст. 11 УПК РФ («достаточных данных») не
+        сохранялась, хотя тот же текст в .md проходил чисто.
+        """
+        quotes = getattr(self, "_quote_paragraphs", set())
+        parts = ["> " + p.text if p._p in quotes else p.text
+                 for p in self.doc.paragraphs]
         for t in self.doc.tables:
             for row in t.rows:
                 parts.extend(c.text for c in row.cells)
-        return "\n".join(x for x in parts if x.strip())
+        # Абзацы разделяются пустой строкой: scan_legal.sh склеивает соседние
+        # непустые строки в один абзац по правилам markdown, и цитата теряет
+        # свой префикс «> », если предыдущий абзац стоит вплотную.
+        return "\n\n".join(x for x in parts if x.strip())
 
     def _humanizer_gate(self):
         """Прогнать текст через scan_legal.sh. Вернуть список сработавших
