@@ -1,16 +1,38 @@
 #!/usr/bin/env python3
 """Машина состояний протокола Фемиды — детерминированный статус дела.
 
-Использование: python3 scripts/themis_status.py cases/{клиент}/{дело}
+Использование:
+    python3 scripts/themis_status.py cases/{клиент}/{дело}
+    python3 scripts/themis_status.py cases/{клиент}/{дело} --brief
+    python3 scripts/themis_status.py --selftest
 
 Читает маркеры с ДИСКА (не из памяти модели) и печатает: статус каждого шага
 и СЛЕДУЮЩИЙ ШАГ. Фемида обязана работать по этому выводу — это единственный
 источник правды о состоянии протокола.
+
+`--brief` добавляет сводку старта сессии и заменяет собой ритуал из шести чтений
+(лог, индекс, `_case.md`, профиль, событие, карта). Смысл не в удобстве, а в
+деньгах: прочитанный файл остаётся в контексте до конца сессии и переоплачивается
+КАЖДЫМ следующим обращением к инструменту. Индекс дел — 16,9 КБ, карта знаний —
+десятки килобайт; вместе ритуал заносил в контекст порядка 30 000 знаков, из
+которых для решения нужны полтора десятка строк. Их скрипт и печатает — бесплатно
+по токенам, потому что считает python, а не модель.
 """
+import argparse
 import datetime
+import hashlib
+import os
 import re
 import sys
 from pathlib import Path
+
+# Кеш роутера извлечения: если файл там есть, он уже распознан и
+# перераспознавать его запрещено (конституция, раздел LOCAL-FIRST).
+EXTRACT_CACHE = Path(os.environ.get(
+    "THEMIS_EXTRACT_CACHE", Path.home() / ".cache" / "legal_extract"))
+SCAN_EXT = {".pdf", ".jpg", ".jpeg", ".png", ".tiff", ".tif", ".heic", ".bmp"}
+TEXT_EXT = {".docx", ".xlsx", ".pptx", ".rtf", ".txt", ".md", ".html", ".csv"}
+FLAGS = ("[ОБНОВИТЬ КЛИЕНТА]", "[ОБНОВИТЬ ИНДЕКС]")
 
 
 def has_marker(f: Path, pattern: str) -> bool:
@@ -63,10 +85,101 @@ def check_frontmatter() -> list[str]:
     return bad
 
 
+def field(text: str, name: str) -> str:
+    """Значение поля `- **Имя:** значение` из _case.md. Пусто — прочерк."""
+    m = re.search(rf"(?m)^\s*[-*]\s*\*\*{re.escape(name)}:\*\*\s*(.+?)\s*$", text)
+    v = m.group(1).strip() if m else ""
+    return "" if v in ("—", "-", "") else v
+
+
+def extracted(files: list[Path]) -> int:
+    """Сколько материалов уже лежит в кеше роутера — их не перераспознавать."""
+    n = 0
+    for f in files:
+        try:
+            sha = hashlib.sha256(f.read_bytes()).hexdigest()
+        except OSError:
+            continue
+        if (EXTRACT_CACHE / f"{sha}.md").exists() or (EXTRACT_CACHE / sha).is_dir():
+            n += 1
+    return n
+
+
+def brief(case: Path, level: str) -> None:
+    """Сводка старта сессии: то, ради чего конституция велела читать шесть файлов."""
+    case_txt = read(case / "_case.md")
+    client_dir = case.parent
+    client_txt = read(client_dir / "_client.md")
+
+    head = " · ".join(x for x in (
+        f"стадия: {field(case_txt, 'Стадия')}" if field(case_txt, "Стадия") else "",
+        f"суд: {field(case_txt, 'Суд')}" if field(case_txt, "Суд") else "",
+        f"дело № {field(case_txt, 'Номер дела')}" if field(case_txt, "Номер дела") else "",
+        f"судья: {field(case_txt, 'Судья')}" if field(case_txt, "Судья") else "",
+    ) if x) or "реквизиты в _case.md не заполнены"
+    print(f"# Сводка — {client_dir.name}/{case.name} (уровень {level})")
+    print(f"  {head}")
+
+    hearing = field(case_txt, "Следующее заседание")
+    events = sorted((p for p in (case / "02_hearings").iterdir() if p.is_dir()),
+                    reverse=True) if (case / "02_hearings").is_dir() else []
+    print(f"  заседание: {hearing or 'не назначено'}"
+          f" · последнее событие: {events[0].name if events else 'нет'}")
+
+    fio = field(client_txt, "ФИО") or "профиль пуст"
+    print(f"  доверитель: {fio}"
+          f"{'' if (client_dir / '_client.md').exists() else ' ⚠ файла _client.md нет'}")
+
+    intake = case / "00_intake"
+    files = [f for f in intake.rglob("*") if f.is_file() and not f.name.startswith((".", "~$"))] \
+        if intake.is_dir() else []
+    scans = [f for f in files if f.suffix.lower() in SCAN_EXT]
+    done = extracted(files)
+    print(f"  материалы: {len(files)} шт (сканов {len(scans)}), уже извлечено {done} — "
+          f"{'перераспознавать нельзя' if done else 'кеш пуст'}")
+
+    # Флаги живут в файлах дела и в последнем логе сессий: необработанный флаг
+    # означает, что реестр или профиль разошлись с делом.
+    flagged = []
+    for f in list(case.rglob("*.md")) + sorted(
+            (case.parents[1] / "_logs").glob("session_*.md"), reverse=True)[:1]:
+        t = read(f)
+        if any(flag in t for flag in FLAGS):
+            flagged.append(f.name)
+    if flagged:
+        print(f"  ⚠ необработанные флаги в: {', '.join(sorted(set(flagged))[:4])}")
+
+    # Трек считается по счётному: объём и природа материалов. Правовой вопрос
+    # машине не виден — про него говорится прямо, а не умалчивается.
+    if len(files) <= 3 and not scans:
+        hint = "MICRO по объёму"
+    elif len(files) <= 6 and (not scans or done >= len(scans)):
+        hint = "FAST по объёму"
+    else:
+        hint = "FULL по объёму"
+    print(f"  трек: {hint}; новизну правового вопроса оценивает Фемида по practice_index\n")
+
+
+def read(f: Path) -> str:
+    try:
+        return f.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ""
+
+
 def main() -> int:
-    if len(sys.argv) < 2:
-        print("usage: themis_status.py cases/{клиент}/{дело}", file=sys.stderr)
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument("case", nargs="?")
+    ap.add_argument("--brief", action="store_true",
+                    help="сводка старта сессии вместо шести чтений")
+    ap.add_argument("--selftest", action="store_true")
+    a, _ = ap.parse_known_args()
+    if a.selftest:
+        return selftest()
+    if not a.case:
+        print("usage: themis_status.py cases/{клиент}/{дело} [--brief]", file=sys.stderr)
         return 1
+    sys.argv = [sys.argv[0], a.case]
 
     broken = check_frontmatter()
     if broken:
@@ -108,6 +221,9 @@ def main() -> int:
     except OSError:
         pass
     s3_not_needed = level == "L1"
+
+    if a.brief:
+        brief(case, level)
 
     drafts = sorted((case / "03_drafts").glob("*.md")) if (case / "03_drafts").is_dir() else []
     drafts = [d for d in drafts if "_working" not in d.parts and "_baselines" not in d.parts]
@@ -171,6 +287,74 @@ def main() -> int:
         nxt = "/finalize — пакет в 02_hearings (guard правок доверителя)"
     print(f"\nСЛЕДУЮЩИЙ ШАГ: {nxt}")
     return 0
+
+
+def selftest() -> int:
+    """Без сети и без диска проекта. Фикстуры враждебные: каждая метит в ветку,
+    которая уже ломалась или может тихо соврать."""
+    import tempfile
+    tmp = Path(tempfile.mkdtemp())
+    case = tmp / "cases" / "klient" / "delo-2026"
+    (case / "01_context").mkdir(parents=True)
+    (case / "00_intake").mkdir()
+    (case / "02_hearings" / "2026-06-29_zasedanie").mkdir(parents=True)
+    (case / "02_hearings" / "2026-05-12_beseda").mkdir(parents=True)
+    (tmp / "cases" / "_logs").mkdir(parents=True)
+    (case / "_case.md").write_text(
+        "# дело\n- **Стадия:** Первая инстанция\n- **Уровень:** L2\n"
+        "- **Суд:** Советский районный суд\n- **Номер дела:** 2-4590/2026\n"
+        "- **Судья:** —\n- **Следующее заседание:** 29.06.2026 в 13:00\n", encoding="utf-8")
+    (case.parent / "_client.md").write_text(
+        "# профиль\n- **ФИО:** Тестова Тестина Тестовна\n", encoding="utf-8")
+    (case / "01_context" / "knowledge-map.md").write_text("## КАРТА ГОТОВА ✓", encoding="utf-8")
+    # Содержимое разное: у одинаковых файлов один sha, и кеш засчитал бы все три.
+    for n, body in (("a.pdf", b"pdf"), ("b.jpg", b"jpeg"), ("c.docx", b"docx")):
+        (case / "00_intake" / n).write_bytes(body)
+    (case / "01_context" / "zametka.md").write_text("надо [ОБНОВИТЬ КЛИЕНТА]", encoding="utf-8")
+
+    txt = read(case / "_case.md")
+    cache = Path(tempfile.mkdtemp())
+    global EXTRACT_CACHE
+    EXTRACT_CACHE = cache
+    files = sorted((case / "00_intake").iterdir())
+    # Один из трёх материалов уже в кеше роутера.
+    sha = hashlib.sha256((case / "00_intake" / "a.pdf").read_bytes()).hexdigest()
+    (cache / f"{sha}.md").write_text("уже извлечено", encoding="utf-8")
+
+    import io
+    import contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        brief(case, "L2")
+    out = buf.getvalue()
+
+    checks = [
+        ("поле читается из _case.md", field(txt, "Номер дела") == "2-4590/2026"),
+        # Прочерк — это ОТСУТСТВИЕ значения, а не значение «—»: иначе сводка
+        # уверенно печатает «судья: —» и выглядит заполненной.
+        ("прочерк считается пустым", field(txt, "Судья") == ""),
+        ("несуществующее поле не выдумывается", field(txt, "Кадастровый номер") == ""),
+        # Поле берётся целиком: обрезка по первому пробелу теряла зал и время.
+        ("значение берётся до конца строки",
+         field(txt, "Следующее заседание") == "29.06.2026 в 13:00"),
+        ("кеш роутера опознан", extracted(files) == 1),
+        ("не в кеше — не засчитан", extracted(files) != len(files)),
+        ("сводка называет суд", "Советский районный суд" in out),
+        ("сводка называет доверителя", "Тестова" in out),
+        # События сортируются по имени: даты ISO, последнее — старшее.
+        ("последнее событие — самое свежее", "2026-06-29_zasedanie" in out
+         and "2026-05-12_beseda" not in out),
+        ("материалы сосчитаны", "материалы: 3 шт (сканов 2), уже извлечено 1" in out),
+        ("необработанный флаг виден", "флаги" in out and "zametka.md" in out),
+        # Два скана, извлечён один — по объёму это ещё не FAST.
+        ("трек не занижается при нераспознанных сканах", "FULL по объёму" in out),
+        ("машина не молчит о правовом вопросе", "practice_index" in out),
+    ]
+    for name, ok in checks:
+        print(f"  {'✓' if ok else '✗'} {name}")
+    bad = [n for n, ok in checks if not ok]
+    print(f"selftest {'пройден' if not bad else 'ПРОВАЛЕН'}: {len(checks) - len(bad)}/{len(checks)}")
+    return 1 if bad else 0
 
 
 if __name__ == "__main__":
