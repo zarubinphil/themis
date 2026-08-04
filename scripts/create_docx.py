@@ -18,6 +18,9 @@
     b.save("путь/к/файлу.docx")
 """
 
+import os
+import sys
+
 from docx import Document
 from docx.shared import Pt, Cm, Mm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -817,7 +820,18 @@ class DocBuilder:
         section.different_first_page_header_footer = hide_on_first
         footer = section.footer
         footer.is_linked_to_previous = False
-        p = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
+        # Номеру нужен СВОЙ абзац. Нижний колонтитул может быть уже занят —
+        # в образцах legal design туда пишут сноску («Образец, фактура вымышлена»),
+        # и номер, подсаженный в тот же абзац, вставал впритык к чужому тексту
+        # по центру. Занятый абзац не трогаем, берем следующий; абзац, где номер
+        # уже стоит, переиспользуем — иначе повторный вызов даст два номера.
+        for cand in footer.paragraphs:
+            if "PAGE" in cand._p.xml:
+                return cand          # номер уже стоит — второй не ставим
+        p = next((c for c in footer.paragraphs
+                  if not c.text.strip() and not c.runs), None)
+        if p is None:
+            p = footer.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         probe = p.add_run("")
         _set_font(probe, 12, family=FONT_DISPLAY)
@@ -962,7 +976,95 @@ class DocBuilder:
                       f"в других приложениях и повторите save().")
 
 
+def selftest() -> int:
+    """Проверка сборщика без сети: гарнитура и место номера страницы."""
+    import tempfile
+    from docx import Document
+
+    tmp = tempfile.mkdtemp()
+
+    plain = os.path.join(tmp, "plain.docx")
+    b = DocBuilder()
+    b.add_title("ИСКОВОЕ ЗАЯВЛЕНИЕ")
+    b.add_section("I. ОБСТОЯТЕЛЬСТВА")
+    b.add_body("Текст документа.")
+    b.add_table(["Основание", "Сумма, руб."], [["Долг", "150 000,00"]])
+    b.add_signature("Представитель", "04.08.2026")
+    b.save(plain)
+
+    # Колонтитул уже занят чужой строкой (образцы legal design пишут туда сноску).
+    busy = os.path.join(tmp, "busy.docx")
+    b2 = DocBuilder()
+    b2.add_body("Текст документа.")
+    f = b2.doc.sections[0].footer
+    f.is_linked_to_previous = False
+    p0 = f.paragraphs[0] if f.paragraphs else f.add_paragraph()
+    p0.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    _set_font(p0.add_run("Образец. Фактура вымышлена."), 11)
+    b2.save(busy)
+
+    twice = os.path.join(tmp, "twice.docx")
+    b3 = DocBuilder()
+    b3.add_body("Текст документа.")
+    b3.add_page_numbers()
+    b3.add_page_numbers()
+    b3.save(twice)
+
+    def fonts(path):
+        d, out = Document(path), set()
+        def walk(c):
+            for par in getattr(c, "paragraphs", []):
+                for r in par.runs:
+                    if r.font.name:
+                        out.add(r.font.name)
+            for t in getattr(c, "tables", []):
+                for row in t.rows:
+                    for cell in row.cells:
+                        walk(cell)
+        walk(d)
+        walk(d.sections[0].footer)
+        return out
+
+    d_plain, d_busy, d_twice = (Document(p) for p in (plain, busy, twice))
+    foot_plain = d_plain.sections[0].footer
+    foot_busy = d_busy.sections[0].footer
+
+    checks = [
+        ("гарнитура в документе одна — PT Serif", fonts(plain) == {FONT_BODY}),
+        ("роли не разъезжаются по гарнитурам",
+         FONT_TITLE == FONT_DISPLAY == FONT_MONO == FONT_BODY),
+        ("номер страницы в нижнем колонтитуле", "PAGE" in foot_plain._element.xml),
+        ("в верхнем колонтитуле номера нет",
+         "PAGE" not in d_plain.sections[0].header._element.xml),
+        ("номер по центру",
+         any(p.alignment == WD_ALIGN_PARAGRAPH.CENTER and "PAGE" in p._p.xml
+             for p in foot_plain.paragraphs)),
+        ("первая страница без номера",
+         d_plain.sections[0].different_first_page_header_footer),
+        # Занятый колонтитул: номер обязан взять свой абзац, чужую строку не трогая.
+        ("чужая строка колонтитула не перекроена",
+         any(p.text.startswith("Образец") and p.alignment == WD_ALIGN_PARAGRAPH.LEFT
+             and "PAGE" not in p._p.xml for p in foot_busy.paragraphs)),
+        ("номер получил собственный абзац",
+         any(not p.text.strip() and "PAGE" in p._p.xml for p in foot_busy.paragraphs)),
+        ("повторный вызов не ставит второй номер",
+         d_twice.sections[0].footer._element.xml.count(" PAGE ") == 1),
+        ("буква ё вычищена при сохранении", "ё" not in "".join(
+            p.text for p in d_plain.paragraphs)),
+    ]
+    for name, ok in checks:
+        print(f"  {'✓' if ok else '✗'} {name}")
+    bad = [n for n, ok in checks if not ok]
+    if bad:
+        print(f"selftest ПРОВАЛЕН: {len(bad)} из {len(checks)}")
+        return 1
+    print(f"selftest пройден: {len(checks)}/{len(checks)}")
+    return 0
+
+
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        sys.exit(selftest())
     # Тест-пример
     b = DocBuilder()
     b.add_header_table(

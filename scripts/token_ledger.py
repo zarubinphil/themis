@@ -102,7 +102,7 @@ MAIN_SIGNALS = [
     (r"practice\.md|hunter_|_practice/|practice_index|practice_search|practice_harvest|cite\.py",
      "2 практика"),
     (r"positions\.md|_council/", "3 позиция"),
-    (r"03_drafts/|create_docx|md_to_docx|gosposhlina|calc395|make_playfair", "4 составление"),
+    (r"03_drafts/|create_docx|md_to_docx|gosposhlina|calc395", "4 составление"),
     (r"quality_gate|document_guard|table_guard|verify_inn|verify_act|crosscheck_numbers|"
      r"sroki|02_hearings/", "5 проверка"),
     (r"_index\.md|_clients\.md|_client\.md|registry_check|redline", "6 архив"),

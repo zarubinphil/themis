@@ -169,7 +169,7 @@ def check_docx(path: str, l3: bool = False, dogovor: bool = False) -> list[str]:
                         "левый отступ гасит его ровно)")
 
     text = doc_text(doc)
-    problems += check_text(text, os.path.basename(path))
+    problems += check_text(text, os.path.basename(path), dogovor=dogovor)
 
     # Нумерация страниц — безусловное требование протокола (решение владельца
     # 03.08.2026). Порога по объему больше нет: короткий документ тоже может
@@ -204,7 +204,7 @@ def check_docx(path: str, l3: bool = False, dogovor: bool = False) -> list[str]:
     return problems
 
 
-def check_text(text: str, where: str) -> list[str]:
+def check_text(text: str, where: str, dogovor: bool = False) -> list[str]:
     problems = []
     yo = len(re.findall(r"[ёЁ]", text))
     if yo:
@@ -215,12 +215,14 @@ def check_text(text: str, where: str) -> list[str]:
     placeholders = re.findall(r"\{\{[^}]+\}\}|\bХХХ\b|\bXXX\b|\[ЗАПОЛНИТЬ[^\]]*\]", text)
     if placeholders:
         problems.append(f"{where}: незаполненные плейсхолдеры: {', '.join(sorted(set(placeholders))[:5])}")
-    # Ряд подчеркиваний — это либо забытый пропуск, либо законное место подписи
-    # в договоре. Машине их не различить, поэтому отдельная мягкая строка.
+    # Ряд подчеркиваний: в процессуальном документе — забытое поле, в договоре —
+    # законное место подписи. Под флагом --dogovor это НЕ нарушение: прибор,
+    # который сам пишет «в договоре норма» и тут же валит проверку, приучает
+    # пролистывать его вывод, а вместе с ложной тревогой пролистают настоящую.
     blanks = len(re.findall(r"_{4,}", text))
-    if blanks:
-        problems.append(f"{where}: подчеркнутых пропусков {blanks} — в договоре норма (место "
-                        "подписи), в процессуальном документе означает незаполненное поле")
+    if blanks and not dogovor:
+        problems.append(f"{where}: подчеркнутых пропусков {blanks} — в процессуальном "
+                        "документе это незаполненное поле; если это договор, гнать с --dogovor")
     return problems
 
 
@@ -516,6 +518,11 @@ def selftest() -> int:
         ("дыра в нумерации приложений поймана", any("сквозная" in p for p in check_attachments(att_gap))),
         ("плейсхолдер пойман", any("плейсхолдер" in p for p in check_text("Сумма {{amount}}", "t"))),
         ("дата не того формата поймана", any("ДД.ММ.ГГГГ" in p for p in check_text("2026-08-03", "t"))),
+        # Ложная тревога дороже молчания: она приучает пролистывать вывод.
+        ("подчеркнутый пропуск в процессуальном документе пойман",
+         any("незаполненное поле" in p for p in check_text("Подпись ________", "t"))),
+        ("в договоре место подписи претензий не вызывает",
+         check_text("Подпись ________", "t", dogovor=True) == []),
     ]
     for name, ok in checks:
         print(f"  {'✓' if ok else '✗'} {name}")
