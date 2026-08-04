@@ -27,6 +27,31 @@ def block(msg: str) -> None:
     sys.exit(2)
 
 
+def _is_new_intake_file(cmd: str) -> bool:
+    """Команда кладёт НОВЫЙ файл в 00_intake — пополнение, а не затирание.
+
+    True только для `cp`/`mv` с ровно двумя аргументами, где источник лежит вне
+    охраняемых папок, а цели на диске ещё нет. Любое отклонение — False, то есть
+    блок: сторож ошибается в сторону запрета, а не разрешения.
+    """
+    import shlex
+    try:
+        parts = shlex.split(cmd)
+    except ValueError:
+        return False
+    if len(parts) != 3 or parts[0] not in ("cp", "mv"):
+        return False
+    src, dst = parts[1], parts[2]
+    if re.search(r"00_intake|_baselines", src):
+        return False
+    if "/00_intake/" not in dst.replace(os.sep, "/"):
+        return False
+    dst_abs = os.path.expanduser(dst)
+    if os.path.isdir(dst_abs):        # цель-папка: имя внутри неизвестно, не рискуем
+        return False
+    return not os.path.exists(dst_abs)
+
+
 # Маркер, названный в отрицании, — не маркер. Поиск вхождением по всему файлу
 # засчитывал строку «в practice.md нет маркера «## FAST-СИНТЕЗ ФЕМИДЫ»» как
 # пройденный шаг: хук пропускал запись, которую обязан блокировать. Та же дыра
@@ -191,6 +216,13 @@ def main() -> None:
                 "БЛОК: удаление в 00_intake/ или _baselines/ запрещено "
                 "(железное правило). Действительно нужно — только пользователь вручную."
             )
+        # ПОПОЛНЕНИЕ первички — не перезапись. Материалы клиента обязаны попадать
+        # в 00_intake/, этим и занят inbox-triage (Bash mv из инбокса). Прежнее
+        # правило рубило и его: сторож видел «mv … 00_intake/…» и блокировал
+        # перенос НОВОГО файла наравне с затиранием существующего (прецедент
+        # 04.08.2026 — сертификат ЭЦП не удалось положить в дело). Послабление
+        # узкое: ровно cp/mv, ровно два аргумента, источник вне охраняемых папок,
+        # а целевого файла на диске ещё НЕТ. Существует — блок как прежде.
         # Затирание не менее разрушительно, чем удаление: `> файл`, cp, mv, tee,
         # truncate, dd, sed -i переписывают первичку и базу «ДО» так же безвозвратно.
         # Каждая альтернатива — только в КОМАНДНОЙ позиции. Без этого «sed -i»
@@ -201,7 +233,7 @@ def main() -> None:
             r"(?:cp|mv|tee|truncate|dd|install|sed\s+(?:-\w+\s+)*-i)\b"
             r"|>\s*\S*(?:00_intake|_baselines)",
             cmd, re.M)
-        if write_cmd and protected:
+        if write_cmd and protected and not _is_new_intake_file(cmd):
             block(
                 "БЛОК: перезапись в 00_intake/ или _baselines/ запрещена — исходники "
                 "клиента и база «ДО» для разбора правок неприкосновенны. Класть новое "
@@ -243,6 +275,15 @@ def selftest() -> int:
     small = tmp + "/small.md"
     with open(small, "w", encoding="utf-8") as f:
         f.write("ok")
+    # Первичка для проверки границы «затирание против пополнения»: один файл на
+    # диске есть, второго нет. Пути реальные — правило смотрит именно на диск.
+    from shlex import quote as shlex_quote
+    intake = tmp + "/cases/k/d/00_intake"
+    os.makedirs(intake, exist_ok=True)
+    existing_intake = intake + "/est.pdf"
+    with open(existing_intake, "w", encoding="utf-8") as f:
+        f.write("scan")
+    new_intake = intake + "/novyy.pdf"
 
     def run(payload, raw=None):
         data = raw if raw is not None else json.dumps(payload, ensure_ascii=False)
@@ -263,8 +304,17 @@ def selftest() -> int:
          run({"tool_name": "Write", "tool_input": {"file_path": "/c/cases/x/y/00_intake/z.md"}}), 2),
         ("rm по _baselines блокируется",
          run({"tool_name": "Bash", "tool_input": {"command": "rm -rf x/_baselines"}}), 2),
-        ("cp поверх 00_intake блокируется",
-         run({"tool_name": "Bash", "tool_input": {"command": "cp a.pdf cases/k/d/00_intake/a.pdf"}}), 2),
+        # Затирание СУЩЕСТВУЮЩЕЙ первички запрещено, пополнение новым файлом —
+        # разрешено: без второго inbox-triage не смог бы положить материал в дело.
+        ("cp поверх существующего файла в 00_intake блокируется",
+         run({"tool_name": "Bash",
+              "tool_input": {"command": f"cp a.pdf {shlex_quote(existing_intake)}"}}), 2),
+        ("cp нового файла в 00_intake пропускается",
+         run({"tool_name": "Bash",
+              "tool_input": {"command": f"cp a.pdf {shlex_quote(new_intake)}"}}), 0),
+        ("mv существующего файла ИЗ 00_intake блокируется",
+         run({"tool_name": "Bash",
+              "tool_input": {"command": f"mv {shlex_quote(existing_intake)} /tmp/x.pdf"}}), 2),
         ("редирект в _baselines блокируется",
          run({"tool_name": "Bash", "tool_input": {"command": "echo hi > d/_baselines/f.docx"}}), 2),
         ("sed -i по 00_intake блокируется",
