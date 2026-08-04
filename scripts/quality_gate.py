@@ -299,9 +299,17 @@ def case_paths(case: str) -> dict:
     ctx = os.path.join(case, "01_context")
     drafts = [p for p in sorted(glob.glob(os.path.join(case, "03_drafts", "*.md")))
               if "_working" not in p and "_baselines" not in p]
+    # Источником числа считается не только канон дела, но и рабочая папка:
+    # выписка ЕГРЮЛ, расшифровка, бриф и промпт живут в 01_context/_working/ и
+    # приносят реквизиты (ГРН, ИНН, даты записи, адрес), которых в карте ещё нет.
+    # Пока их не индексировали, gate три прогона подряд кричал «число не найдено
+    # в источниках» на реквизиты, взятые из свежей выписки (04.08.2026), и правил
+    # заставляли документ, а не прибор. Черновики из _working/ по-прежнему не в
+    # drafts — там сырьё, а не выданный документ.
     sources = [p for p in (os.path.join(ctx, n) for n in
                            ("knowledge-map.md", "positions.md", "practice.md"))
                if os.path.isfile(p)]
+    sources += sorted(glob.glob(os.path.join(ctx, "_working", "*.md")))
     return {"drafts": drafts, "sources": sources,
             "requisites": case_requisite_files(case)}
 
