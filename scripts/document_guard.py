@@ -215,6 +215,12 @@ def check_text(text: str, where: str, dogovor: bool = False) -> list[str]:
     placeholders = re.findall(r"\{\{[^}]+\}\}|\bХХХ\b|\bXXX\b|\[ЗАПОЛНИТЬ[^\]]*\]", text)
     if placeholders:
         problems.append(f"{where}: незаполненные плейсхолдеры: {', '.join(sorted(set(placeholders))[:5])}")
+    # Квадратные скобки: в российском судебном обиходе их не пишут — ни в ссылках
+    # на нормы, ни в тексте. Только круглые. Решение владельца 10.08.2026.
+    square = len(re.findall(r"[\[\]]", text))
+    if square:
+        problems.append(f"{where}: квадратные скобки — {square} шт. В документах "
+                        "практики их не пишут, ссылки и вставки только в круглых")
     # Ряд подчеркиваний: в процессуальном документе — забытое поле, в договоре —
     # законное место подписи. Под флагом --dogovor это НЕ нарушение: прибор,
     # который сам пишет «в договоре норма» и тут же валит проверку, приучает
@@ -523,6 +529,10 @@ def selftest() -> int:
          any("незаполненное поле" in p for p in check_text("Подпись ________", "t"))),
         ("в договоре место подписи претензий не вызывает",
          check_text("Подпись ________", "t", dogovor=True) == []),
+        ("квадратные скобки пойманы",
+         any("квадратные скобки" in p for p in check_text("(ст. 617 ГК РФ) [ст. 621 ГК РФ]", "t"))),
+        ("круглые скобки претензий не вызывают",
+         check_text("(ст. 617 ГК РФ)", "t") == []),
     ]
     for name, ok in checks:
         print(f"  {'✓' if ok else '✗'} {name}")
@@ -562,6 +572,13 @@ def main() -> int:
         problems += check_attachments(text)
     if a.md:
         problems += check_md_vs_docx(a.md, a.docx)
+        # Источник правят руками чаще, чем сборку: скобки ловим и в .md,
+        # иначе они переживут пересборку и всплывут в следующей редакции.
+        md_square = len(re.findall(r"[\[\]]",
+                                   open(a.md, encoding="utf-8").read()))
+        if md_square:
+            problems.append(f"{os.path.basename(a.md)}: квадратные скобки — "
+                            f"{md_square} шт. Ссылки и вставки только в круглых")
 
     if not problems:
         print(f"✓ {os.path.basename(a.docx)}: формат и согласованность в порядке")
