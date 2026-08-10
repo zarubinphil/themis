@@ -43,6 +43,7 @@ CODEX_SLUGS = {
     "зозпп": "zozpp", "озпп": "zozpp",
     "229-фз": "fz-229-ispolnitelnoe", "127-фз": "fz-127-bankrotstvo",
     "3-фз": "fz-3-policiya", "о полиции": "fz-3-policiya", "полиции": "fz-3-policiya",
+    "89-фз": "fz-89-othody", "об отходах": "fz-89-othody", "отходах": "fz-89-othody",
 }
 
 # Кодекс в запросе — не только кириллица: «229-ФЗ», «127-ФЗ», «ЗоЗПП». Прежний
@@ -221,7 +222,7 @@ def find_article(num: str, codex_word: str) -> dict:
         "integrity": integrity_ok(text),
         "source": part.get("source") or frontmatter_field(text, "источник"),
         "text": section,
-        "cite_tag": f"[ст. {num} {codex_word.upper()} РФ]",
+        "cite_tag": f"(ст. {num} {codex_word.upper()} РФ)",
     })
     return result
 
@@ -270,7 +271,7 @@ def find_chapter(num: str, codex_word: str) -> dict:
         "text": section,
         # Тег строится из найденного заголовка: раньше он эхом отдавал ЗАПРОШЕННЫЙ
         # номер, и под чужим текстом стояла синтаксически безупречная ложная ссылка.
-        "cite_tag": f"[{_found_label(heading_line, 'глава')} {codex_word.upper()} РФ]",
+        "cite_tag": f"({_found_label(heading_line, 'глава')} {codex_word.upper()} РФ)",
     })
     return result
 
@@ -329,8 +330,8 @@ def find_plenum_punkt(punkt: str, date_str: str, num: str | None) -> dict:
         "integrity": integrity_ok(text),
         "source": frontmatter_field(text, "источник"),
         "text": section,
-        "cite_tag": f"[{title_line.lstrip('# ').strip()}, "
-                    f"{_found_label(heading_line, 'п.')}]",
+        "cite_tag": f"({title_line.lstrip('# ').strip()}, "
+                    f"{_found_label(heading_line, 'п.')})",
     })
     return result
 
@@ -453,7 +454,7 @@ def selftest() -> int:
         ("неизвестный кодекс назван ошибкой", not r_nocodex["found"]),
         ("пункт Пленума найден", r_plenum["found"] and "апелляционной" in r_plenum["text"]),
         ("нераспознанный запрос не даёт ложного попадания", not r_junk["found"]),
-        ("тег для вставки собран", r_ok["cite_tag"] == "[ст. 683 ГК РФ]"),
+        ("тег для вставки собран", r_ok["cite_tag"] == "(ст. 683 ГК РФ)"),
         # Многочастный кодекс: дата и источник берутся ТОЙ части, где лежит статья.
         # Раньше всегда брался первый элемент, и ст. 1229 из части четвёртой
         # подписывалась редакцией части первой — эта дата уходит в судебный документ.
@@ -481,7 +482,7 @@ def selftest() -> int:
          _found_label("## Глава 25. Налог", "глава").split()[-1]),
         ("ярлык пункта из заголовка", _found_label("### п. 15.1", "п.") == "п. 15.1"),
         ("тег строится по найденному", resolve("глава 25.3 ЗК")["cite_tag"]
-         == "[глава 25.3 ЗК РФ]"),
+         == "(глава 25.3 ЗК РФ)"),
         ("утративший силу пункт не цитируется", not resolve(
             "п. 9 Пленума ВС РФ от 01.01.2020 № 7")["found"]),
         ("длинный текст режется", clip("x" * 50_000, False)[1] is True),
