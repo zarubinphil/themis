@@ -28,6 +28,16 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
 
 
+def _sudact_allowed() -> bool:
+    """Точка правды — practice_search.search_allowed(). Читаем её, а не копию условия."""
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    try:
+        from practice_search import search_allowed
+        return search_allowed()
+    except Exception:
+        return os.environ.get("THEMIS_SUDACT_SEARCH") == "1"
+
+
 def probe_url(url: str, timeout: int = 8) -> bool:
     """Живой ли публикатор. ponytail: HEAD часто режут, берем первые байты GET."""
     try:
@@ -117,11 +127,12 @@ def main() -> int:
         rows.append((f"Публикатор {name}", ok, "отвечает" if ok else "недоступен",
                      "verify_act.py сработает" if ok else "верификация через фолбэк"))
 
-    # Поиск практики на sudact закрыт до решения владельца: robots.txt источника
-    # запрещает роботам /{раздел}/doc_ajax/, а иного пути к поиску у сайта нет.
-    sudact_on = os.environ.get("THEMIS_SUDACT_SEARCH") == "1"
+    # Решение по sudact живёт в practice_search.py (SUDACT_SEARCH_ALLOWED +
+    # THEMIS_SUDACT_SEARCH). Preflight его читает, а не дублирует условие:
+    # своя копия условия врала «закрыт» при работающем поиске.
+    sudact_on = _sudact_allowed()
     rows.append(("Поиск практики sudact.ru", sudact_on,
-                 "включен владельцем" if sudact_on else "закрыт: robots.txt источника",
+                 "включен владельцем" if sudact_on else "выключен явно (THEMIS_SUDACT_SEARCH=0)",
                  "practice_search.py ищет"
                  if sudact_on else "искать в knowledge/practice_index.md; акт по URL — --doc"))
     rows.append(("WebSearch (квота сессии)", None, "программно не проверяется",
