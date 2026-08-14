@@ -23,7 +23,7 @@ import sys
 
 from docx import Document
 from docx.shared import Pt, Cm, Mm
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
@@ -309,6 +309,35 @@ class DocBuilder:
     def add_empty(self):
         """Пустой параграф-разделитель."""
         self.doc.add_paragraph()
+
+    def add_page_break(self):
+        """Разрыв страницы. Приложения-фотографии начинаются с новой страницы,
+        иначе снимок разрывает абзац по месту и лист печатается наполовину."""
+        p = self.doc.add_paragraph()
+        p.add_run().add_break(WD_BREAK.PAGE)
+        return p
+
+    def add_image(self, path, caption=None, width_mm=155):
+        """Изображение по центру страницы, под ним подпись 11pt.
+
+        width_mm по умолчанию 155: рабочее поле листа при левом поле 35 мм
+        (L3) составляет 160 мм, запас в 5 мм не даёт Word ужать картинку
+        и сорвать выравнивание по центру.
+        """
+        p = self.doc.add_paragraph()
+        # Абзацный отступ намеренно НЕ задается: центрированный снимок и его
+        # подпись отступа первой строки не имеют, а document_guard пропускает
+        # абзацы с неустановленным отступом.
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p.paragraph_format.space_before = Pt(6)
+        p.paragraph_format.space_after  = Pt(2)
+        p.add_run().add_picture(path, width=Mm(width_mm))
+        if caption:
+            c = self.doc.add_paragraph()
+            c.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            c.paragraph_format.space_after = Pt(10)
+            _set_font(c.add_run(caption), 11)
+        return p
 
     def add_title(self, text):
         """Главный заголовок документа: 14pt, bold, CENTER, sb=6, sa=4."""
