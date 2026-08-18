@@ -2,7 +2,7 @@
 """
 Универсальный конвертер .md -> .docx через DocBuilder.
 Использование:
-    python3 scripts/md_to_docx.py cases/.../03_drafts/document.md
+    python3 scripts/md_to_docx.py cases/.../.agent/drafts/document.md
 Сохраняет document.docx рядом с исходным .md.
 """
 

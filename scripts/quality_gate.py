@@ -296,11 +296,11 @@ def case_requisite_files(case: str, cache_dir: str = EXTRACT_CACHE) -> list[str]
 
 def case_paths(case: str) -> dict:
     """Что из дела можно проверить машиной."""
-    ctx = os.path.join(case, "01_context")
-    drafts = [p for p in sorted(glob.glob(os.path.join(case, "03_drafts", "*.md")))
+    ctx = os.path.join(case, ".agent/context")
+    drafts = [p for p in sorted(glob.glob(os.path.join(case, ".agent/drafts", "*.md")))
               if "_working" not in p and "_baselines" not in p]
     # Источником числа считается не только канон дела, но и рабочая папка:
-    # выписка ЕГРЮЛ, расшифровка, бриф и промпт живут в 01_context/_working/ и
+    # выписка ЕГРЮЛ, расшифровка, бриф и промпт живут в .agent/context/_working/ и
     # приносят реквизиты (ГРН, ИНН, даты записи, адрес), которых в карте ещё нет.
     # Пока их не индексировали, gate три прогона подряд кричал «число не найдено
     # в источниках» на реквизиты, взятые из свежей выписки (04.08.2026), и правил
@@ -345,7 +345,7 @@ def main() -> int:
     if args.case:
         paths = case_paths(args.case)
         if not paths["drafts"]:
-            report.append((f"дело {args.case}", ["черновиков в 03_drafts/ нет — сверять нечего"]))
+            report.append((f"дело {args.case}", ["черновиков в .agent/drafts/ нет — сверять нечего"]))
         for d in paths["drafts"]:
             if paths["sources"]:
                 report.append((f"числа {os.path.basename(d)}",
@@ -427,13 +427,13 @@ def selftest() -> int:
          any("из практики" in p for p in check_numbers(draft_pr, [map_pr, practice_pr]))),
         ("число, найденное в карте дела, замечаний не даёт",
          check_numbers(draft_fact, [map_fact, practice_pr]) == []),
-        ("practice.md опознан как практика", is_practice_source("/x/01_context/practice.md")),
+        ("practice.md опознан как практика", is_practice_source("/x/.agent/context/practice.md")),
         ("hunter-файл опознан как практика",
-         is_practice_source("/x/01_context/hunter_classic.md")),
+         is_practice_source("/x/.agent/context/hunter_classic.md")),
         ("карта дела практикой не считается",
-         not is_practice_source("/x/01_context/knowledge-map.md")),
+         not is_practice_source("/x/.agent/context/knowledge-map.md")),
         ("позиция практикой не считается",
-         not is_practice_source("/x/01_context/positions.md")),
+         not is_practice_source("/x/.agent/context/positions.md")),
         ("валидный ИНН проходит", check_requisites(req_ok, None) == []),
         ("битый ИНН ловится", len(check_requisites(req_bad, None)) == 1),
         ("пустая OCR-папка — замечание", len(check_ocr(empty_ocr)) == 1),

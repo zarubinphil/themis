@@ -198,8 +198,8 @@ def selftest():
         os.makedirs(src)
         with open(os.path.join(src, "material.txt"), "w", encoding="utf-8") as f:
             f.write("Определение суда от 18.08.2026\n")
-        os.makedirs(os.path.join(tmp, "cases", "ivanov-ivan", "delo-2026", "01_context"))
-        with open(os.path.join(tmp, "cases", "ivanov-ivan", "delo-2026", "01_context", "нет.md"), "w") as f:
+        os.makedirs(os.path.join(tmp, "cases", "ivanov-ivan", "delo-2026", ".agent/context"))
+        with open(os.path.join(tmp, "cases", "ivanov-ivan", "delo-2026", ".agent/context", "нет.md"), "w") as f:
             f.write("вне 00_intake — копировать не должен\n")
         cases_dir, dest = os.path.join(tmp, "cases"), os.path.join(tmp, "backup")
         files, errors = backup(cases_dir, dest, quiet=True)

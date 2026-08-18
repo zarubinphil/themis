@@ -2,7 +2,7 @@
 """practice_harvest.py — что уже найдено по делам, но не попало в базу практики.
 
 Базу кормят единицы дел из семидесяти: практика, добытая охотниками, оседает в
-`01_context/` дела и умирает вместе с ним, а следующая охота по той же теме идёт
+`.agent/context/` дела и умирает вместе с ним, а следующая охота по той же теме идёт
 заново. Скрипт вычитывает ссылки на судебные акты из всех дел regex-ом ($0, без
 модели), вычитает то, что уже есть в `knowledge/practice_index.md`, и выдаёт
 кандидатов с цитатой-контекстом. Модели остаётся правовая оценка, не поиск.
@@ -40,8 +40,8 @@ PATTERNS = {
     "СОЮ": re.compile(r"\b(\d{1,2}-\d{2,6}/\d{4})\b"),
 }
 
-SOURCE_GLOBS = ("01_context/practice.md", "01_context/hunter_*.md",
-                "01_context/positions.md", "01_context/_practice/*.md")
+SOURCE_GLOBS = (".agent/context/practice.md", ".agent/context/hunter_*.md",
+                ".agent/context/positions.md", ".agent/context/_practice/*.md")
 
 
 def act_key(kind: str, m: re.Match) -> str:
@@ -71,7 +71,7 @@ def harvest(cases_dir: str) -> dict[str, dict]:
             # Номер САМОГО дела встречается в его же материалах на каждой странице —
             # и попадал в кандидаты как «практика». Собираем и исключаем.
             own = set()
-            for probe in ("_case.md", "01_context/knowledge-map.md"):
+            for probe in ("_case.md", ".agent/context/knowledge-map.md"):
                 try:
                     head = open(os.path.join(case_dir, probe), encoding="utf-8",
                                 errors="replace").read()
@@ -250,7 +250,7 @@ def selftest() -> int:
     import tempfile
     tmp = tempfile.mkdtemp()
     cases = os.path.join(tmp, "cases")
-    ctx = os.path.join(cases, "ivanov", "dolg-2026", "01_context")
+    ctx = os.path.join(cases, "ivanov", "dolg-2026", ".agent/context")
     os.makedirs(ctx)
     open(os.path.join(ctx, "practice.md"), "w", encoding="utf-8").write(
         "Постановление Пленума ВС РФ от 23.06.2015 № 25, п. 86. Также 81-КГ19-2, 81-КГ19-20 "
@@ -258,13 +258,13 @@ def selftest() -> int:
         "Постановление Конституционного Суда РФ от 21.12.2011 № 30-П. "
         "Суд рассмотрел дело и удовлетворил.")
     own_case = os.path.join(cases, "sidorov", "spor-2026")
-    os.makedirs(os.path.join(own_case, "01_context"))
+    os.makedirs(os.path.join(own_case, ".agent/context"))
     open(os.path.join(own_case, "_case.md"), "w", encoding="utf-8").write(
         "Дело № 2-777/2026 в Вахитовском районном суде.")
-    open(os.path.join(own_case, "01_context", "practice.md"), "w", encoding="utf-8").write(
+    open(os.path.join(own_case, ".agent/context", "practice.md"), "w", encoding="utf-8").write(
         "По делу 2-777/2026 суд применил позицию 5-КГ24-9-К2.")
 
-    ctx2 = os.path.join(cases, "petrov", "razdel-2026", "01_context")
+    ctx2 = os.path.join(cases, "petrov", "razdel-2026", ".agent/context")
     os.makedirs(ctx2)
     open(os.path.join(ctx2, "hunter_classic.md"), "w", encoding="utf-8").write(
         "Опять Постановление Пленума ВС РФ от 23.06.2015 № 25. "

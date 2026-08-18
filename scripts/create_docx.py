@@ -966,9 +966,50 @@ class DocBuilder:
 
         self._strip_yo()
         p = _P(path)
+        # `.agent/drafts` — ДВЕ составляющие пути, и проверка `in p.parts` на ней
+        # всегда ложна. Раскладку спрашиваем у контракта, а не у литерала.
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import case_paths as _cp
+        parts = p.parts
         # снимок только для реальных документов дел (не тест/tmp), без рекурсии
-        is_case_doc = p.parent.name != "_baselines" and ("cases" in p.parts or "03_drafts" in p.parts)
-        bfile = p.parent / "_baselines" / p.name
+        is_case_doc = (p.parent.name != "_baselines"
+                       and ("cases" in parts or _cp.READY in parts
+                            or (_cp.AGENT_DIR in parts and "drafts" in parts)))
+
+        # Точка сборки одна: готовый документ живёт в GOTOVO/, снимок — рядом с
+        # черновиком, в .agent/drafts/_baselines/. Иначе снимки засоряют папку,
+        # за которой человек приходит за готовым.
+        case_root = None
+        for i, part in enumerate(parts):
+            if part == _cp.READY or (part == _cp.AGENT_DIR and "drafts" in parts[i:]):
+                case_root = _P(*parts[:i])
+                break
+        bfile = (_cp.baselines(case_root) / p.name) if case_root \
+            else (p.parent / "_baselines" / p.name)
+
+        # Вердикт Кони привязан к SHA-256 редакции .md. Собирать .docx в GOTOVO/
+        # из неодобренной или изменённой после одобрения редакции запрещено:
+        # прежде старое одобрение разрешало сборку любого последующего текста.
+        if _cp.READY in parts and os.environ.get("THEMIS_SKIP_VERDICT") != "1":
+            import verdict as _v
+            md = None
+            for cand in ([_cp.drafts(case_root) / (p.stem + ".md")] if case_root else []):
+                if cand.is_file():
+                    md = cand
+            if md is None:
+                print(f"СТОП, НЕ СОХРАНЕНО: {p.name} — не найден парный черновик .md "
+                      f"в {_cp.DRAFTS}/. Документ собирается ИЗ черновика, "
+                      f"одобренного Кони, а не из воздуха.")
+                return
+            problems = _v.check(md)
+            if problems:
+                print("СТОП, НЕ СОХРАНЕНО: сборка .docx запрещена вердиктом.")
+                for x in problems:
+                    print("  · " + x)
+                print("  Провести раунд Кони и записать вердикт: "
+                      "python3 scripts/verdict.py ЧЕРНОВИК.md --record --verdict "
+                      "'ГОТОВ К ПОДАЧЕ' -r N")
+                return
 
         if (is_case_doc and p.exists() and bfile.exists()
                 and not filecmp.cmp(p, bfile, shallow=False)
@@ -985,24 +1026,82 @@ class DocBuilder:
         if not getattr(self, "_paginated", False):
             self.add_page_numbers()
 
-        blockers = self._humanizer_gate()
-        if blockers and os.environ.get("THEMIS_SKIP_HUMANIZER") != "1":
-            print(f"СТОП, НЕ СОХРАНЕНО: документ не прошел humanizer-legal.\n"
-                  f"  Сработали блокирующие категории: {', '.join(blockers)}.\n"
-                  f"  Прогнать скилл humanizer-legal по тексту, затем повторить save().\n"
-                  f"  Полный отчет: ~/.claude/skills/humanizer-legal/scripts/scan_legal.sh ФАЙЛ.md")
-            return
+        # Гейт humanizer-legal вынесен из сборки в прогон по `.md` каждый раунд
+        # (`scripts/verdict.py --scan`). На собранном `.docx` он срабатывал один
+        # раз и слишком поздно — текст уже стал документом. Для документов вне
+        # конвейера (тесты, разовые сборки) остаётся здесь как последний рубеж.
+        if not is_case_doc:
+            blockers = self._humanizer_gate()
+            if blockers and os.environ.get("THEMIS_SKIP_HUMANIZER") != "1":
+                print(f"СТОП, НЕ СОХРАНЕНО: документ не прошел humanizer-legal.\n"
+                      f"  Сработали блокирующие категории: {', '.join(blockers)}.\n"
+                      f"  Прогнать `python3 scripts/verdict.py ФАЙЛ.md --scan`, затем повторить.")
+                return
 
         self.doc.save(path)
         print(f"Сохранено: {path}")
         if is_case_doc:
             try:
-                bfile.parent.mkdir(exist_ok=True)
+                bfile.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(path, bfile)  # перезапись: baseline = свежая версия
             except OSError as e:
-                print(f"ВНИМАНИЕ: снимок в _baselines/ не записан ({e}). "
-                      f"База «ДО» для redline-разбора устарела — закройте файл "
-                      f"в других приложениях и повторите save().")
+                # Fail-open закрыт: без снимка разбор правок доверителя сравнивает
+                # документ сам с собой и молча ничему не учится. Прежде здесь стояло
+                # предупреждение, которое никто не читал.
+                raise RuntimeError(
+                    f"снимок в {bfile} не записан ({e}). Документ сохранён, но база «ДО» "
+                    f"для redline-разбора не обновлена — закройте файл в других "
+                    f"приложениях и повторите save()") from e
+
+
+def _verdict_gate_checks(tmp):
+    """Жизненный цикл документа: .docx собирается ОДИН раз, из редакции, одобренной Кони."""
+    import sys as _s
+    from pathlib import Path as _P
+    _s.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import case_paths as _cp
+    import verdict as _v
+
+    case = _P(tmp) / "cases" / "ivanov-ivan" / "delo-2026"
+    _cp.drafts(case).mkdir(parents=True)
+    _cp.ready(case).mkdir(parents=True)
+    md = _cp.drafts(case) / "isk_v1.md"
+    md.write_text("# Иск\n\nТекст.\n", encoding="utf-8")
+    target = _cp.ready(case) / "isk_v1.docx"
+
+    def build():
+        b = DocBuilder()
+        b.add_title("ИСКОВОЕ ЗАЯВЛЕНИЕ")
+        b.add_body("Текст документа без плейсхолдеров.")
+        return b
+
+    build().save(str(target))
+    no_verdict = not target.exists()
+
+    _v.record(md, "ТРЕБУЕТ ПРАВОК", 1)
+    build().save(str(target))
+    not_ready = not target.exists()
+
+    _v.record(md, _v.READY, 2)
+    build().save(str(target))
+    saved = target.exists()
+
+    bl = _cp.baselines(case) / "isk_v1.docx"
+    snapshot_right_place = bl.is_file() and not (_cp.ready(case) / "_baselines").exists()
+
+    # Текст правится ПОСЛЕ одобрения — прежний вердикт не должен пускать сборку
+    target.unlink()
+    md.write_text("# Иск\n\nТекст.\n\nДописано после одобрения.\n", encoding="utf-8")
+    build().save(str(target))
+    stale_blocked = not target.exists()
+
+    return [
+        ("сборка без вердикта Кони запрещена", no_verdict),
+        ("сборка при вердикте ТРЕБУЕТ ПРАВОК запрещена", not_ready),
+        ("сборка по одобренной редакции проходит", saved),
+        ("снимок лёг в .agent/drafts/_baselines, а не в GOTOVO", snapshot_right_place),
+        ("правка .md после одобрения снова запрещает сборку", stale_blocked),
+    ]
 
 
 def selftest() -> int:
@@ -1080,7 +1179,8 @@ def selftest() -> int:
          d_twice.sections[0].footer._element.xml.count(" PAGE ") == 1),
         ("буква ё вычищена при сохранении", "ё" not in "".join(
             p.text for p in d_plain.paragraphs)),
-    ]
+    ] + _verdict_gate_checks(tmp)
+
     for name, ok in checks:
         print(f"  {'✓' if ok else '✗'} {name}")
     bad = [n for n, ok in checks if not ok]

@@ -162,6 +162,38 @@ def backup_moving(moves_by_case, dest):
     return copied, bad
 
 
+def plan_promote(root=CASES):
+    """Выданные `.docx` из корня черновиков → `GOTOVO/`: [(источник, назначение)].
+
+    В прежней модели `.docx` пересобирался каждый раунд и лежал в корне `03_drafts/` —
+    именно его открывал доверитель, а `_baselines/` хранил снимок. Значит корневой
+    `.docx` и есть выданный документ, и его место в слое человека. Снимки, рабочие
+    файлы и локи Word остаются в кухне.
+    """
+    out = []
+    for case in all_cases(root):
+        d = cp.drafts(case)
+        if not d.is_dir():
+            continue
+        for f in sorted(d.glob("*.docx")):
+            if f.name.startswith("~$"):
+                continue
+            out.append((f, cp.ready(case) / f.name))
+    return out
+
+
+def do_promote(pairs):
+    done = []
+    for src, dst in pairs:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if dst.exists():
+            raise RuntimeError(f"в папке готовых уже есть файл: {dst}")
+        os.rename(src, dst)
+        done.append((str(src), str(dst)))
+        journal({"event": "promote", "src": str(src), "dst": str(dst)})
+    return done
+
+
 def journal(entry):
     JOURNAL.parent.mkdir(parents=True, exist_ok=True)
     with open(JOURNAL, "a", encoding="utf-8") as f:
@@ -196,6 +228,31 @@ def do_code(root=ROOT):
     return changed
 
 
+def promoted_map(root=CASES):
+    """Перенос выданных документов из журнала: {старый относительный путь: новый}.
+
+    Без него `--verify` объявляет потерянными 193 документа, которые лежат в GOTOVO/:
+    прибор, врущий о потере, хуже отсутствующего — на него перестают смотреть.
+    """
+    out = {}
+    if not JOURNAL.is_file():
+        return out
+    for line in open(JOURNAL, encoding="utf-8"):
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if e.get("event") != "promote":
+            continue
+        try:
+            a = os.path.relpath(e["src"], root)
+            b = os.path.relpath(e["dst"], root)
+        except (KeyError, ValueError):
+            continue
+        out[unicodedata.normalize("NFC", a)] = unicodedata.normalize("NFC", b)
+    return out
+
+
 def verify(before, root=CASES, renamed=True):
     """Ни один файл не потерян, содержимое не изменилось, неприкосновенные зоны целы.
 
@@ -206,8 +263,11 @@ def verify(before, root=CASES, renamed=True):
     after = manifest(root)
     problems = []
 
+    promoted = promoted_map(root) if renamed else {}
+
     def rename_key(rel):
-        return unicodedata.normalize("NFC", cp.modernize(rel) if renamed else rel)
+        key = unicodedata.normalize("NFC", cp.modernize(rel) if renamed else rel)
+        return promoted.get(key, key)
 
     expected = {rename_key(k): v for k, v in before.items()}
     if len(expected) != len(before):
@@ -232,10 +292,14 @@ def verify(before, root=CASES, renamed=True):
 def rollback():
     if not JOURNAL.is_file():
         return ["журнала переезда нет — откатывать нечего"]
-    moves = [json.loads(l) for l in open(JOURNAL, encoding="utf-8")]
-    moves = [m for m in moves if m.get("event") == "move"]
+    entries = [json.loads(l) for l in open(JOURNAL, encoding="utf-8")]
+    # Откат обязан отменить ВСЁ, что сделал прибор: и переезд каталогов, и перенос
+    # выданных документов в слой человека. Половинчатый откат оставляет систему
+    # в третьем состоянии, которого не было ни до, ни после.
+    steps = [m for m in entries if m.get("event") in ("move", "promote")]
+    moves = [m for m in steps if m.get("event") == "move"]
     problems = []
-    for m in reversed(moves):
+    for m in reversed(steps):
         src, dst = Path(m["src"]), Path(m["dst"])
         if not dst.exists():
             problems.append(f"{dst}: нечего возвращать")
@@ -255,6 +319,50 @@ def rollback():
             except OSError:
                 pass          # непусто — значит там что-то живое, не трогаем
     return problems
+
+
+def _promote_checks():
+    """Второй шаг переезда: выданный документ уходит в слой человека, снимок остаётся.
+
+    В своём дереве: блок добавляет файлы, которых нет в манифесте ДО основного
+    блока, и смешивать их значит ловить ложное расхождение вместо настоящего.
+    """
+    import tempfile
+    global JOURNAL
+    with tempfile.TemporaryDirectory(prefix="migrate-promote-") as tmp:
+        root = Path(tmp)
+        cases = root / "cases"
+        case = cases / "ivanov-ivan" / "delo-2026"
+        (case / ".agent" / "drafts" / "_baselines").mkdir(parents=True)
+        (case / "GOTOVO").mkdir(parents=True)
+        (case / ".agent" / "drafts" / "isk.docx").write_text("документ", encoding="utf-8")
+        (case / ".agent" / "drafts" / "~$isk.docx").write_text("лок", encoding="utf-8")
+        (case / ".agent" / "drafts" / "_baselines" / "isk.docx").write_text(
+            "снимок", encoding="utf-8")
+
+        saved, JOURNAL = JOURNAL, root / "journal.jsonl"
+        try:
+            before = manifest(cases)
+            pairs = plan_promote(cases)
+            assert len(pairs) == 1, f"к переносу {len(pairs)} файлов вместо одного"
+            assert pairs[0][0].name == "isk.docx", "лок Word попал в перенос"
+            do_promote(pairs)
+            assert (case / "GOTOVO" / "isk.docx").is_file(), "документ не попал к человеку"
+            assert (case / ".agent" / "drafts" / "_baselines" / "isk.docx").is_file(), \
+                "снимок утащило из кухни"
+            assert not (case / ".agent" / "drafts" / "isk.docx").exists(), \
+                "документ остался и в кухне тоже"
+            problems = verify(before, cases)
+            assert not problems, f"перенос признан потерей файлов: {problems[:3]}"
+            assert plan_promote(cases) == [], "перенос не идемпотентен"
+
+            rollback()
+            assert (case / ".agent" / "drafts" / "isk.docx").is_file(), \
+                "откат не вернул документ в кухню"
+            assert not verify(before, cases, renamed=False), \
+                "откаченный перенос не совпал с состоянием ДО"
+        finally:
+            JOURNAL = saved
 
 
 def selftest():
@@ -332,6 +440,7 @@ def selftest():
     assert all(h in SKIP_FILES for h in HISTORICAL), "исторические записи не защищены от правки"
     assert "knowledge/lessons-log.md" not in code_sites(ROOT), \
         "лог уроков попал под автоправку — прецеденты будут искажены"
+    _promote_checks()
     print("selftest: план переезда, неприкосновенные зоны, детект потери/подмены, "
           "идемпотентность, откат, коллизии имён, защита исторических записей — ок")
     return 0
@@ -372,6 +481,8 @@ def main():
     ap.add_argument("--apply", action="store_true", help="выполнить переезд")
     ap.add_argument("--verify", action="store_true", help="сверить по манифесту ДО")
     ap.add_argument("--rollback", action="store_true", help="вернуть каталоги по журналу")
+    ap.add_argument("--promote-ready", action="store_true",
+                    help="выданные .docx из черновиков → GOTOVO/ (второй шаг переезда)")
     ap.add_argument("--manifest", metavar="FILE", help="куда положить манифест ДО")
     ap.add_argument("--backup-dir", default=os.path.join(
         os.path.expanduser("~"), "Хранилище", "themis-layout-backup"),
@@ -386,6 +497,30 @@ def main():
         for p in problems:
             print("  · " + p)
         return 1 if problems else 0
+    if a.promote_ready:
+        pairs = plan_promote()
+        if not pairs:
+            print("переносить нечего — выданных .docx в корне черновиков нет")
+            return 2
+        before = manifest()
+        print(f"выданных документов к переносу: {len(pairs)}")
+        if not a.apply:
+            for src, dst in pairs[:10]:
+                print(f"  {src.relative_to(CASES)} → {dst.relative_to(CASES)}")
+            print(f"  … всего {len(pairs)}. Выполнить: --promote-ready --apply")
+            return 0
+        done = do_promote(pairs)
+        problems = [x for x in verify(before, renamed=False)
+                    if "потерян" not in x and "появился" not in x]
+        moved_ok = all(Path(d).is_file() for _, d in done)
+        if problems or not moved_ok:
+            print(f"❌ перенос не сошёлся: {len(problems)}")
+            for x in problems[:20]:
+                print("  · " + x)
+            return 1
+        print(f"✓ перенесено в GOTOVO: {len(done)} документов, содержимое не изменилось")
+        return 0
+
     if a.verify:
         path = a.manifest or (ROOT / ".autoloop" / "manifest_before.json")
         if not os.path.isfile(path):

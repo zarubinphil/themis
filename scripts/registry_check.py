@@ -27,7 +27,7 @@ SERVICE = re.compile(r"^[._]")  # _templates, _logs, _archive_*, .DS_Store — �
 # и путать их нельзя: 10 МБ node_modules внутри cases/ реально нашлись 03.08.2026.
 ALIEN = {"node_modules", "knowledge", "scripts", "venv", ".venv", "__pycache__", "bin", "docs"}
 # Признак настоящей папки дела — рабочая структура протокола.
-CASE_MARKS = ("00_intake", "01_context", "02_hearings", "03_drafts", "_case.md")
+CASE_MARKS = ("00_intake", ".agent/context", "02_hearings", ".agent/drafts", "_case.md")
 
 
 def looks_like_case(path: str) -> bool:
@@ -282,8 +282,8 @@ def selftest() -> int:
     import tempfile
     tmp = tempfile.mkdtemp()
     cases = os.path.join(tmp, "cases")
-    for rel in ["ivanov/dolg-2026/01_context", "petrov/razvod-2026/00_intake",
-                "ivan/spor-2026/01_context",
+    for rel in ["ivanov/dolg-2026/.agent/context", "petrov/razvod-2026/00_intake",
+                "ivan/spor-2026/.agent/context",
                 # Двойник по одной правке: petrow — опечатка при заведении дела,
                 # материалов нет. Так выглядела пара папок из прецедента 03.08.2026.
                 "petrow/razvod-2026/00_intake",

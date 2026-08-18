@@ -176,7 +176,7 @@ OFFICE = [
      "members": [{"id": "muravyov", "name": "Муравьев"}, {"id": "maklakov", "name": "Маклаков"}, {"id": "foynitsky", "name": "Фойницкий"}, {"id": "vladimirov", "name": "Владимиров"}, {"id": "urusov", "name": "Урусов"}],
      "markers": ["council", "Урусов", "Муравьев", "Маклаков", "Фойницкий", "Владимиров", "СОГЛАСОВАНО"]},
     {"id": "speransky",   "name": "Сперанский",   "role": "Документ",     "step": 4,
-     "markers": ["doc-drafter", "Сперанский", "03_drafts", "черновик"]},
+     "markers": ["doc-drafter", "Сперанский", ".agent/drafts", "черновик"]},
     {"id": "koni",        "name": "Кони",         "role": "Проверка",     "step": 5,
      "markers": ["doc-reviewer", "Кони", "ГОТОВ К ПОДАЧЕ", "ТРЕБУЕТ ПРАВОК"]},
 ]
@@ -198,7 +198,7 @@ _NAMES_SORTED = sorted(NAME2PERSON, key=len, reverse=True)
 import re as _re
 _PREFIX = _re.compile(r"^\s*[\[\(<]?\s*([А-ЯЁ][а-яё]+)\s*[\]\)>:.,—–-]+\s*")
 # техно-строки (не речь): пути, файлы, команды, разметка, чек-листы
-_TECH = _re.compile(r"\.py\b|\.docx|\.md\b|create_docx|колонтитул|JUSTIFY|Times New Roman|00_intake|03_drafts|cases/|приложени[ея]\s*№|МЗ-|```|knowledge-map|practice\.md|positions\.md|\bWrite\b|директори|запис[ьи] файл|повторяю запис|сохран(ил|яю) файл|разреш[иь]|висят в очеред|в очеред|жму один раз|^\s*[-*]\s+[a-zа-я]|^#{1,6}\s|^\s*\d+\.\s"
+_TECH = _re.compile(r"\.py\b|\.docx|\.md\b|create_docx|колонтитул|JUSTIFY|Times New Roman|00_intake|\\.agent/drafts|cases/|приложени[ея]\s*№|МЗ-|```|knowledge-map|practice\.md|positions\.md|\bWrite\b|директори|запис[ьи] файл|повторяю запис|сохран(ил|яю) файл|разреш[иь]|висят в очеред|в очеред|жму один раз|^\s*[-*]\s+[a-zа-я]|^#{1,6}\s|^\s*\d+\.\s"
     # статусы-маркеры шагов, токен-отчёт, имена инструментов, служебка — НЕ речь:
     r"|^\s*\*{0,2}\s*✓?\s*Шаг\s*\d|Шаг\s*\d+\s*завершён|Отчёт по токен|\bтокен"
     r"|^\s*\||SendMessage|Реестр агентов|хрупкая семёрка|журнал дела|лог сесси"
@@ -308,6 +308,10 @@ def inbox() -> JSONResponse:
 
 CASES_DIR = LEGAL / "cases"
 
+import sys as _sys
+_sys.path.insert(0, str(LEGAL / "scripts"))
+import case_paths as _cp   # контракт раскладки: где готовое, где кухня
+
 
 def _initials(fio: str) -> str:
     """«Ахметгалиев Азат Рамазанович» → «Ахметгалиев А.Р.»"""
@@ -339,16 +343,17 @@ def _client_name(folder: Path) -> str:
 
 
 def _visible_docx(base: Path):
-    """Документы дела, которые видит юрист: без снимков `_baselines/`, локов Word и служебных каталогов.
+    """Документы, которые видит юрист: только то, что лежит в папке готовых.
 
-    Негативный фильтр (этап 1 плана 18.08.2026): `rglob` тянул неизменяемые снимки ДО-правок
-    доверителя и Word-локи как готовые документы. Позитивный фильтр «только папка готовых»
-    ставится ПОСЛЕ миграции — сейчас таких папок нет и панель показала бы ноль.
+    Позитивный фильтр (этап 3, 19.08.2026): показываем `GOTOVO/`, а не «всё, кроме
+    служебного». Негативный список надо было пополнять на каждый новый служебный
+    каталог, и любой пропущенный протекал к юристу как готовый документ.
+    Локи Word отсекаются отдельно: они лежат рядом с самим документом.
     """
     for f in base.rglob("*.docx"):
         if f.name.startswith("~$"):
             continue
-        if any(p == "_baselines" or p.startswith(".") for p in f.relative_to(base).parts[:-1]):
+        if _cp.READY not in f.relative_to(base).parts[:-1]:
             continue
         yield f
 

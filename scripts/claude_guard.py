@@ -76,7 +76,7 @@ def _has_marker(path, pattern: str) -> bool:
 #   «## FAST-СИНТЕЗ ФЕМИДЫ»  — FAST: синтез Фемидой без совета
 # До 02.08.2026 у FAST не было своего маркера: скилл разрешал писать practice.md
 # без маркера, а хук за это давал exit 2 — агент шёл искать обход и находил его
-# (три дела попали в 03_drafts мимо конвейера).
+# (три дела попали в .agent/drafts мимо конвейера).
 # Запрет без легального пути производит обходы, а не дисциплину.
 PRACTICE_MARKER = r"## (СОВЕТ ЗАВЕРШ|FAST-СИНТЕЗ ФЕМИДЫ)"
 
@@ -87,7 +87,7 @@ def _workflow_gate(p: str) -> None:
     Запись артефакта шага N блокируется, пока нет маркера шага N-1 на диске:
       practice.md   ← требует «## КАРТА ГОТОВА ✓» в knowledge-map.md
       positions.md  ← требует маркер практики (СОВЕТ ЗАВЕРШЕН либо FAST-СИНТЕЗ)
-      03_drafts/*   ← требует оба маркера (кроме _working/ и _baselines/)
+      .agent/drafts/*   ← требует оба маркера (кроме _working/ и _baselines/)
     """
     norm = p.replace("\\", "/")
     parts = norm.split("/")
@@ -98,28 +98,32 @@ def _workflow_gate(p: str) -> None:
     if len(parts) < i + 4 or parts[i + 1].startswith("_"):
         return
     case_root = "/".join(parts[: i + 3])
-    km = case_root + "/01_context/knowledge-map.md"
-    pr = case_root + "/01_context/practice.md"
+    km = case_root + "/.agent/context/knowledge-map.md"
+    pr = case_root + "/.agent/context/practice.md"
     tail = "/".join(parts[i + 3:])
 
-    if tail == "01_context/practice.md" and not _has_marker(km, r"## КАРТА ГОТОВА ✓"):
+    if tail == ".agent/context/practice.md" and not _has_marker(km, r"## КАРТА ГОТОВА ✓"):
         block(
             "БЛОК ПРОТОКОЛА: practice.md пишется только после Шага 1 — "
             "в knowledge-map.md нет маркера «## КАРТА ГОТОВА ✓». Запустить case-mapper. "
             "Статус: python3 scripts/themis_status.py " + case_root
         )
-    if tail == "01_context/positions.md" and not _has_marker(pr, PRACTICE_MARKER):
+    if tail == ".agent/context/positions.md" and not _has_marker(pr, PRACTICE_MARKER):
         block(
             "БЛОК ПРОТОКОЛА: positions.md пишется только после Шага 2 — "
             "в practice.md нет ни «## СОВЕТ ЗАВЕРШЕН», ни «## FAST-СИНТЕЗ ФЕМИДЫ». "
             "Запустить охоту/совет либо поставить честный FAST-маркер. "
             "Статус: python3 scripts/themis_status.py " + case_root
         )
-    if (tail.startswith("03_drafts/")
-            and "/_working/" not in norm and "/_baselines/" not in norm):
+    # Кухня и слой человека сторожатся ОДИНАКОВО. После переезда на два слоя
+    # (19.08.2026) документ мог лечь прямо в GOTOVO/ мимо конвейера — то есть
+    # мимо маркеров попасть сразу на стол юристу, минуя и карту, и практику.
+    guarded = (tail.startswith(".agent/drafts/") or tail.startswith("GOTOVO/"))
+    if guarded and "/_working/" not in norm and "/_baselines/" not in norm:
         if not _has_marker(km, r"## КАРТА ГОТОВА ✓") or not _has_marker(pr, PRACTICE_MARKER):
+            where = "GOTOVO/" if tail.startswith("GOTOVO/") else ".agent/drafts/"
             block(
-                "БЛОК ПРОТОКОЛА: черновик в 03_drafts/ пишется только после Шагов 1-2 — "
+                f"БЛОК ПРОТОКОЛА: документ в {where} пишется только после Шагов 1-2 — "
                 "нет маркера карты и/или практики. Судебные документы вне конвейера запрещены. "
                 "Статус: python3 scripts/themis_status.py " + case_root
             )
@@ -328,6 +332,16 @@ def selftest() -> int:
          run({"tool_name": "Bash", "tool_input": {"command": "echo 'norm 00_intake'"}}), 0),
         # Гейт следует решению владельца, а не собственной копии: включён поиск —
         # пропускаем, выключен — блокируем. Проверяем именно согласованность.
+        # Слой человека сторожится так же, как кухня: документ не должен
+        # оказаться на столе юриста мимо маркеров карты и практики.
+        ("документ в папку готовых без маркеров блокируется",
+         run({"tool_name": "Write", "tool_input": {
+             "file_path": "cases/klient/delo-2026/GOTOVO/isk.docx",
+             "content": "x"}}), 2),
+        ("рабочий файл кухни маркеров не требует",
+         run({"tool_name": "Write", "tool_input": {
+             "file_path": "cases/klient/delo-2026/.agent/drafts/_working/review_log.md",
+             "content": "x"}}), 0),
         ("гейт совпадает с решением в practice_search.py",
          run({"tool_name": "Bash",
               "tool_input": {"command": "curl https://sudact.ru/regular/doc_ajax/?q=1"}}),

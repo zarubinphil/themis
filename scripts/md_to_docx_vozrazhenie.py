@@ -64,8 +64,8 @@ def process_court_header(text: str) -> dict:
     return {'court': court_name, 'case': case_number, 'parties': parties}
 
 def main():
-    md_path = "cases/example/case-2026/03_drafts/vozrazhenie_na_isk.md"
-    out_path = "cases/example/case-2026/03_drafts/vozrazhenie_na_isk.docx"
+    md_path = "cases/example/case-2026/.agent/drafts/vozrazhenie_na_isk.md"
+    out_path = "cases/example/case-2026/.agent/drafts/vozrazhenie_na_isk.docx"
 
     content = read_md(md_path)
 

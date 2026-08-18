@@ -20,7 +20,7 @@ argument-hint: "{клиент} {дело-год}"
 
 ## 1. Структура
 
-`mkdir -p cases/{клиент}/{дело}/{00_intake,01_context/_working,01_context/_practice,01_context/_council,02_hearings,03_drafts,04_archive}`
+`mkdir -p cases/{клиент}/{дело}/{00_intake,.agent/context/_working,.agent/context/_practice,.agent/context/_council,02_hearings,.agent/drafts,.agent/archive}`
 
 Папка дела уже существует → СТОП, спросить: дубль или продолжение. `knowledge-map.md` / `practice.md` / `positions.md` НЕ создавать — только агенты конвейера после консенсуса.
 

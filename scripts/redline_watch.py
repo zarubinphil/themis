@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """redline_watch.py — найти документы, которые доверитель правил после выдачи.
 
-База «ДО» — неизменяемый снимок в `03_drafts/_baselines/<имя>.docx`, его кладет
+База «ДО» — неизменяемый снимок в `.agent/drafts/_baselines/<имя>.docx`, его кладет
 `create_docx.py save()`. Если выданный файл отличается от снимка, значит его
 правил человек, и правки надо разобрать: чему-то они учат (`knowledge/redlines.md`),
 иначе `doc-drafter` повторит тот же огрех в следующем документе.
@@ -24,6 +24,9 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import case_paths as cp  # noqa: E402
+
 CASES = Path(__file__).resolve().parent.parent / "cases"
 DEFAULT_DAYS = 8  # неделя плюс сутки запаса: понедельник видит всю прошлую неделю
 
@@ -33,10 +36,13 @@ def find_edited(days=None):
     cutoff = None if days is None else time.time() - days * 86400
     found = []
 
-    for doc in sorted(CASES.glob("*/*/03_drafts/*.docx")):
-        if doc.parent.name == "_baselines" or doc.name.startswith("~$"):
+    # Доверитель правит то, что ему выдали, а выданное лежит в GOTOVO/. Снимок «ДО»
+    # остаётся в кухне, рядом с черновиком: сравнение идёт между слоями.
+    for doc in sorted(CASES.glob(f"*/*/{cp.READY}/*.docx")):
+        if doc.name.startswith("~$"):
             continue
-        baseline = doc.parent / "_baselines" / doc.name
+        case_root = doc.parent.parent
+        baseline = cp.baselines(case_root) / doc.name
         if not baseline.exists():
             continue  # выдан до появления механизма снимков — сравнивать не с чем
         try:
@@ -49,7 +55,7 @@ def find_edited(days=None):
         if cutoff is not None and mtime < cutoff:
             continue
 
-        case_dir = doc.parent.parent
+        case_dir = case_root
         found.append({
             "document": doc.name,
             "case": f"{case_dir.parent.name}/{case_dir.name}",
@@ -96,13 +102,17 @@ if __name__ == "__main__":
         import shutil
         import tempfile
         with tempfile.TemporaryDirectory() as td:
-            root = Path(td) / "cases" / "client" / "case-2026" / "03_drafts"
-            (root / "_baselines").mkdir(parents=True)
+            # Два слоя: выданное лежит в GOTOVO/, снимок «ДО» — в кухне
+            case = Path(td) / "cases" / "client" / "case-2026"
+            root = cp.ready(case)
+            root.mkdir(parents=True)
+            snap = cp.baselines(case)
+            snap.mkdir(parents=True)
             edited, untouched = root / "a.docx", root / "b.docx"
             edited.write_text("ПОСЛЕ правок доверителя", encoding="utf-8")
-            (root / "_baselines" / "a.docx").write_text("ДО правок", encoding="utf-8")
+            (snap / "a.docx").write_text("ДО правок", encoding="utf-8")
             untouched.write_text("не тронут", encoding="utf-8")
-            shutil.copy2(untouched, root / "_baselines" / "b.docx")
+            shutil.copy2(untouched, snap / "b.docx")
             globals()["CASES"] = Path(td) / "cases"
             res = find_edited(None)
             assert len(res) == 1, f"ожидался 1 документ, получено {len(res)}"

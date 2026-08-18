@@ -31,7 +31,7 @@
     python3 scripts/verify_act.py 81-КГ19-2@26.03.2019 5-КГ22-82-К2@04.10.2022
     python3 scripts/verify_act.py --json 41-КГ16-17@17.05.2016
     python3 scripts/verify_act.py --url https://... 56-КГ23-6-К9
-    python3 scripts/verify_act.py --emit 01_context/_practice/verified.json 81-КГ19-2@26.03.2019
+    python3 scripts/verify_act.py --emit .agent/context/_practice/verified.json 81-КГ19-2@26.03.2019
     python3 scripts/verify_act.py --demo        # самопроверка разбора и сборки URL
 
 ponytail: кеш на диске, без БД — актов десятки, не миллионы.

@@ -212,7 +212,17 @@ def check_text(text: str, where: str, dogovor: bool = False) -> list[str]:
     bad_dates = re.findall(r"\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}/\d{1,2}/\d{2,4}\b", text)
     if bad_dates:
         problems.append(f"{where}: даты не в формате ДД.ММ.ГГГГ: {', '.join(sorted(set(bad_dates))[:5])}")
-    placeholders = re.findall(r"\{\{[^}]+\}\}|\bХХХ\b|\bXXX\b|\[ЗАПОЛНИТЬ[^\]]*\]", text)
+    placeholders = []
+    for m in re.finditer(r"\{\{[^}]+\}\}|\bХХХ\b|\bXXX\b|\[ЗАПОЛНИТЬ[^\]]*\]", text):
+        token = m.group(0)
+        # «ХХХ» — действующая серия бланка полиса ОСАГО (РСА, с 2018), а не забытая
+        # заглушка. Отличаем по контексту: «серия ХХХ № 0648968315». Ложная тревога
+        # на подлинном реквизите приучает пролистывать вывод сторожа.
+        if token in ("ХХХ", "XXX"):
+            ctx = text[max(0, m.start() - 40):m.end() + 20]
+            if re.search(r"сери\w*\s+(?:ХХХ|XXX)\b", ctx) or re.search(r"(?:ХХХ|XXX)\s*№\s*\d", ctx):
+                continue
+        placeholders.append(token)
     if placeholders:
         problems.append(f"{where}: незаполненные плейсхолдеры: {', '.join(sorted(set(placeholders))[:5])}")
     # Квадратные скобки: в российском судебном обиходе их не пишут — ни в ссылках
@@ -523,6 +533,9 @@ def selftest() -> int:
         ("сквозная нумерация приложений проходит", check_attachments(att_ok) == []),
         ("дыра в нумерации приложений поймана", any("сквозная" in p for p in check_attachments(att_gap))),
         ("плейсхолдер пойман", any("плейсхолдер" in p for p in check_text("Сумма {{amount}}", "t"))),
+        ("голое ХХХ поймано", any("плейсхолдер" in p for p in check_text("Полис ХХХ выдан", "t"))),
+        ("серия полиса ОСАГО претензий не вызывает",
+         check_text("полис ОСАГО серия ХХХ № 0648968315", "t") == []),
         ("дата не того формата поймана", any("ДД.ММ.ГГГГ" in p for p in check_text("2026-08-03", "t"))),
         # Ложная тревога дороже молчания: она приучает пролистывать вывод.
         ("подчеркнутый пропуск в процессуальном документе пойман",

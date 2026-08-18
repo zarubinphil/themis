@@ -54,6 +54,18 @@ def has_marker(f: Path, pattern: str) -> bool:
                for line in text.splitlines())
 
 
+def fakty_zamorozheny(case: Path) -> bool:
+    """Владелец подтвердил, что материалы дела собраны полностью.
+
+    Охота, запущенная до этого, переискивает по каждой новой порции документов:
+    прецедент 15.08.2026 — материалы пришли тремя порциями, шаг практики съел
+    51% прогона. Маркер ставится строкой в brief.md, отрицание не засчитывается
+    (та же дыра, что закрыта в has_marker).
+    """
+    return has_marker(case / ".agent/context" / "_working" / "brief.md",
+                      r"ФАКТУРА ЗАМОРОЖЕНА")
+
+
 def age_days(f: Path) -> int:
     try:
         mtime = datetime.datetime.fromtimestamp(f.stat().st_mtime)
@@ -205,7 +217,7 @@ def main() -> int:
         print(f"СТОП: {case} не существует. Сначала /new-case.", file=sys.stderr)
         return 1
 
-    ctx = case / "01_context"
+    ctx = case / ".agent/context"
     km, pr, pos = ctx / "knowledge-map.md", ctx / "practice.md", ctx / "positions.md"
     case_md = case / "_case.md"
 
@@ -241,15 +253,15 @@ def main() -> int:
     if a.brief:
         brief(case, level)
 
-    drafts = sorted((case / "03_drafts").glob("*.md")) if (case / "03_drafts").is_dir() else []
+    drafts = sorted((case / ".agent/drafts").glob("*.md")) if (case / ".agent/drafts").is_dir() else []
     drafts = [d for d in drafts if "_working" not in d.parts and "_baselines" not in d.parts]
     # Вердикт приёмки лежал только по одному захардкоженному пути, а Кони пишет
     # его куда придётся: на диске «ГОТОВ К ПОДАЧЕ» встречается в 14 файлах, из них
     # по каноническому пути — 2. Из-за этого машина печатала «Шаг 5 ✗» примерно в
     # 95% дел и приучала оператора себя игнорировать. Ищем везде, где он бывает.
-    candidates = [case / "03_drafts" / "_working" / "review_log.md"]
-    if (case / "03_drafts").is_dir():
-        candidates += sorted((case / "03_drafts").rglob("*.md"))
+    candidates = [case / ".agent/drafts" / "_working" / "review_log.md"]
+    if (case / ".agent/drafts").is_dir():
+        candidates += sorted((case / ".agent/drafts").rglob("*.md"))
     candidates += [case / "_case.md", ctx / "review_log.md"]
     # Подстрока «ГОТОВ К ПОДАЧЕ» входит в отрицательный вердикт «НЕ ГОТОВ К ПОДАЧЕ»
     # и в «документ пока НЕ готов к подаче» — машина принимала отказ Кони за приёмку
@@ -275,7 +287,7 @@ def main() -> int:
         s3_how = ("СОГЛАСОВАНО СОВЕТОМ" if has_marker(pos, r"СОГЛАСОВАНО СОВЕТОМ")
                   else "FAST-ПОЗИЦИЯ ФЕМИДЫ" if s3 else "— нет маркера")
         print(f"Шаг 3 Позиция:   {mark(s3)}  positions.md {s3_how}")
-    print(f"Шаг 4 Черновики: {mark(bool(drafts))}  {len(drafts)} файл(ов) в 03_drafts")
+    print(f"Шаг 4 Черновики: {mark(bool(drafts))}  {len(drafts)} файл(ов) в .agent/drafts")
     print(f"Шаг 5 Кони:      {mark(approved)}  "
           f"{'ГОТОВ К ПОДАЧЕ — ' + approved_in.name if approved else 'вердикта ГОТОВ К ПОДАЧЕ нет'}")
 
@@ -284,7 +296,7 @@ def main() -> int:
     # «СЛЕДУЮЩИЙ ШАГ: Шаг 1», не сказав ни слова о документе вне протокола.
     if drafts and not (s1 and s2):
         missing = ", ".join(x for x, ok in (("карта", s1), ("практика", s2)) if not ok)
-        print(f"\n⚠ НАРУШЕН ПОРЯДОК: в 03_drafts есть {len(drafts)} документ(ов), "
+        print(f"\n⚠ НАРУШЕН ПОРЯДОК: в .agent/drafts есть {len(drafts)} документ(ов), "
               f"но не пройдено: {missing}. Документ создан вне конвейера — "
               f"проверять реквизиты вручную, к подаче не готов.")
 
@@ -304,6 +316,13 @@ def main() -> int:
     else:
         nxt = "/finalize — пакет в 02_hearings (guard правок доверителя)"
     print(f"\nСЛЕДУЮЩИЙ ШАГ: {nxt}")
+    if not fakty_zamorozheny(case) and (not s2 or not pr_fresh):
+        print("⚠ ФАКТУРА НЕ ЗАМОРОЖЕНА: в .agent/context/_working/brief.md нет строки "
+              "«ФАКТУРА ЗАМОРОЖЕНА». Опросить владельца по чек-листу документов "
+              "(редакции договора, допсоглашения, платежные документы по спорным "
+              "суммам, доказательства вручения, согласия и разрешения) и записать "
+              "строку. Охота, запущенная до заморозки, переискивает по каждой новой "
+              "порции материалов: прецедент 15.08.2026 — 51% расхода прогона.")
     return 0
 
 
@@ -313,7 +332,7 @@ def selftest() -> int:
     import tempfile
     tmp = Path(tempfile.mkdtemp())
     case = tmp / "cases" / "klient" / "delo-2026"
-    (case / "01_context").mkdir(parents=True)
+    (case / ".agent/context").mkdir(parents=True)
     (case / "00_intake").mkdir()
     (case / "02_hearings" / "2026-06-29_zasedanie").mkdir(parents=True)
     (case / "02_hearings" / "2026-05-12_beseda").mkdir(parents=True)
@@ -324,11 +343,11 @@ def selftest() -> int:
         "- **Судья:** —\n- **Следующее заседание:** 29.06.2026 в 13:00\n", encoding="utf-8")
     (case.parent / "_client.md").write_text(
         "# профиль\n- **ФИО:** Тестова Тестина Тестовна\n", encoding="utf-8")
-    (case / "01_context" / "knowledge-map.md").write_text("## КАРТА ГОТОВА ✓", encoding="utf-8")
+    (case / ".agent/context" / "knowledge-map.md").write_text("## КАРТА ГОТОВА ✓", encoding="utf-8")
     # Содержимое разное: у одинаковых файлов один sha, и кеш засчитал бы все три.
     for n, body in (("a.pdf", b"pdf"), ("b.jpg", b"jpeg"), ("c.docx", b"docx")):
         (case / "00_intake" / n).write_bytes(body)
-    (case / "01_context" / "zametka.md").write_text("надо [ОБНОВИТЬ КЛИЕНТА]", encoding="utf-8")
+    (case / ".agent/context" / "zametka.md").write_text("надо [ОБНОВИТЬ КЛИЕНТА]", encoding="utf-8")
 
     txt = read(case / "_case.md")
     cache = Path(tempfile.mkdtemp())
@@ -340,12 +359,12 @@ def selftest() -> int:
     (cache / f"{sha}.md").write_text("уже извлечено", encoding="utf-8")
 
     # Три варианта записи маркера позиции — ровно те, что встречаются на диске.
-    neg = case / "01_context" / "pos_neg.md"
+    neg = case / ".agent/context" / "pos_neg.md"
     neg.write_text('Статус: зафиксировано, без маркера «СОГЛАСОВАНО СОВЕТОМ» '
                    '(исключение по срокам).', encoding="utf-8")
-    pos_ok = case / "01_context" / "pos_ok.md"
+    pos_ok = case / ".agent/context" / "pos_ok.md"
     pos_ok.write_text("СОГЛАСОВАНО СОВЕТОМ", encoding="utf-8")
-    mixed = case / "01_context" / "pos_mixed.md"
+    mixed = case / ".agent/context" / "pos_mixed.md"
     mixed.write_text('# позиция\nРаунд 1 шёл без маркера «СОГЛАСОВАНО СОВЕТОМ».\n'
                      'СОГЛАСОВАНО СОВЕТОМ\n', encoding="utf-8")
 

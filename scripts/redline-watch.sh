@@ -51,7 +51,7 @@ while IFS= read -r CASE; do
     [[ -z "$CASE" ]] && continue
     echo "$(ts) | REDLINE | разбор $CASE" >> "$LOG"
     claude -p --model sonnet \
-        "Изучи правки доверителя по делу $CASE. Строго по knowledge/redlines.md: сравни выданные .docx из cases/$CASE/03_drafts/ с их снимками в 03_drafts/_baselines/ через scripts/markdown_extract.py по двум осям — содержание и форматирование (эталон .claude/skills/doc-drafter/DOCX_FORMATTING.md). Уроки допиши в knowledge/redlines.md строками формата '- [ДД.ММ.ГГГГ · дело] правило', системные — в knowledge/lessons-log.md. Документы НЕ менять, снимки НЕ трогать. Если правки чисто косметические и правила из них не выводится — так и напиши одной строкой, пустых уроков не плодить." \
+        "Изучи правки доверителя по делу $CASE. Строго по knowledge/redlines.md: сравни выданные .docx из cases/$CASE/.agent/drafts/ с их снимками в .agent/drafts/_baselines/ через scripts/markdown_extract.py по двум осям — содержание и форматирование (эталон .claude/skills/doc-drafter/DOCX_FORMATTING.md). Уроки допиши в knowledge/redlines.md строками формата '- [ДД.ММ.ГГГГ · дело] правило', системные — в knowledge/lessons-log.md. Документы НЕ менять, снимки НЕ трогать. Если правки чисто косметические и правила из них не выводится — так и напиши одной строкой, пустых уроков не плодить." \
         >> "$LOG" 2>&1 || echo "$(ts) | REDLINE | сбой разбора $CASE" >> "$LOG"
 done <<< "$CASES"
 

@@ -102,7 +102,7 @@ MAIN_SIGNALS = [
     (r"practice\.md|hunter_|_practice/|practice_index|practice_search|practice_harvest|cite\.py",
      "2 практика"),
     (r"positions\.md|_council/", "3 позиция"),
-    (r"03_drafts/|create_docx|md_to_docx|gosposhlina|calc395", "4 составление"),
+    (r"\.agent/drafts/|create_docx|md_to_docx|gosposhlina|calc395", "4 составление"),
     (r"quality_gate|document_guard|table_guard|verify_inn|verify_act|crosscheck_numbers|"
      r"sroki|02_hearings/", "5 проверка"),
     (r"_index\.md|_clients\.md|_client\.md|registry_check|redline", "6 архив"),
@@ -541,7 +541,7 @@ def selftest() -> int:
                 "Bash", {"command": "python3 scripts/quality_gate.py --case cases/X/Y"})
                 == "5 проверка"),
             ("сигнал по пути файла дела", main_step_signal(
-                "Read", {"file_path": "cases/К/дело/01_context/practice.md"}) == "2 практика"),
+                "Read", {"file_path": "cases/К/дело/.agent/context/practice.md"}) == "2 практика"),
             ("сигнал по запуску агента", main_step_signal(
                 "Agent", {"subagent_type": "doc-drafter", "description": "документ"})
                 == "4 составление"),
