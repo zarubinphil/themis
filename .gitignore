@@ -75,3 +75,6 @@ knowledge/refactor-plan-*.md
 knowledge/multi-cli-plan-*.md
 knowledge/integrations-plan-*.md
 knowledge/PROMPT-*.md
+
+# Автономный цикл: журнал, отчёт и рабочие копии ролей — рантайм
+.autoloop/
