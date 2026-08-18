@@ -16,7 +16,7 @@ model: sonnet
 Файл существует (`ls "{путь}"`), иначе СТОП: «файл не найден: {путь}». Дан диапазон и/или `ocr_dir` → обрабатывать ТОЛЬКО его.
 
 ## Алгоритм
-1. `ocr_dir` не передан → `PY=/Library/Frameworks/Python.framework/Versions/3.11/bin/python3; $PY scripts/markdown_extract.py "{путь}" --json-meta` → `route, pages, md_path, small, ocr_dir, note, requisites_path`.
+1. `ocr_dir` не передан → `PY=python3; $PY scripts/markdown_extract.py "{путь}" --json-meta` → `route, pages, md_path, small, ocr_dir, note, requisites_path`.
 2. `route=text-pdf` (зона Покровского, отметить в отчете): `small=true` → `--inline`; крупный → `--grep "ИНН|ОГРН|№|руб|договор|истец|ответчик|дата"` + один Read `md_path` срезом. → п. 5.
 3. `route=scan`: сайдкары есть (`ls {ocr_dir}/page_*.txt` непуст или ocr_dir в промпте) → читай `.txt`; нет → `$PY scripts/markdown_extract.py "{путь}" --render-dir "/tmp/{case}/{имя}" --json-meta` (аргумент-каталог обязателен). Движок недоступен (note «OCR-ДВИЖОК НЕ СОБРАН») → СТОП, на облако не деградировать. **Усечение:** в note «УСЕЧЕНО» ИЛИ сайдкаров меньше `pages` → `$PY scripts/render_tail.py "{путь}" "{ocr_dir}" 1` (идемпотентен, добирает дыры и хвост) — ни одна страница не выпадает. Диапазон — одним Bash-проходом (`for f in {ocr_dir}/page_*.txt; do echo "=== $f ==="; cat "$f"; done`).
 4. ⛔ PNG через Read (облачный vision) на основном проходе запрещено. Фолбэк — ровно 3 случая, точечно: пустой/мусорный `.txt` (note «OCR пуст») → соответствующий `page_NNN.png` · спорный КРИТИЧНЫЙ реквизит (№ дела, стороны, ИНН, суммы) → сверка конкретного места · рукопись/печать/угасший текст. Пустой `.txt` — сигнал: проверь PNG; пусто → «стр. N — чистый оборот», не молча.

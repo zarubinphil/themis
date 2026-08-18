@@ -116,6 +116,24 @@ def check_smoke(root=ROOT):
     return fails
 
 
+def check_prompts(root=ROOT):
+    """Производные наборы промптов совпадают с каноном `.claude/`.
+
+    Разошедшийся промпт хуже отсутствующего: агент исполняет устаревшее правило
+    уверенно. Правка канона без регенерации красит гейт — это и есть смысл.
+    """
+    gen = os.path.join(root, "scripts", "sync_prompts.py")
+    if not os.path.isfile(gen):
+        return []
+    code, out = run([sys.executable, gen], cwd=root)
+    if code == 0:
+        return []
+    n = out.count("\n  · ")
+    return [("prompts:drift",
+             f"производные промпты разошлись с каноном ({n} файлов) — "
+             f"починить `python3 scripts/sync_prompts.py --apply`")]
+
+
 def check_pd(root=ROOT):
     fails = []
     guard = os.path.join(root, "scripts", "pd_guard.py")
@@ -133,6 +151,7 @@ def gate(base="HEAD", root=ROOT, every=False):
     fails += check_compile(root)
     fails += check_selftests(base, root, every)
     fails += check_smoke(root)
+    fails += check_prompts(root)
     fails += check_pd(root)
     return fails
 
@@ -184,6 +203,13 @@ def selftest():
 
         # Smoke: сторожа на месте нет → гейт обязан покраснеть, а не промолчать
         assert check_smoke(os.path.join(tmp, "нет-такого")), "smoke на пустом дереве промолчал"
+
+        # Расхождение промптов с каноном обязано красить гейт
+        shutil.copy(os.path.join(SCRIPTS, "sync_prompts.py"), os.path.join(tmp, "scripts"))
+        os.makedirs(os.path.join(tmp, ".claude", "agents"))
+        with open(os.path.join(tmp, ".claude", "agents", "kto.md"), "w", encoding="utf-8") as f:
+            f.write("---\nname: kto\ndescription: проба\n---\n\nтело\n")
+        assert check_prompts(tmp), "отсутствующее производное не покрасило гейт"
     print("selftest: детект приборов, устойчивость отпечатка, компиляция, smoke — ок")
     return 0
 

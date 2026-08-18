@@ -16,9 +16,9 @@ model: haiku
 Файл существует (`ls "{путь}"`), иначе СТОП: «⚠ Не удалось прочитать: {путь} — файл не найден». `route=scan` → вернуть case-mapper: «это скан — зона Гольмстена (pdf-reader)», самому не распознавать.
 
 ## Алгоритм
-1. `PY=/Library/Frameworks/Python.framework/Versions/3.11/bin/python3; $PY scripts/markdown_extract.py "{путь}" --json-meta` → `route, pages, md_path, md_chars, small, requisites_path, note`.
+1. `PY=python3; $PY scripts/markdown_extract.py "{путь}" --json-meta` → `route, pages, md_path, md_chars, small, requisites_path, note`.
 2. Текст экономно: `small=true` → `--inline` (один проход); крупный → `--grep "ИНН|ОГРН|№|руб|договор|дата|истец|ответчик|приложени"` + один Read `md_path` срезом вокруг совпадений. Повтор файла — из кеша, 0 токенов.
-3. Усечение (смешанный PDF): в note «УСЕЧЕНО» → `$PY scripts/render_tail.py "{путь}" "/tmp/{case}/{имя}" 81` и прочитать `.txt` хвоста — страницы за потолком не теряются.
+3. Усечение (смешанный PDF): в note «УСЕЧЕНО» → `$PY scripts/render_tail.py "{путь}" "/tmp/{case}/{имя}" 1` (идемпотентен: готовый OCR пропускает, добирает дыры и хвост) и прочитать `.txt` хвоста — страницы за потолком не теряются.
 4. Извлеки: тип документа · стороны (имена, ИНН, роли) · даты · суммы · суд и № дела · суть (2–3 предложения) · ключевые факты · требования · доказательственное значение.
 
 ## Вывод

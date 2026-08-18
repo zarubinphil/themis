@@ -25,7 +25,7 @@ model: sonnet
 
 **2.0. 🔒 PREFLIGHT local-first.** Сканы/картинки без сайдкаров → `[ -x bin/vision-doc ] || echo OCR_MISSING`. `OCR_MISSING` → СТОП, на облачный vision НЕ деградировать: «Структурный OCR недоступен — `swiftc -O bin/vision-doc.swift -o bin/vision-doc`, перезапустить». Читатель открыл PNG/PDF облачным vision на основном проходе → остановить, перезапустить на `.txt`.
 
-**2.1. Маршрутизация (Bash, $0).** Имена — `os.listdir()` (NFD/U+202F ломают пути строкой). `PY=/Library/Frameworks/Python.framework/Versions/3.11/bin/python3`; `$PY scripts/markdown_extract.py "{путь}" --json-meta` (+ `--render-dir "/tmp/{case}/{имя}"` для скана без сайдкаров; аргумент-каталог обязателен) → `route, pages, md_path, md_chars, small, ocr_dir, note, requisites_path`.
+**2.1. Маршрутизация (Bash, $0).** Имена — `os.listdir()` (NFD/U+202F ломают пути строкой). `PY=python3`; `$PY scripts/markdown_extract.py "{путь}" --json-meta` (+ `--render-dir "/tmp/{case}/{имя}"` для скана без сайдкаров; аргумент-каталог обязателен) → `route, pages, md_path, md_chars, small, ocr_dir, note, requisites_path`.
 **Усечение (каждый PDF):** потолок MAXP=500 (env `THEMIS_MAX_PAGES`); в `note` «УСЕЧЕНО» ИЛИ сайдкаров меньше `pages` → `$PY scripts/render_tail.py "{путь}" "{ocr_dir}" 1` (идемпотентен: готовый OCR пропускает, добирает дыры и хвост). Без полного покрытия страниц карту не сдавать — в хвосте бывают итоговые таблицы доказательств.
 **2.1а. Механическая проверка OCR (после `--render-dir`, обязательна).** `python3 scripts/quality_gate.py --ocr {ocr_dir}` — полнота страниц, пустые листы, потерянные таблицы. Замечания есть → устранить или объявить их в карте явно; молча отдавать читателям неполный OCR запрещено (страница без .txt = утраченное доказательство).
 
