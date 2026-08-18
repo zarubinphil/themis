@@ -1,4 +1,4 @@
-#!/Library/Frameworks/Python.framework/Versions/3.11/bin/python3
+#!/usr/bin/env python3
 """verify_requisites.py — контрольные числа реквизитов: арифметика ловит ошибку OCR за $0.
 
 Проверки (все — официальные алгоритмы контрольных разрядов):

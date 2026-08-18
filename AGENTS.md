@@ -99,4 +99,4 @@ Reasoning — Claude-модели. Извлечение — локально, б
 
 ## Инструкционный Бюджет
 
-`CLAUDE.md` и `AGENTS.md` держать до 150 строк. Детали — в agents, skills, commands, case docs.
+`CLAUDE.md` и `AGENTS.md` держать до 200 строк. Детали — в agents, skills, commands, case docs.

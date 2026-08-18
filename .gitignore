@@ -62,3 +62,16 @@ knowledge/legal-design/_raw/
 
 # промежуточные рендеры образцов (6 МБ, пересобираются render_qa.py)
 knowledge/legal-design/samples/_qa/
+
+# Word-локи открытых документов — рантайм, не в репозиторий
+~$*
+
+# ── Рабочие планы перестройки: называют папки дел поимённо (ПД) ──
+# Пойманы pd_guard при попытке коммита 18.08.2026. Каноничны для работы,
+# но публикации не подлежат — живут локально, как cases/_logs/.
+knowledge/FINAL-PLAN-*.md
+knowledge/MASTER-PLAN-*.md
+knowledge/refactor-plan-*.md
+knowledge/multi-cli-plan-*.md
+knowledge/integrations-plan-*.md
+knowledge/PROMPT-*.md

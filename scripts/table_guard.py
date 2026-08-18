@@ -1,4 +1,4 @@
-#!/Library/Frameworks/Python.framework/Versions/3.11/bin/python3
+#!/usr/bin/env python3
 """table_guard.py — детекция «таблица на странице БЫЛА, а в выходе OCR ее НЕТ».
 
 Двухсторонняя проверка, $0, без модели:

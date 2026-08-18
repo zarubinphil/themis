@@ -1,4 +1,4 @@
-#!/Library/Frameworks/Python.framework/Versions/3.11/bin/python3
+#!/usr/bin/env python3
 """
 markdown_extract.py — роутер извлечения текста (экономный по токенам).
 
@@ -309,6 +309,7 @@ def transcribe(path):
 LAT_MAX = 0.10   # доля латиницы среди букв страницы; выше — текст-слой битый
 RU_MIN = 0.40    # доля кириллицы по ВСЕМУ документу, чтобы считать его русским
 ALL_BAD = 0.25   # столько битых страниц — битый весь PDF (один прогон чужого OCR)
+NOLOOK_MIN = 0.08  # доля латиницы без кириллического двойника; ниже — это не латынь
 
 
 # Кириллица РУССКОГО алфавита, а не весь блок U+0400-U+04FF. Прежнее условие
@@ -338,6 +339,28 @@ def _lat_share(t):
     return (len(letters) - ru) / len(letters)
 
 
+# Латинские буквы, у которых НЕТ кириллического двойника по начертанию. Чужой
+# OCR, приняв русский лист за латиницу, подбирает буквы по форме глифа: «ПРЕДМЕТ
+# ДОГОВОРА» становится «TPEJIMET JOTOBOPA». Такие буквы в результат не попадают
+# почти никогда, а в настоящей латыни их пятая часть текста (замер 15.08.2026:
+# порченый договор — 3,6 %, живой английский документ — 20,2 %).
+_NO_CYR_LOOKALIKE = frozenset("sdfgwqvSDFGWQV")
+
+
+def latin_is_faux_cyrillic(t: str) -> bool:
+    """Латиница в тексте — на деле перекодированная по начертанию кириллица.
+
+    Нужно там, где порча ПОЛНАЯ: русской буквы не осталось ни одной, доля
+    кириллицы равна нулю, и проверка «русский ли документ» объявляла лист
+    иноязычным — а значит мусор проходил как годный текст (прецедент 15.08.2026:
+    договор аренды на 6 страниц ушёл в работу латиницей-двойником).
+    """
+    lat = [c for c in t if "a" <= c.lower() <= "z"]
+    if len(lat) < 100:
+        return False
+    return sum(1 for c in lat if c in _NO_CYR_LOOKALIKE) / len(lat) < NOLOOK_MIN
+
+
 def text_layer_ok(t, doc_is_ru=True):
     """Текст-слой русского документа бывает битым: чужой OCR запечен в PDF и дает
     кашу вида «Рссn)'6л~1кс». Такой слой ХУЖЕ, чем его отсутствие — читается как
@@ -365,6 +388,10 @@ def pdf_garbage_pages(path, idx):
         return []
     cyr = sum(1 for c in letters if is_ru_letter(c))
     doc_is_ru = cyr >= len(letters) * RU_MIN
+    # Кириллицы нет вовсе — либо документ и правда иноязычный, либо она ВСЯ ушла
+    # в латиницу-двойник. Различает состав латиницы, а не её количество.
+    if not doc_is_ru:
+        doc_is_ru = latin_is_faux_cyrillic("".join(texts.values()))
     bad = [i for i in idx if not text_layer_ok(texts[i], doc_is_ru)]
     return list(idx) if len(bad) >= max(2, len(idx) * ALL_BAD) else bad
 
@@ -540,6 +567,15 @@ def selftest() -> int:
          (_lat_share("Российской Федерации " * 12) or 0) == 0),
         ("латиница в кириллице по-прежнему ловится долей",
          (_lat_share("Pоccийcкoй Фeдepaции " * 12) or 0) > LAT_MAX),
+        # Полная порча: кириллицы не осталось совсем. Прежняя проверка объявляла
+        # такой лист иноязычным и пропускала мусор в работу.
+        ("сплошная латиница-двойник опознана как порченая кириллица",
+         latin_is_faux_cyrillic("TPEJIMET JOTOBOPA APEHJIA IIOMEIIEHIA " * 12)),
+        ("настоящий английский текст порчей не считается",
+         not latin_is_faux_cyrillic("The landlord shall provide the tenant with "
+                                    "written notice of default and grounds " * 8)),
+        ("короткий фрагмент латиницы вердикта не даёт",
+         not latin_is_faux_cyrillic("PDF OCR")),
     ]
     for name, ok in checks:
         print(f"  {'✓' if ok else '✗'} {name}")

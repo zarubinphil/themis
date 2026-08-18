@@ -12,7 +12,7 @@ import os
 import sys
 from pathlib import Path
 
-ROOT = Path("/Users/fil/Проекты/themis")
+ROOT = Path(__file__).resolve().parents[3]  # корень репозитория, не машина автора
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(HERE))

@@ -1,4 +1,4 @@
-#!/Library/Frameworks/Python.framework/Versions/3.11/bin/python3
+#!/usr/bin/env python3
 """extract_manifest.py — аудит полноты OCR-кеша: каждая страница дошла до артефакта?
 
 Проверяет ~/.cache/legal_extract/*_ocr:

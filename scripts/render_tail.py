@@ -1,13 +1,14 @@
-#!/Library/Frameworks/Python.framework/Versions/3.11/bin/python3
+#!/usr/bin/env python3
 """render_tail.py — дорендер хвоста скан-PDF сверх потолка MAXP роутера.
 
-markdown_extract.py рендерит/OCR-ит не более MAXP (=80) страниц; усечение
-помечается в note: «УСЕЧЕНО: всего N стр., обработано 80». Этот скрипт
+markdown_extract.py рендерит/OCR-ит не более MAXP (=500, env THEMIS_MAX_PAGES) страниц;
+усечение помечается в note: «УСЕЧЕНО: всего N стр., обработано MAXP». Этот скрипт
 отрисовывает и OCR-ит остаток локальным Apple Vision ($0) в те же сайдкары
 ocr_dir/page_NNN.{png,txt}. Идемпотентен: страницы с готовым .txt пропускает.
 
 Использование: render_tail.py FILE OCR_DIR START [END]
-  START/END — номера страниц от 1 включительно (обычно START=81).
+  START/END — номера страниц от 1 включительно. START=1 безопасен всегда:
+  страницы с готовым .txt пропускаются, добираются только дыры и хвост.
 """
 import os
 import sys

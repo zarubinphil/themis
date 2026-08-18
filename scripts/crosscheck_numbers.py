@@ -1,4 +1,4 @@
-#!/Library/Frameworks/Python.framework/Versions/3.11/bin/python3
+#!/usr/bin/env python3
 """crosscheck_numbers.py — кросс-сверка ЧИСЕЛ между двумя движками OCR по одной странице.
 
 Идея: движки ошибаются по-разному (Vision калечит структуру, Unlimited — кириллицу),

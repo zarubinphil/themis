@@ -338,6 +338,21 @@ def _client_name(folder: Path) -> str:
     return folder.name
 
 
+def _visible_docx(base: Path):
+    """Документы дела, которые видит юрист: без снимков `_baselines/`, локов Word и служебных каталогов.
+
+    Негативный фильтр (этап 1 плана 18.08.2026): `rglob` тянул неизменяемые снимки ДО-правок
+    доверителя и Word-локи как готовые документы. Позитивный фильтр «только папка готовых»
+    ставится ПОСЛЕ миграции — сейчас таких папок нет и панель показала бы ноль.
+    """
+    for f in base.rglob("*.docx"):
+        if f.name.startswith("~$"):
+            continue
+        if any(p == "_baselines" or p.startswith(".") for p in f.relative_to(base).parts[:-1]):
+            continue
+        yield f
+
+
 def _case_title(folder: Path) -> str:
     """Русское название дела из _case.md (первый H1). Фолбэк — slug."""
     cm = folder / "_case.md"
@@ -372,7 +387,7 @@ def client_cases(slug: str) -> JSONResponse:
     out = []
     for d in sorted(base.iterdir()):
         if d.is_dir() and not d.name.startswith((".", "_")):
-            docx = [f for f in d.rglob("*.docx") if not f.name.startswith("~$")]
+            docx = list(_visible_docx(d))
             out.append({"slug": d.name, "title": _case_title(d), "docx": len(docx)})
     return JSONResponse(out)
 
@@ -384,9 +399,7 @@ def case_docs(client: str, case: str) -> JSONResponse:
     if CASES_DIR.resolve() not in base.parents or not base.exists():
         return JSONResponse([])
     docs = []
-    for f in sorted(base.rglob("*.docx"), key=lambda p: p.stat().st_mtime, reverse=True):
-        if f.name.startswith("~$"):
-            continue
+    for f in sorted(_visible_docx(base), key=lambda p: p.stat().st_mtime, reverse=True):
         docs.append({
             "name": f.name, "path": str(f),
             "rel": str(f.relative_to(base)),
@@ -467,7 +480,7 @@ PIPELINE = (
     "Шаг 6 — самоконтроль (молча, не в чат): если в прогоне были ошибки, сбои или перезапуски "
     "агентов, предупреждения, пропуски маркеров — проведи разбор «причина → исправление → как "
     "не повторять» и занеси в cases/_logs/session_ДД-ММ-ГГГГ.md; если урок системный — также в "
-    "~/.claude/references/lessons-log.md. Это обязательная часть протокола. "
+    "knowledge/lessons-log.md. Это обязательная часть протокола. "
     "Соблюдай все маркеры-ворота. НЕ останавливайся и НЕ спрашивай разрешения продолжать между "
     "шагами — иди до готового документа сам. Останавливайся ВОПРОСом только если реально нужен "
     "выбор юриста по существу спора (а не по технике)."
@@ -494,7 +507,7 @@ def _redline_prompt(doc_path: str) -> str:
         "урок — конкретное правило в нужный раздел по категории (или в раздел «Форматирование»), "
         "в формате «- [дата · дело] правило». "
         "Если правка вскрыла системный огрех протокола — добавь урок и в "
-        "~/.claude/references/lessons-log.md. Документ доверителя НЕ меняй. "
+        "knowledge/lessons-log.md. Документ доверителя НЕ меняй. "
         "В чат — кратко, живым голосом богини: что именно усвоила (1-3 реплики), без техники."
     )
 
@@ -551,12 +564,11 @@ def _emit_event(line: str) -> None:
 def _docx_snapshot() -> dict:
     snap = {}
     if CASES_DIR.exists():
-        for f in CASES_DIR.rglob("*.docx"):
-            if not f.name.startswith("~$"):
-                try:
-                    snap[str(f)] = f.stat().st_mtime
-                except OSError:
-                    pass
+        for f in _visible_docx(CASES_DIR):
+            try:
+                snap[str(f)] = f.stat().st_mtime
+            except OSError:
+                pass
     return snap
 
 

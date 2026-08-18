@@ -37,6 +37,7 @@ scripts/registry_check.py и в тело сообщения коммита. **И
 вторым каналом утечки. Печатается файл, строка и длина совпадения.
 """
 import argparse
+import glob
 import os
 import re
 import subprocess
@@ -118,6 +119,34 @@ def check_tree(pat: re.Pattern | None) -> list[str]:
     return problems
 
 
+def local_log_files(root: str = ROOT) -> list[str]:
+    """Рабочие логи, где имена дел лежат законно: корневые *.log и всё под cases/_logs/."""
+    out = list(glob.glob(os.path.join(root, "*.log")))
+    out += [p for p in glob.glob(os.path.join(root, "cases", "_logs", "**", "*"), recursive=True)
+            if os.path.isfile(p)]
+    return sorted(set(out))
+
+
+def check_local_logs(root: str = ROOT) -> list[str]:
+    """Рабочие логи ОБЯЗАНЫ оставаться вне git.
+
+    В `audit.log` и `cases/_logs/` имя дела пишется по делу — это работа, вычищать нечего.
+    Опасность другая: правило `.gitignore` сломали или файл добавили `git add -f`, и вся
+    история прогонов уезжает в публичный репозиторий разом. Сторож проверяет не текст,
+    а статус: игнорируется и не отслеживается.
+    """
+    problems = []
+    for path in local_log_files(root):
+        rel = os.path.relpath(path, root)
+        if subprocess.run(["git", "check-ignore", "-q", "--", rel], cwd=root).returncode != 0:
+            problems.append(f"{rel} — рабочий лог НЕ покрыт .gitignore")
+        tracked = subprocess.run(["git", "ls-files", "--", rel], cwd=root,
+                                 capture_output=True, text=True).stdout.strip()
+        if tracked:
+            problems.append(f"{rel} — рабочий лог ОТСЛЕЖИВАЕТСЯ git")
+    return problems
+
+
 HOOK = """#!/bin/sh
 # Поставлен scripts/pd_guard.py --install. Фамилия доверителя не уходит наружу.
 exec python3 "$(git rev-parse --show-toplevel)/scripts/pd_guard.py" %s
@@ -162,6 +191,8 @@ def main() -> int:
     ap.add_argument("--staged", action="store_true", help="проверить индекс коммита")
     ap.add_argument("--msg", metavar="FILE", help="проверить сообщение коммита")
     ap.add_argument("--tree", action="store_true", help="проверить всё дерево git")
+    ap.add_argument("--local-logs", action="store_true",
+                    help="рабочие логи (audit.log, cases/_logs/) вне git")
     ap.add_argument("--install", action="store_true", help="поставить git-хуки")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
@@ -182,12 +213,33 @@ def main() -> int:
             print(f"сообщение коммита не прочитано ({e})", file=sys.stderr)
             return 0
         return report(scan_text(text, pat, "сообщение коммита"), "сообщении коммита")
+    if a.local_logs:
+        return report(check_local_logs(), "рабочих логах")
     if a.tree:
         return report(check_tree(pat), "дереве git")
     if a.staged:
         return report(check_staged(pat), "коммите")
     ap.print_help()
     return 2
+
+
+def _local_logs_probe(force_add: bool = False) -> int:
+    """Синтетический репозиторий: рабочий лог игнорируется, а насильно добавленный — ловится."""
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="pdguard-logs-") as tmp:
+        os.makedirs(os.path.join(tmp, "cases", "_logs"))
+        with open(os.path.join(tmp, "audit.log"), "w", encoding="utf-8") as f:
+            f.write("прогон по делу\n")
+        with open(os.path.join(tmp, "cases", "_logs", "session_18-08-2026.md"), "w",
+                  encoding="utf-8") as f:
+            f.write("разбор\n")
+        with open(os.path.join(tmp, ".gitignore"), "w", encoding="utf-8") as f:
+            f.write("*.log\ncases/_logs/\n")
+        for cmd in (["init", "-q"], ["add", ".gitignore"]):
+            subprocess.run(["git", *cmd], cwd=tmp, capture_output=True)
+        if force_add:
+            subprocess.run(["git", "add", "-f", "audit.log"], cwd=tmp, capture_output=True)
+        return len(check_local_logs(tmp))
 
 
 def selftest() -> int:
@@ -226,6 +278,9 @@ def selftest() -> int:
          all("familiya-ab" not in p for p in scan_text("familiya-ab", pat, "f"))),
         ("находка называет файл и строку",
          "f.py:1" in scan_text("familiya-ab", pat, "f.py")[0]),
+        # Рабочие логи: сторож смотрит не на текст, а на статус в git.
+        ("рабочий лог под .gitignore проходит", _local_logs_probe() == 0),
+        ("рабочий лог, добавленный в git, ловится", _local_logs_probe(force_add=True) > 0),
         ("пустой список имён никого не ловит",
          scan_text("familiya-ab", name_pattern([]), "f") == []),
         ("отчёт по находкам даёт код 1", report(["x"], "тесте") == 1),

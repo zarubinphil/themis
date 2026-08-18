@@ -7,8 +7,13 @@
   1 числа каждого месяца в 12:00: --check дешево сверяет дату редакции,
   --update тянет заново только то, что реально изменилось.
 
-  Установка (один раз):
-    cp ~/Проекты/themis/scripts/legal.corpus.update.plist ~/Library/LaunchAgents/
+  Шаблон, а не готовый plist: launchd не разворачивает ~ и переменные окружения в
+  ProgramArguments и WorkingDirectory, поэтому путь обязан быть абсолютным — но абсолютным
+  ДЛЯ ЭТОЙ машины, а не для машины автора. Подстановка делается при установке.
+
+  Установка (один раз, из корня проекта):
+    sed "s|__THEMIS_HOME__|$PWD|g" scripts/legal.corpus.update.plist.template \
+      > ~/Library/LaunchAgents/legal.corpus.update.plist
     launchctl load ~/Library/LaunchAgents/legal.corpus.update.plist
 
   Остановка:
@@ -18,7 +23,7 @@
     launchctl list | grep legal.corpus
 
   Ручной прогон (без ожидания 1 числа):
-    ~/Проекты/themis/scripts/legal-corpus-monthly.sh
+    bash scripts/legal-corpus-monthly.sh
 -->
 
 <plist version="1.0">
@@ -29,7 +34,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/fil/Проекты/themis/scripts/legal-corpus-monthly.sh</string>
+        <string>__THEMIS_HOME__/scripts/legal-corpus-monthly.sh</string>
     </array>
 
     <!-- 1 числа каждого месяца в 12:00 -->
@@ -44,13 +49,13 @@
     </dict>
 
     <key>WorkingDirectory</key>
-    <string>/Users/fil/Проекты/themis</string>
+    <string>__THEMIS_HOME__</string>
 
     <key>StandardOutPath</key>
-    <string>/Users/fil/Проекты/themis/audit.log</string>
+    <string>__THEMIS_HOME__/audit.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/fil/Проекты/themis/audit.log</string>
+    <string>__THEMIS_HOME__/audit.log</string>
 
     <key>RunAtLoad</key>
     <false/>

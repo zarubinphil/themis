@@ -10,6 +10,10 @@
 
 set -uo pipefail
 
+# launchd запускает с голым PATH (/usr/bin:/bin:/usr/sbin:/sbin) — claude и python3
+# из Framework/Homebrew там не резолвятся, и еженедельный разбор молча не стартует.
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/Library/Frameworks/Python.framework/Versions/3.11/bin:$PATH"
+
 ROOT="$HOME/Проекты/themis"
 LOG="$ROOT/audit.log"
 DRY=0
