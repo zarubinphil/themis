@@ -146,13 +146,41 @@ def check_pd(root=ROOT):
     return fails
 
 
-def gate(base="HEAD", root=ROOT, every=False):
+def check_spec(spec, root=ROOT):
+    """Внешняя приёмка этапа: контракт задан координатором, исполнитель его не правит."""
+    if not spec:
+        return []
+    path = os.path.join(root, spec) if not os.path.isabs(spec) else spec
+    if not os.path.isfile(path):
+        return [("spec:missing", f"приёмка {spec} не найдена")]
+
+    # Приёмку правит только координатор. Просьба «не трогай» исполняется вероятностно,
+    # сверка с зафиксированной в git редакцией — детерминированно. Подогнанная под
+    # результат приёмка не отличается от отсутствующей.
+    rel = os.path.relpath(path, root)
+    code, committed = run(["git", "show", f"HEAD:{rel}"], cwd=root)
+    if code == 0 and committed:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            if f.read() != committed:
+                return [("spec:tampered",
+                         f"{rel} изменён относительно зафиксированного в git — приёмку правит "
+                         f"только координатор. Вернуть: git checkout HEAD -- {rel}")]
+    code, out = run([sys.executable, path], cwd=root, timeout=1800)
+    if code == 0:
+        return []
+    head = next((l.strip() for l in out.splitlines() if "сдано" in l), "")
+    return [("spec:failed", f"приёмка этапа не пройдена ({head or 'код ' + str(code)}). "
+                            f"Подробно: python3 {spec}")]
+
+
+def gate(base="HEAD", root=ROOT, every=False, spec=None):
     fails = []
     fails += check_compile(root)
     fails += check_selftests(base, root, every)
     fails += check_smoke(root)
     fails += check_prompts(root)
     fails += check_pd(root)
+    fails += check_spec(spec, root)
     return fails
 
 
@@ -164,6 +192,31 @@ def fingerprint(fails):
     """
     ids = ";".join(sorted(f_id for f_id, _ in fails))
     return hashlib.sha256(ids.encode("utf-8")).hexdigest()[:16]
+
+
+def _spec_tamper_probe():
+    """Свой git-репозиторий: чистая приёмка проходит, подменённая краснеет.
+
+    Проверка обязана быть герметичной — оглядка на состояние боевого репозитория
+    делает результат selftest зависимым от того, что сейчас лежит на диске.
+    """
+    import shutil as _sh
+    import tempfile as _tf
+    with _tf.TemporaryDirectory(prefix="loopgate-tamper-") as tmp:
+        os.makedirs(os.path.join(tmp, "scripts"))
+        spec = os.path.join(tmp, "scripts", "priemka.py")
+        with open(spec, "w", encoding="utf-8") as f:
+            f.write("import sys\nsys.exit(0)\n")
+        for cmd in (["init", "-q"], ["add", "scripts/priemka.py"],
+                    ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "spec"]):
+            subprocess.run(["git", *cmd], cwd=tmp, capture_output=True)
+        assert check_spec("scripts/priemka.py", tmp) == [], \
+            "чистая приёмка объявлена подменённой"
+        with open(spec, "a", encoding="utf-8") as f:
+            f.write("# подгонка под результат\n")
+        ids = {i for i, _ in check_spec("scripts/priemka.py", tmp)}
+        assert "spec:tampered" in ids, f"подмена приёмки не поймана: {ids}"
+        _sh.rmtree(os.path.join(tmp, ".git"), ignore_errors=True)
 
 
 def selftest():
@@ -204,6 +257,11 @@ def selftest():
         # Smoke: сторожа на месте нет → гейт обязан покраснеть, а не промолчать
         assert check_smoke(os.path.join(tmp, "нет-такого")), "smoke на пустом дереве промолчал"
 
+        # Отсутствующая приёмка обязана красить гейт, а не тихо пропускаться
+        assert check_spec("scripts/net-takoy-priemki.py", tmp), "пропавшая приёмка не поймана"
+        _spec_tamper_probe()
+        assert check_spec(None, tmp) == [], "без приёмки гейт обязан работать как прежде"
+
         # Расхождение промптов с каноном обязано красить гейт
         shutil.copy(os.path.join(SCRIPTS, "sync_prompts.py"), os.path.join(tmp, "scripts"))
         os.makedirs(os.path.join(tmp, ".claude", "agents"))
@@ -219,6 +277,7 @@ def main():
     ap.add_argument("--base", default="HEAD", help="точка отсчета изменений (по умолчанию HEAD)")
     ap.add_argument("--all-selftests", action="store_true",
                     help="гонять selftest ВСЕХ приборов, а не только затронутых")
+    ap.add_argument("--spec", help="внешняя приёмка этапа (например scripts/stage5_spec.py)")
     ap.add_argument("--fingerprint", action="store_true", help="печатать только отпечаток вердикта")
     ap.add_argument("--json", action="store_true", help="машинный вывод")
     ap.add_argument("--selftest", action="store_true")
@@ -226,7 +285,7 @@ def main():
     if a.selftest:
         return selftest()
 
-    fails = gate(a.base, ROOT, a.all_selftests)
+    fails = gate(a.base, ROOT, a.all_selftests, a.spec)
     fp = fingerprint(fails)
     if a.fingerprint:
         print(fp)

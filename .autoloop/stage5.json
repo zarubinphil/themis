@@ -1,0 +1,38 @@
+{
+  "task": "Этап 5 — написать шесть приборов Фемиды строго по контракту scripts/stage5_spec.py. Прогресс измеряется ТОЛЬКО этой приёмкой: python3 scripts/stage5_spec.py (сейчас сдано 0 из 6). Контракты полностью: python3 scripts/stage5_spec.py --contracts. Работать по одному прибору за итерацию, начиная с pii_gate.py — он блокирует этап 7. Правило: приёмку scripts/stage5_spec.py НЕ ПРАВИТЬ ни при каких обстоятельствах, прибор подстраивается под контракт, а не наоборот. Каждый прибор — свой файл в scripts/, в стиле проекта: русская докстрока «зачем», комментарии объясняют ПОЧЕМУ, свой --selftest без сети, коды возврата как в контракте. Пакеты не ставить: только стандартная библиотека и то, что уже есть в проекте (python-docx есть).",
+  "stage": "5",
+
+  "guards": {
+    "max_iterations": 10,
+    "max_money": 12.0,
+    "wall_clock_seconds": 10800,
+    "no_progress_limit": 2,
+    "stop_when": "gate_green"
+  },
+
+  "isolation_worktree": false,
+  "_isolation": "Роли работают по очереди в одном дереве: строитель пишет прибор, скептик читает написанное. Параллельными их делать нельзя — скептику нечего рецензировать, пока строитель не закончил, а изоляция в отдельных копиях развела бы их по разным деревьям.",
+
+  "roles": [
+    {
+      "name": "stroitel",
+      "kind": "generator",
+      "argv": ["claude", "-p", "{brief}",
+               "--model", "sonnet",
+               "--permission-mode", "acceptEdits",
+               "--allowed-tools", "Read", "Write", "Edit", "Glob", "Grep", "Bash"]
+    },
+    {
+      "name": "skeptik",
+      "kind": "reviewer",
+      "argv": ["claude", "-p", "{brief}",
+               "--model", "opus",
+               "--permission-mode", "acceptEdits",
+               "--allowed-tools", "Read", "Write", "Edit", "Glob", "Grep", "Bash"]
+    }
+  ],
+  "_roles": "Промпт стоит ПЕРВЫМ аргументом: --allowed-tools вариативен и съедает следующий позиционный аргумент как имя инструмента (проверено 19.08.2026). acceptEdits вместо dangerously-skip-permissions: запрет обхода проверок конституция снимать не разрешает.",
+
+  "gate": ["{python}", "scripts/loop_gate.py", "--json", "--spec", "scripts/stage5_spec.py"],
+  "_gate": "Компиляция, selftest затронутых приборов, smoke, промпты, ПД — и внешняя приёмка этапа. Вердикт держит код возврата, мнение ролей вердиктом не считается."
+}
