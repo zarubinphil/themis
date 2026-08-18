@@ -194,6 +194,77 @@ def do_promote(pairs):
     return done
 
 
+def plan_merge(root=CASES):
+    """Каталоги старой раскладки, ВОЗНИКШИЕ ЗАНОВО рядом с новой.
+
+    Так выглядит живая сессия, начатая до переезда: она держит прежние пути в
+    контексте и пишет в них дальше. Данные не теряются, но новый код их не видит —
+    статус, сторож и панель смотрят в `.agent/`. Это слияние, а не переезд:
+    назначение уже существует, и `os.rename` каталога тут отказал бы.
+
+    Возвращает [(дело, старый, новый)].
+    """
+    out = []
+    for case in all_cases(root):
+        for old, new in cp.LEGACY:
+            src, dst = case / old, case / new
+            if src.is_dir() and dst.is_dir():
+                out.append((case, src, dst))
+    return out
+
+
+def do_merge(triples, apply=False):
+    """Слияние без потерь: новее побеждает, прежнее уходит в архив дела.
+
+    Правило «новее побеждает» здесь не догадка: файлы старого каталога записаны
+    ПОСЛЕ переезда — потому он и возник заново. Но выбор всё равно не молчаливый:
+    вытесненная версия кладётся в `.agent/archive/_pered-sliyaniem/`, а не удаляется.
+    """
+    moved, identical, replaced = [], [], []
+    for case, src, dst in triples:
+        for dirpath, _, files in os.walk(src):
+            for name in sorted(files):
+                a = Path(dirpath) / name
+                rel = a.relative_to(src)
+                b = dst / rel
+                if not b.exists():
+                    moved.append((a, b))
+                elif sha256(a) == sha256(b):
+                    identical.append((a, b))
+                else:
+                    replaced.append((a, b))
+    if not apply:
+        return moved, identical, replaced
+
+    for a, b in moved:
+        b.parent.mkdir(parents=True, exist_ok=True)
+        os.rename(a, b)
+        journal({"event": "merge_move", "src": str(a), "dst": str(b)})
+    for a, b in replaced:
+        keep = cp.archive(Path(str(b).split(f"/{cp.AGENT_DIR}/")[0])) / "_pered-sliyaniem"
+        target = keep / b.relative_to(cp.context(Path(str(b).split(f"/{cp.AGENT_DIR}/")[0])))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        os.rename(b, target)
+        os.rename(a, b)
+        journal({"event": "merge_replace", "src": str(a), "dst": str(b),
+                 "archived": str(target)})
+    for a, b in identical:
+        os.remove(a)          # побайтово тот же файл — второй экземпляр не нужен
+        journal({"event": "merge_same", "src": str(a)})
+    for case, src, dst in triples:
+        for d in sorted((x for x in src.rglob("*") if x.is_dir()),
+                        key=lambda x: -len(x.parts)):
+            try:
+                d.rmdir()
+            except OSError:
+                pass
+        try:
+            src.rmdir()
+        except OSError:
+            pass
+    return moved, identical, replaced
+
+
 def journal(entry):
     JOURNAL.parent.mkdir(parents=True, exist_ok=True)
     with open(JOURNAL, "a", encoding="utf-8") as f:
@@ -481,6 +552,8 @@ def main():
     ap.add_argument("--apply", action="store_true", help="выполнить переезд")
     ap.add_argument("--verify", action="store_true", help="сверить по манифесту ДО")
     ap.add_argument("--rollback", action="store_true", help="вернуть каталоги по журналу")
+    ap.add_argument("--merge-stray", action="store_true",
+                    help="слить старые каталоги, возникшие заново рядом с новыми")
     ap.add_argument("--promote-ready", action="store_true",
                     help="выданные .docx из черновиков → GOTOVO/ (второй шаг переезда)")
     ap.add_argument("--manifest", metavar="FILE", help="куда положить манифест ДО")
@@ -497,6 +570,35 @@ def main():
         for p in problems:
             print("  · " + p)
         return 1 if problems else 0
+    if a.merge_stray:
+        triples = plan_merge()
+        if not triples:
+            print("заблудившихся каталогов нет — раскладка едина")
+            return 2
+        moved, identical, replaced = do_merge(triples, apply=False)
+        print(f"дел с раздвоенной раскладкой: {len(triples)}")
+        for case, src, dst in triples:
+            print(f"  {case.parent.name}/{case.name}: {src.name} → {dst.name}")
+        print(f"  переедет впервые:      {len(moved)}")
+        print(f"  побайтово совпадает:   {len(identical)}")
+        print(f"  вытеснит прежнюю:      {len(replaced)}  (прежние — в архив дела)")
+        for a_, b_ in replaced[:10]:
+            print(f"      ⚠ {b_.name}")
+        if not a.apply:
+            print("\n  Выполнить: --merge-stray --apply")
+            return 0
+        before = manifest()
+        do_merge(triples, apply=True)
+        after = manifest()
+        lost = len(before) - len(after) - len(identical)
+        if lost:
+            print(f"\n❌ баланс файлов не сошёлся: расхождение {lost}")
+            return 1
+        print(f"\n✓ слито: {len(moved)} перенесено, {len(replaced)} вытеснило прежние "
+              f"(сохранены в архиве), {len(identical)} дублей убрано. Файлов было "
+              f"{len(before)}, стало {len(after)}")
+        return 0
+
     if a.promote_ready:
         pairs = plan_promote()
         if not pairs:
