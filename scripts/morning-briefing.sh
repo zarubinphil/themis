@@ -59,6 +59,20 @@ echo -e "$BODY" >> "$LOG"
 # --- Уведомление macOS ---
 osascript -e "display notification \"$(echo -e "$BODY")\" with title \"$MSG\" sound name \"default\""
 
+# --- Напоминание в Telegram (этап 8) ---
+# Единственный внешний канал уведомлений. Наружу уходят только даты и счёт:
+# имена доверителей и номера дел остаются в локальном уведомлении выше.
+# Секрет читается из ~/.secrets и в лог не попадает. Бот выключен либо секрета
+# нет — молча пропускаем: система от бота не зависит.
+BOT="$HOME/Проекты/themis/scripts/themis_bot.py"
+BOT_SECRET="$HOME/.secrets/themis-telegram.env"
+if [[ -f "$BOT_SECRET" ]]; then
+    set -a; . "$BOT_SECRET"; set +a
+    if python3 "$BOT" --check >/dev/null 2>&1; then
+        python3 "$BOT" --notify-hearings --days "$DAYS_AHEAD" >> "$LOG" 2>&1
+    fi
+fi
+
 # --- Если есть входящие — запустить inbox-triage автоматически ---
 if [[ "$INBOX_COUNT" -gt 0 ]]; then
     echo "$(date '+%Y-%m-%d %H:%M') | BRIEFING | Запускаю inbox-triage для $INBOX_COUNT файлов" >> "$LOG"

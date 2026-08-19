@@ -36,6 +36,9 @@ DEFAULTS = {
     "bot": {"enabled": False, "token_env": "THEMIS_TELEGRAM_BOT_TOKEN", "chat_id_env":
             "THEMIS_TELEGRAM_CHAT_ID"},
     "practice": {"categories": [], "region": "", "arbitrazh": False},
+    # Своя команда расшифровки голосового, если платформенная не подходит.
+    # Пусто — движок выбирает scripts/voice_local.py по платформе.
+    "voice": {"stt_cmd": ""},
 }
 # Ключи, в которых значение секрета быть НЕ ДОЛЖНО ни при каких обстоятельствах.
 SECRET_KEYS = ("token", "secret", "password", "api_key", "apikey")
@@ -134,6 +137,7 @@ def selftest() -> int:
         assert check(ok) == 0, "годный конфиг отвергнут"
         assert load(ok)["practice"]["region"] == "Республика Татарстан", "слияние потеряло своё"
         assert load(ok)["bot"]["enabled"] is False, "слияние потеряло умолчание"
+        assert load(net)["voice"]["stt_cmd"] == "", "движок расшифровки задан по умолчанию"
 
         no_url = td / "nourl.json"
         no_url.write_text(json.dumps({"server": {"enabled": True}}), encoding="utf-8")

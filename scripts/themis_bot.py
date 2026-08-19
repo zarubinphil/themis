@@ -51,6 +51,7 @@ SCRIPTS = Path(__file__).resolve().parent
 ROOT = SCRIPTS.parent
 CASES = ROOT / "cases"
 API = "https://api.telegram.org"
+PREDEL_ZVUKA = 25 * 1024 * 1024        # потолок скачиваемого голосового
 TAYMAUT = 40
 
 sys.path.insert(0, str(SCRIPTS))
@@ -109,9 +110,16 @@ def gotovnost(c: dict, path: str | None = None) -> list:
     elif not token(c):
         beda.append(f"переменная {c['bot']['token_env']} пуста — положить токен в "
                     "~/.secrets/themis-telegram.env и передать в окружение запуска")
-    if not owner(c):
+    svoy = owner(c)
+    if not svoy:
         beda.append(f"не задан чат владельца (переменная {c['bot'].get('chat_id_env')}) — "
                     "без него отвечать некому и отличить чужого нечем")
+    elif not re.fullmatch(r"-?\d{5,20}", svoy):
+        # Молчаливое несовпадение выглядит как «бот сломался»: он честно
+        # сравнивает строки, просто ни одна не совпадёт никогда.
+        beda.append(f"чат владельца «{svoy}» не похож на номер чата Telegram — "
+                    "бот не узнает владельца и промолчит на каждое сообщение. "
+                    "Узнать свой: --chat-probe")
     return beda
 
 
@@ -139,6 +147,7 @@ def audit(sobytie: str, chat: str = "", detal: str = "") -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
         with open(p, "a", encoding="utf-8") as f:
             f.write(line)
+        p.chmod(0o600)          # в журнале номера чатов — читает его владелец
     except OSError:
         pass          # журнал не роняет бота, но и молчать о себе не будет
 
@@ -299,7 +308,12 @@ def tg(c: dict, api_base: str, metod: str, telo: dict | None = None, taymaut: in
                                  headers={"content-type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=taymaut) as r:
-            return json.loads(r.read().decode("utf-8", "replace"))
+            otvet = json.loads(r.read().decode("utf-8", "replace"))
+        if isinstance(otvet, dict) and otvet.get("ok") is False:
+            # 200 с «ok»: false — тоже отказ. Молча прочитав пустой result, бот
+            # решил бы, что сообщений нет, и потерял бы их без следа.
+            raise Otkaz(f"Telegram отклонил {metod}: {str(otvet.get('description'))[:120]}")
+        return otvet
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
             raise Otkaz(f"Telegram не принял токен ({e.code}). Проверить значение "
@@ -390,12 +404,19 @@ def golos(c: dict, api_base: str, file_id: str) -> str:
         req = urllib.request.Request(f"{api_base.rstrip('/')}/file/bot{t}/{put}")
         try:
             with urllib.request.urlopen(req, timeout=TAYMAUT) as resp:
-                zvuk.write_bytes(resp.read())
+                # Читаем с потолком: длину сообщает та же сторона, что и файл,
+                # и верить ей на слово значит отдать ей память машины.
+                telo = resp.read(PREDEL_ZVUKA + 1)
+            if len(telo) > PREDEL_ZVUKA:
+                raise Otkaz("голосовое неправдоподобно большое — не беру")
+            zvuk.write_bytes(telo)
         except (urllib.error.URLError, OSError):
             raise Otkaz("голосовое не скачалось")
+        sreda = {k: v for k, v in os.environ.items()
+                 if not any(g in k.upper() for g in ("TOKEN", "SECRET", "PASSWORD", "API_KEY"))}
         p = subprocess.run([sys.executable, str(SCRIPTS / "voice_local.py"),
                             "--transcribe", str(zvuk), "--json"],
-                           capture_output=True, text=True, timeout=1200, input="")
+                           capture_output=True, text=True, timeout=1200, input="", env=sreda)
         if p.returncode != 0:
             raise Otkaz("расшифровать не вышло: локального движка нет либо он молчит")
         try:
@@ -443,7 +464,7 @@ def otvet(c: dict, api_base: str, msg: dict) -> str:
             return f"Панель здесь: {miniapp_link(c)}"
         except Otkaz as e:
             audit("ссылка не выдана", owner(c), str(e))
-            return sh["error"]
+            return "Панель пока только на рабочей машине — ссылку дать некуда."
     return sh["unknown"]
 
 
@@ -554,6 +575,38 @@ def serve(c: dict, api_base: str, cycles: int | None = None) -> int:
     return 0
 
 
+def blizhaishie(dney: int = 1) -> list:
+    """Даты событий на ближайшие N суток. Только даты: что именно назначено и по
+    какому делу — в панели, за паролем."""
+    segodnya = time.strftime("%Y-%m-%d")
+    do = time.strftime("%Y-%m-%d", time.localtime(time.time() + dney * 86400))
+    daty = []
+    for delo in _dela():
+        for ev in (delo / "02_hearings").glob("*"):
+            if not ev.is_dir():
+                continue
+            m = DATA_PAPKI.match(ev.name)
+            if not m:
+                continue
+            d, mm, g, g2, m2, d2 = m.groups()
+            iso = f"{g}-{mm}-{d}" if g else f"{g2}-{m2}-{d2}"
+            if segodnya <= iso <= do:
+                daty.append(iso)
+    return sorted(daty)
+
+
+def svodka_sobytiy(dney: int = 1) -> str:
+    """Текст утреннего напоминания. Событий нет — пустая строка, и бот молчит:
+    ежедневное «сегодня ничего» превращает уведомления в шум, который перестают
+    читать, а вместе с ним перестают замечать и настоящее."""
+    daty = blizhaishie(dney)
+    if not daty:
+        return ""
+    kogda = ", ".join(f"{i[8:10]}.{i[5:7]}.{i[:4]}" for i in sorted(set(daty)))
+    srok = "на завтра" if dney <= 1 else f"на ближайшие {dney} дня"
+    return f"Заседаний {srok}: {len(daty)} — {kogda}. Что брать с собой, смотрите в панели."
+
+
 # ── Команды ─────────────────────────────────────────────────────────────────
 def cmd_check(c: dict, path: str | None) -> int:
     beda = gotovnost(c, path)
@@ -609,6 +662,27 @@ def cmd_notify(c: dict, api_base: str, text: str) -> int:
     return 0
 
 
+def cmd_chat_probe(c: dict, api_base: str) -> int:
+    """Кто писал боту. Нужно один раз, при первой настройке: свой chat_id владелец
+    иначе взять неоткуда, а без него бот не отличает владельца от чужого.
+    Печатает номера чатов и ничего не отвечает — на этом шаге ещё некому."""
+    r = tg(c, api_base, "getUpdates", {"timeout": 0, "limit": 50})
+    chaty = {}
+    for u in (r or {}).get("result") or []:
+        msg = u.get("message") or u.get("edited_message") or {}
+        ident = str(((msg.get("chat") or {}).get("id") or ""))
+        if ident:
+            chaty[ident] = chaty.get(ident, 0) + 1
+    if not chaty:
+        print("боту пока никто не писал — напишите ему что-нибудь и повторите")
+        return 1
+    print("писали эти чаты (свой впишите в переменную "
+          f"{c['bot'].get('chat_id_env')}):")
+    for ident, skolko in sorted(chaty.items(), key=lambda x: -x[1]):
+        print(f"  {ident}  — сообщений {skolko}")
+    return 0
+
+
 def cmd_templates(as_json: bool) -> int:
     sh = shablony(FIXTURE)
     if as_json:
@@ -644,6 +718,9 @@ def selftest() -> int:
                     "Срок 21.08.2026 — это через 3 дня.", "Готово, забирайте.",
                     "2 копии договора приложены."):
         assert not chisto(obikhod), f"ложная тревога на обиходе: {obikhod!r}"
+
+    assert svodka_sobytiy.__doc__ and "молч" in svodka_sobytiy.__doc__, \
+        "молчание при отсутствии событий не описано"
 
     m = DATA_PAPKI.match("04-08-2026_zasedanie")
     assert m and m.group(3) == "2026", "дата ДД-ММ-ГГГГ не разобрана"
@@ -706,6 +783,11 @@ def main() -> int:
                     help="сколько проходов сделать в --serve (по умолчанию без конца)")
     ap.add_argument("--notify", metavar="ТЕКСТ")
     ap.add_argument("--notify-file", metavar="ФАЙЛ")
+    ap.add_argument("--notify-hearings", action="store_true",
+                    help="напоминание о ближайших заседаниях (запускается по расписанию)")
+    ap.add_argument("--days", type=int, default=1, help="горизонт напоминания в сутках")
+    ap.add_argument("--chat-probe", action="store_true",
+                    help="какие чаты писали боту — чтобы владелец узнал свой chat_id")
     ap.add_argument("--templates", action="store_true")
     ap.add_argument("--check-out", metavar="ФАЙЛ")
     ap.add_argument("--doc-link", metavar="ПУТЬ")
@@ -742,6 +824,10 @@ def main() -> int:
             return once(c, a.api_base)
         if a.serve:
             return serve(c, a.api_base, a.cycles)
+        if a.chat_probe:
+            return cmd_chat_probe(c, a.api_base)
+        if a.notify_hearings:
+            return cmd_notify(c, a.api_base, svodka_sobytiy(max(1, a.days)))
         if a.notify is not None:
             return cmd_notify(c, a.api_base, a.notify)
         if a.notify_file:
