@@ -311,6 +311,12 @@ def check_secret():
         if code != 0:
             fails.append(("themis_bot.py", f"--check при заданном секрете вернул {code}: "
                                            f"{(out + err).strip()[:200]}"))
+        # Чат владельца не номером: бот честно сравнивает строки, ни одна не совпадёт,
+        # и владелец видит «бот сломался» вместо внятной причины.
+        krivoy = {**env, "THEMIS_TELEGRAM_CHAT_ID": "мой чат"}
+        code, out, err = run([tool("themis_bot.py"), "--check"], env=krivoy)
+        if code == 0:
+            fails.append(("themis_bot.py", "чат владельца «мой чат» принят как готовность"))
         if FAKE_TOKEN in out + err:
             fails.append(("themis_bot.py", "--check напечатал ЗНАЧЕНИЕ секрета"))
 
@@ -352,6 +358,9 @@ ACCESS_CONTRACT = """  scripts/themis_bot.py — whitelist единственн�
       message.from.id равен message.chat.id, и расхождение значит, что бота позвали
       в группу либо пишет не владелец — такому собеседнику не отвечают;
     · обновление без message (callback_query и прочее) ответа не получает;
+    · ФОРМА обновления — тоже заявление: chat не объектом, update_id строкой, message
+      строкой вместо объекта не роняют проход. В непрерывном опросе падение значит
+      тихую смерть канала, которую владелец заметит только по молчанию бота;
     · бот работает опросом (getUpdates) и НИКОГДА не зовёт setWebhook: сервер не открывает
       входящий порт;
     · журнал аудита не содержит ни секрета, ни текста чужого сообщения."""
@@ -377,12 +386,23 @@ def check_access():
                    upd(12, CHUZHOY_CHAT, podlog),
                    chuzhoy_otpravitel,
                    {"update_id": 14, "callback_query": {"id": "1",
-                    "from": {"id": int(CHUZHOY_CHAT)}, "data": "жми"}}]
+                    "from": {"id": int(CHUZHOY_CHAT)}, "data": "жми"}},
+                   # Кривые формы: их присылает и сбойный Telegram, и злонамеренный
+                   # посредник. Ни одна не смеет уронить проход.
+                   {"update_id": "пятнадцать",
+                    "message": {"chat": {"id": int(CHUZHOY_CHAT)}, "text": "/status"}},
+                   {"update_id": 16, "message": "строка вместо объекта"},
+                   {"update_id": 17, "message": {"chat": 5, "text": "/status"}},
+                   {"update_id": 18, "message": {"chat": {"id": None}, "text": "/status"}},
+                   {}]
         with FakeTelegram(updates) as tg:
             code, out, err = run([tool("themis_bot.py"), "--once", "--api-base", tg.base],
                                  env=env, timeout=120)
             if code != 0:
                 fails.append(("themis_bot.py", f"--once вернул {code}: {(out + err).strip()[:250]}"))
+            if "Traceback" in err:
+                fails.append(("themis_bot.py", "кривое обновление уронило проход трассировкой — "
+                                               "в непрерывном опросе это смерть канала"))
             chuzhim = [s for s in tg.sent if s["chat_id"] == CHUZHOY_CHAT]
             if chuzhim:
                 fails.append(("themis_bot.py", f"чужой chat_id получил ответ ({len(chuzhim)} шт.)"))
@@ -431,7 +451,8 @@ RECH_CONTRACT = """  scripts/themis_bot.py — что бот вообще уме
                               ловит утечку и молчит на обиходе («Взыскано», «заседание
                               во вторник», «дел в работе: 12»).
     Весь корпус проходит `pii_gate --residual` с кодом 0, не содержит сумм денег
-    и не содержит номеров дел."""
+    и не содержит номеров дел. Число согласовано со словом («через 1 день», «через
+    3 дня», «через 7 дней»): рассогласование — первое, по чему видно машину."""
 
 OBIKHOD = ["Взыскано по одному делу, остальные в работе.",
            "Готово к подаче, замечаний нет.",
@@ -497,6 +518,12 @@ def check_rech():
     if NOMER_DELA.search(ves):
         fails.append(("themis_bot.py", f"в исходящем тексте номер дела: "
                                        f"{NOMER_DELA.search(ves).group(0)!r}"))
+    plohoe = [t for t in shablony.values()
+              if re.search(r"\b(?:1|21|31)\s+(?:дня|дней)\b", t)
+              or re.search(r"\b(?:5|6|7|8|9|11|12|13|14)\s+(?:день|дня)\b", t)]
+    if plohoe:
+        fails.append(("themis_bot.py", f"число не согласовано со словом: {plohoe[0][:70]!r}"))
+
     start = shablony.get("start", "")
     if "telegram" not in start.lower() or "ссыл" not in start.lower():
         fails.append(("themis_bot.py", "первое сообщение не объясняет границу тайны: "
