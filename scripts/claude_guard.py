@@ -248,16 +248,45 @@ _ECHO_SUBST_RE = re.compile(r"\$\(\s*echo\s+([^\s)]+)\s*\)")
 _SHC_RE = re.compile(r"\b(?:sh|bash|zsh)\s+-c\s+([\"'])(.*?)\1", re.S)
 _FUNC_RE = re.compile(r"\b\w+\s*\(\)\s*\{(.*?)\}", re.S)
 
+# Префикс-модификатор команды прячет ГЛАГОЛ от regexp, не трогая ЦЕЛЬ записи:
+# `env A=B cp`, `command cp`, `nice -n5 cp`, `exec cp`, `FOO=bar cp`, `\cp` — всё
+# это проходило сторожа мимо (проба скептика 19.08.2026), потому что после префикса
+# `cp` уже не в командной позиции. Снимаем префиксы ДО вычисления целей — тот же
+# приём, что для sh -c/var=/$(echo)/функции: разворачиваем к плоскому глаголу.
+_ESC_VERB_RE = re.compile(r"((?:^|[;&|]|\$\(|`)[ \t]*)\\(?=[A-Za-z])", re.M)
+_PREFIX_RE = re.compile(
+    r"((?:^|[;&|]|\$\(|`)[ \t]*)"                                   # 1: командная позиция (сохраняем)
+    r"(?:"
+      r"(?:sudo|env|command|builtin|exec|nohup|nice|stdbuf|time|ionice|setsid)\b"
+      r"(?:[ \t]+-{1,2}[^\s;&|]+)*"                                 # флаги префикса: -n5, --
+      r"|[A-Za-z_]\w*=[^\s;&|]*"                                    # либо VAR=val
+    r")[ \t]+", re.M)
+
+
+def _strip_cmd_prefixes(cmd: str) -> str:
+    out = _ESC_VERB_RE.sub(lambda m: m.group(1), cmd)
+    for _ in range(8):                       # префиксы стекаются: sudo env A=B nice cp
+        nxt = _PREFIX_RE.sub(lambda m: m.group(1), out)
+        if nxt == out:
+            break
+        out = nxt
+    return out
+
 
 def _normalize(cmd: str, depth: int = 0) -> str:
     """Разворачивает типовые обёртки shell до плоского текста. Не полноценный
-    интерпретатор — эвристика под обходы, которые реально нашла проба."""
+    интерпретатор — эвристика под обходы, которые реально нашла проба.
+
+    ponytail: static-target модель. `find -exec cp … цель` и `echo цель | xargs cp`
+    прячут цель за пределы командной позиции и здесь не ловятся — редкая для модели
+    форма; закрывать её значило бы разбирать -exec/{}/\\; ради низкой вероятности."""
     if depth > 4:
         return cmd
     out = cmd
     assigns = dict(_ASSIGN_RE.findall(out))
     out = _VAR_REF_RE.sub(lambda m: assigns.get(m.group(1), m.group(0)), out)
     out = _ECHO_SUBST_RE.sub(lambda m: m.group(1), out)
+    out = _strip_cmd_prefixes(out)
     out = _SHC_RE.sub(lambda m: _normalize(m.group(2), depth + 1), out)
     out = _FUNC_RE.sub(lambda m: "; " + _normalize(m.group(1), depth + 1) + " ;", out)
     return out
@@ -704,6 +733,34 @@ def selftest() -> int:
          run({"tool_name": "Bash",
               "tool_input": {"command": "curl https://sudact.ru/regular/doc_ajax/?q=1"}}),
          0 if _sudact_allowed() else 2),
+        # Префикс-модификатор прячет глагол, но не цель (проба скептика 19.08.2026).
+        # Каждая форма — код в дело мимо DocBuilder, обязана блокироваться.
+        ("env VAR=val cp кода в дело — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "env A=B cp /tmp/g.py cases/klient/delo-2026/gen.py"}}), 2),
+        ("FOO=bar cp кода в дело — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "FOO=bar cp /tmp/g.py cases/klient/delo-2026/gen.py"}}), 2),
+        ("command cp кода в дело — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "command cp /tmp/g.py cases/klient/delo-2026/gen.py"}}), 2),
+        ("\\cp (обход алиаса) кода в дело — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "\\cp /tmp/g.py cases/klient/delo-2026/gen.py"}}), 2),
+        ("nice -n5 cp кода в дело — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "nice -n5 cp /tmp/g.py cases/klient/delo-2026/gen.py"}}), 2),
+        ("exec cp кода в дело — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "exec cp /tmp/g.py cases/klient/delo-2026/gen.py"}}), 2),
+        ("env cp поверх существующей первички — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": f"env A=B cp a.pdf {shlex_quote(existing_intake)}"}}), 2),
+        # Ложная тревога недопустима: префикс на безобидной команде молчит.
+        ("env VAR=val перед echo пропускается",
+         run({"tool_name": "Bash", "tool_input": {"command": "env FOO=bar echo hi"}}), 0),
+        ("nice перед обычным cp вне cases пропускается",
+         run({"tool_name": "Bash", "tool_input": {"command": "nice cp a.md b.md"}}), 0),
     ]
     bad = [name for name, got, want in cases if got != want]
     for name, got, want in cases:
