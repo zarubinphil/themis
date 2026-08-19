@@ -168,7 +168,8 @@ class FakeTelegram:
                     return self._otvet({"ok": True, "result": out})
                 if metod == "sendMessage":
                     srv.sent.append({"chat_id": str(telo.get("chat_id", "")),
-                                     "text": str(telo.get("text", ""))})
+                                     "text": str(telo.get("text", "")),
+                                     "telo": telo})
                     return self._otvet({"ok": True, "result": {"message_id": len(srv.sent)}})
                 if metod == "getFile":
                     return self._otvet({"ok": True, "result": {"file_path": "voice/golos.oga"}})
@@ -406,6 +407,11 @@ def check_access():
             chuzhim = [s for s in tg.sent if s["chat_id"] == CHUZHOY_CHAT]
             if chuzhim:
                 fails.append(("themis_bot.py", f"чужой chat_id получил ответ ({len(chuzhim)} шт.)"))
+            bez_zashchity = [s for s in tg.sent
+                             if not (s.get("telo") or {}).get("disable_web_page_preview")]
+            if bez_zashchity:
+                fails.append(("themis_bot.py", "сообщение ушло с включённым превью ссылки — "
+                                               "обходчик Telegram пойдёт по нашему адресу сам"))
             svoi = [s for s in tg.sent if s["chat_id"] == OWNER_CHAT]
             if not svoi:
                 fails.append(("themis_bot.py", "владелец не получил ответа на свою команду"))
@@ -450,6 +456,9 @@ RECH_CONTRACT = """  scripts/themis_bot.py — что бот вообще уме
                               а не на новой регулярке, и проверяется по ОБЕИМ осям:
                               ловит утечку и молчит на обиходе («Взыскано», «заседание
                               во вторник», «дел в работе: 12»).
+    Каждое исходящее сообщение уходит с выключенным превью ссылки
+    (disable_web_page_preview): увидев ссылку, сервер Telegram идёт по ней САМ,
+    чтобы собрать карточку, — звать чужой обходчик внутрь приватной сети незачем.
     Весь корпус проходит `pii_gate --residual` с кодом 0, не содержит сумм денег
     и не содержит номеров дел. Число согласовано со словом («через 1 день», «через
     3 дня», «через 7 дней»): рассогласование — первое, по чему видно машину."""
