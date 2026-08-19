@@ -111,9 +111,11 @@ def check_probe():
         ro.mkdir()
         ro.chmod(0o500)
 
-        def probe(extra, want, why):
-            code, out, err = run([tool("cli_probe.py"), "--provider", "proba", "--json",
-                                  "--cache", str(cache), *extra], timeout=120)
+        def probe(extra, want, why, provider=None):
+            # У каждого исхода свой провайдер: кеш прибора помнит отказ, и общий
+            # ключ маскировал бы четыре следующих пробы первым же результатом.
+            code, out, err = run([tool("cli_probe.py"), "--provider", provider or want,
+                                  "--json", "--cache", str(cache), *extra], timeout=120)
             try:
                 d = json.loads(out)
             except ValueError:
@@ -139,7 +141,7 @@ def check_probe():
 
         # Кеш и протухание отказа по квоте: пять часов, потом проба заново.
         if d:
-            code, out, err = run([tool("cli_probe.py"), "--provider", "proba", "--json",
+            code, out, err = run([tool("cli_probe.py"), "--provider", "no_quota", "--json",
                                   "--cache", str(cache), "--probe-cmd", ok_cmd,
                                   "--workdir", str(work)])
             try:
@@ -153,7 +155,7 @@ def check_probe():
             if not until:
                 fails.append(("cli_probe.py", "у отказа нет срока `until` — протухание не проверить"))
             else:
-                code, out, err = run([tool("cli_probe.py"), "--provider", "proba", "--json",
+                code, out, err = run([tool("cli_probe.py"), "--provider", "no_quota", "--json",
                                       "--cache", str(cache), "--probe-cmd", ok_cmd,
                                       "--workdir", str(work), "--now", str(int(until) + 1)])
                 try:
@@ -237,7 +239,10 @@ exit 0
             fails.append(("foreign_cli.py", f"в рабочем каталоге не один файл, а {files} — "
                                             "чужой CLI видит лишнее"))
         cwd = (stroki.get("CWD") or "")
-        if "themis" in cwd.replace(str(td), ""):
+        # Проверяем принадлежность КОРНЮ ПРОЕКТА, а не вхождение слова: временный
+        # каталог прибора законно называется themis-foreign-…, и поиск подстроки
+        # краснел на честном имени.
+        if cwd and (str(ROOT) in os.path.realpath(cwd)):
             fails.append(("foreign_cli.py", f"рабочий каталог внутри проекта: {cwd}"))
 
         env_keys = (stroki.get("ENV") or "").split(",")
