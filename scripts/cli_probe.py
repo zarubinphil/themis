@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """cli_probe.py — доступен ли чужой CLI. Пять исходов вместо «работает/нет».
 
-Зачем. `command -v codex` проверяет наличие файла, а не возможность работать:
+Зачем. Проверка наличия файла не проверяет возможность работать:
 бинарник на месте, но вход не выполнен, или кончилась квота, или каталог только
 на чтение, или инструмент висит. Все четыре случая выглядят как «не сработало»
 и лечатся по-разному, поэтому исход называется своим именем.
@@ -34,14 +34,6 @@ import tempfile
 import time
 from pathlib import Path
 
-# Команда проверки на каждого известного провайдера. Спрашиваем инструмент о его
-# собственном состоянии: `--version` о входе не говорит ничего.
-KNOWN = {
-    "claude": ["claude", "auth", "status"],
-    "codex": ["codex", "login", "status"],
-    "kimi": ["kimi", "--version"],
-    "gemini": ["gemini", "--version"],
-}
 DEFAULT_CACHE = Path(os.path.expanduser("~/.cache/themis/cli_probe.json"))
 QUOTA_TTL = 5 * 3600      # квота восстанавливается сама — запрет не может быть вечным
 OTKAZ_TTL = 15 * 60       # прочие отказы: чиниться им человеком, но не каждую секунду
@@ -76,11 +68,11 @@ def _writable(d: Path) -> bool:
 
 
 def probe(provider: str, cmd=None, workdir=None, timeout=30) -> dict:
-    argv = cmd if cmd else KNOWN.get(provider)
+    argv = cmd
     if isinstance(argv, str):
         argv = [argv]
     if not argv:
-        return {"outcome": "no_binary", "detail": f"провайдер {provider} неизвестен"}
+        return {"outcome": "no_binary", "detail": "нет команды пробы из реестра"}
 
     exe = argv[0]
     if not (shutil.which(exe) or os.path.isfile(exe)):
@@ -174,8 +166,8 @@ def selftest() -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Доступность чужого CLI: пять исходов.")
-    ap.add_argument("--provider", help="claude | codex | kimi | gemini | своё имя")
-    ap.add_argument("--probe-cmd", help="команда проверки (для своих провайдеров и приёмки)")
+    ap.add_argument("--provider", help="имя записи реестра")
+    ap.add_argument("--probe-cmd", help="JSON-массив команды проверки из реестра")
     ap.add_argument("--workdir", help="каталог, в котором будет работать чужой CLI")
     ap.add_argument("--timeout", type=int, default=30)
     ap.add_argument("--cache", default=str(DEFAULT_CACHE))
@@ -187,7 +179,11 @@ def main() -> int:
         return selftest()
     if not a.provider:
         ap.error("нужен --provider либо --selftest")
-    r = check(a.provider, a.probe_cmd, a.workdir, a.timeout, Path(a.cache), a.now)
+    try:
+        command = json.loads(a.probe_cmd) if a.probe_cmd and a.probe_cmd.lstrip().startswith("[") else a.probe_cmd
+    except ValueError:
+        ap.error("--probe-cmd: повреждён JSON-массив")
+    r = check(a.provider, command, a.workdir, a.timeout, Path(a.cache), a.now)
     if a.json:
         print(json.dumps(r, ensure_ascii=False))
     else:
