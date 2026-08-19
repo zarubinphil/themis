@@ -192,6 +192,9 @@ _REDIRECT_RE = re.compile(r">>?\s*\|?\s*([^\s;&|<>()]+)")
 # Цель — последний аргумент (cp SRC DST) либо каждый (tee A B, touch A B).
 _VERB_LAST = ("cp", "mv", "install", "rsync", "ditto")
 _VERB_ALL = ("tee", "touch")
+# Правка на месте — тоже запись: sed -i меняет уже лежащий под cases/ генератор,
+# и запрет «не создавать» без «не править» держится ровно до первого созданного файла.
+_INPLACE_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?sed\s+((?:-\w+\s+)*-i\b[^;&|<>]*)", re.M)
 _VERB_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(" + "|".join(_VERB_LAST + _VERB_ALL)
                       + r")\s+([^;&|<>]+)", re.M)
 # Загрузчики пишут в файл флагом, а не редиректом.
@@ -223,6 +226,9 @@ def _write_targets(cmd: str) -> list:
         if not parts:
             continue
         targets += parts if verb in _VERB_ALL else parts[-1:]
+    for args in _INPLACE_RE.findall(body):
+        parts = _split(args)
+        targets += parts[1:] if len(parts) > 1 else parts   # первый аргумент — выражение sed
     if _INTERP_RE.search(body) and _WRITE_HINT_RE.search(body):
         targets += [t.strip("'\"") for t in _PATH_RE.findall(body)]
     return targets
@@ -343,6 +349,8 @@ def main() -> None:
     if tool == "Bash":
         cmd = as_str(ti.get("command"))
         _cases_write_gate(_write_targets(cmd))
+        for t in _write_targets(cmd):
+            _workflow_gate(t)      # документ въезжает в GOTOVO и обычным cp, не только Write
         bulk = _bulk_forbidden(cmd)
         if bulk:
             block(
@@ -540,6 +548,18 @@ def selftest() -> int:
         ("чтение картинки дела интерпретатором пропускается",
          run({"tool_name": "Bash", "tool_input": {
              "command": "python3 -c \"print(open('cases/k/d/00_intake/f.png','rb').read()[:4])\""}}), 0),
+        ("sed -i правит генератор в деле — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "sed -i '' s/a/b/ cases/klient/delo-2026/gen.py"}}), 2),
+        ("sed -i по файлу вне cases пропускается",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "sed -i '' s/a/b/ scripts/pribor.py"}}), 0),
+        ("документ в GOTOVO командой мимо маркеров — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "cp /tmp/isk.docx cases/klient/delo-2026/GOTOVO/isk.docx"}}), 2),
+        ("рабочий файл кухни командой пишется",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "cp /tmp/log.md cases/klient/delo-2026/.agent/drafts/_working/log.md"}}), 0),
         # Прецедент 19.08.2026: тело heredoc со строками «cp …» и «00_intake»
         # блокировало запись файла приёмки. Тело — данные, цель записи — команда.
         ("тело heredoc не принимается за команду",
