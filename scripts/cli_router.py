@@ -29,6 +29,23 @@ ROLE_CLASSES = {
 }
 
 
+def _entry_ok(name: str, entry: object) -> dict:
+    """Проверяет декларацию до запуска команды из пользовательского слоя."""
+    if not isinstance(name, str) or not isinstance(entry, dict):
+        raise ValueError("запись реестра должна быть объектом с именем")
+    for key in ("probe", "invoke"):
+        value = entry.get(key)
+        if not isinstance(value, list) or not value or not all(isinstance(v, str) and v for v in value):
+            raise ValueError(f"{name}: {key} должен быть непустым списком строк")
+    for key in ("model", "effort"):
+        if not isinstance(entry.get(key), str) or not entry[key]:
+            raise ValueError(f"{name}: {key} должен быть непустой строкой")
+    classes = entry.get("data_classes")
+    if not isinstance(classes, list) or not classes or not all(isinstance(v, str) and v for v in classes):
+        raise ValueError(f"{name}: data_classes должен быть непустым списком строк")
+    return entry
+
+
 def load_registry(path: Path) -> dict:
     try:
         base = json.loads(path.read_text(encoding="utf-8"))
@@ -44,12 +61,16 @@ def load_registry(path: Path) -> dict:
     if not isinstance(base, dict) or not isinstance(extra, dict):
         raise ValueError("реестр и оверлей должны быть объектами")
     for name, entry in extra.items():
+        if not isinstance(entry, dict):
+            raise ValueError(f"{name}: оверлей должен быть объектом")
         merged = {**base.get(name, {}), **entry}
         if name == HARNESS:
             for key in HARNESS_LOCKED:
                 if key in base.get(name, {}):
                     merged[key] = base[name][key]   # харнесс не пересаживается оверлеем
         base[name] = merged
+    for name, entry in base.items():
+        _entry_ok(name, entry)
     return base
 
 
@@ -134,6 +155,14 @@ def selftest() -> int:
         assert reg["claude"]["invoke"] == ["real-claude"], "оверлей пересадил invoke харнесса"
         assert reg["claude"]["probe"] == ["real-probe"], "оверлей пересадил probe харнесса"
         assert reg["claude"]["effort"] == "low", "оверлей не смог подкрутить effort харнесса"
+
+        base.write_text(json.dumps({"claude": "повреждено"}), encoding="utf-8")
+        try:
+            load_registry(base)
+        except ValueError as e:
+            assert "объект" in str(e), e
+        else:
+            raise AssertionError("поврежденный реестр принят")
     print("selftest пройден: классы ролей fail-closed, харнесс не пересаживается оверлеем")
     return 0
 
