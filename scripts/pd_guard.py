@@ -65,12 +65,62 @@ def client_names(cases_dir: str = CASES) -> list[str]:
         and len(d) >= MIN_NAME)
 
 
+# Обратная транслитерация (латиница → кириллица), самые длинные сочетания первыми:
+# фамилия папки пишется латиницей, но в прозе (сообщение коммита, комментарий)
+# её могут написать кириллицей — «Тестфама» вместо «testfam-ab».
+_LAT2CYR = (
+    ("shch", "щ"), ("sch", "щ"), ("kh", "х"), ("ts", "ц"), ("ch", "ч"),
+    ("sh", "ш"), ("zh", "ж"), ("yu", "ю"), ("iu", "ю"), ("ya", "я"), ("ia", "я"),
+    ("yo", "ё"), ("ye", "е"),
+    ("a", "а"), ("b", "б"), ("v", "в"), ("g", "г"), ("d", "д"), ("e", "е"),
+    ("z", "з"), ("i", "и"), ("y", "ы"), ("j", "й"), ("k", "к"), ("l", "л"),
+    ("m", "м"), ("n", "н"), ("o", "о"), ("p", "п"), ("r", "р"), ("s", "с"),
+    ("t", "т"), ("u", "у"), ("f", "ф"), ("h", "х"), ("c", "к"), ("q", "к"),
+    ("w", "в"), ("x", "кс"),
+)
+
+
+def _translit_to_cyrillic(latin: str) -> str:
+    """Не точный ГОСТ — только чтобы поймать характерную часть фамилии в кириллице."""
+    s = latin.lower()
+    out, i = [], 0
+    while i < len(s):
+        for seq, cyr in _LAT2CYR:
+            if s.startswith(seq, i):
+                out.append(cyr)
+                i += len(seq)
+                break
+        else:
+            i += 1
+    return "".join(out)
+
+
 def name_pattern(names: list[str]) -> re.Pattern | None:
-    """Один шаблон на все имена. Границы — чтобы `ivan` не ловился внутри `ivanov`."""
+    """Один шаблон на все имена. Границы — чтобы `ivan` не ловился внутри `ivanov`.
+
+    Регистронезависим, разделители `-`/`_`/пробел взаимозаменяемы (04.08.2026 —
+    `Testfam-Ab`/`TESTFAM-AB`/`testfam_ab` проходили мимо). Плюс кириллическая
+    транслитерация фамильной части с коротким падежным окончанием — сообщение
+    коммита чаще пишут по-русски, а не именем папки."""
     if not names:
         return None
-    body = "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
-    return re.compile(rf"(?<![A-Za-zА-Яа-я0-9-])({body})(?![A-Za-zА-Яа-я0-9-])")
+    lat_bodies, cyr_bodies = [], []
+    for n in sorted(names, key=len, reverse=True):
+        parts = [p for p in re.split(r"[-_ ]+", n) if p]
+        if not parts:
+            continue
+        lat_bodies.append(r"[-_ ]".join(re.escape(p) for p in parts))
+        for p in parts:
+            if len(p) < 3:
+                continue          # инициалы транслитерировать бессмысленно и рискованно
+            cyr = _translit_to_cyrillic(p)
+            if len(cyr) >= 3:
+                cyr_bodies.append(re.escape(cyr) + r"[а-яё]{0,3}")
+    body = "|".join(lat_bodies + cyr_bodies)
+    if not body:
+        return None
+    return re.compile(rf"(?<![A-Za-zА-Яа-я0-9-])({body})(?![A-Za-zА-Яа-я0-9-])",
+                      re.IGNORECASE)
 
 
 def scan_text(text: str, pat: re.Pattern | None, where: str) -> list[str]:
@@ -83,6 +133,40 @@ def scan_text(text: str, pat: re.Pattern | None, where: str) -> list[str]:
             out.append(f"{where}:{i} — имя папки доверителя ({len(m.group(1))} знаков). "
                        "Само значение не печатается: сторож не должен стать вторым "
                        "каналом утечки")
+    return out
+
+
+# Только категории со строгим форматом или явной меткой. pii_gate.residual_matches
+# целиком (ФИО-эвристика, «cases/…», детские учреждения) написан для ДРУГОЙ
+# задачи — обезличивания извлечённого текста дела перед отправкой наружу, где
+# «слишком грубо» безопаснее «слишком мягко». Здесь сканируется код и документация
+# ЭТОГО репозитория, где «cases/…» и упоминание суда — обиход через строку. Взятый
+# сюда набор не пересекается с обиходом предметной области: паспорт/СНИЛС/кадастр/
+# госномер/дата рождения не появляются в прозе о самом Фемиде НИКОГДА не как ПД.
+_STRONG_PII_CATEGORIES = ("ПАСПОРТ", "СНИЛС", "КАДАСТР", "АВТОНОМЕР", "ДАТАРОЖД")
+
+
+def scan_pii(text: str, where: str) -> list[str]:
+    """Второй рубеж на пути коммита: паспорт/СНИЛС/кадастр/госномер/дата рождения
+    без метки папки дела. pii_gate живёт своей жизнью (стадии 6/7), здесь его
+    структурные шаблоны читаются как модуль этого же каталога — не второй канал."""
+    if not text:
+        return []
+    try:
+        import pii_gate
+    except ImportError:
+        return []
+    try:
+        cats = dict(pii_gate.CATEGORIES_STATIC)
+        raw = [(m.start(), cat) for cat in _STRONG_PII_CATEGORIES
+               for pat in cats.get(cat, ()) for m in pat.finditer(text)]
+    except Exception:
+        return []
+    out = []
+    for start, cat in raw:
+        line_no = text.count("\n", 0, start) + 1
+        out.append(f"{where}:{line_no} — похоже на персональные данные ({cat}), "
+                   "не имя папки дела. Само значение не печатается")
     return out
 
 
@@ -102,6 +186,7 @@ def check_staged(pat: re.Pattern | None) -> list[str]:
         blob = git("show", f":{f}")
         if blob:
             problems += scan_text(blob, pat, f)
+            problems += scan_pii(blob, f)
     return problems
 
 
