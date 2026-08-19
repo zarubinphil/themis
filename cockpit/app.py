@@ -125,7 +125,7 @@ async def strazh(request, call_next):
     path = request.url.path
     mutating = any(path.startswith(p) for p in MUTATING)
     client = _client_of(request)
-    if PANEL_TOKEN and path.startswith("/api/"):
+    if PANEL_TOKEN and (path.startswith("/api/") or path.startswith("/miniapp")):
         given = (request.headers.get("x-themis-token")
                  or request.cookies.get(COOKIE_NAME) or "")
         if not _hmac.compare_digest(given, PANEL_TOKEN):
@@ -523,6 +523,128 @@ def open_file(payload: dict) -> JSONResponse:
         return JSONResponse({"ok": False, "error": "нет файла"}, status_code=404)
     subprocess.Popen(["open", str(p)])
     return JSONResponse({"ok": True})
+
+
+# ── Этап 8: то, куда ведёт ссылка из Telegram ───────────────────────────────
+# Бот отправляет владельцу ссылку, а не файл: всё, что попало в Telegram,
+# разглашено Telegram. В ссылке нет ни имени дела, ни токена — только непрозрачный
+# идентификатор; узнаёт владельца панель, на своей стороне и своим входом.
+DOC_LINKS = Path(os.environ.get("THEMIS_DOC_LINKS") or (HOME / ".themis" / "doc-links.json"))
+_HEARING_DATE = _re.compile(r"^(?:(\d{2})-(\d{2})-(\d{4})|(\d{4})-(\d{2})-(\d{2}))[_-]")
+
+
+def _link_path(ident: str) -> Path | None:
+    """Путь по идентификатору. Карта ссылок — на диске у владельца, не в URL."""
+    if not _re.match(r"^[a-z]{8,32}$", ident or ""):
+        return None
+    try:
+        karta = json.loads(DOC_LINKS.read_text(encoding="utf-8")).get("links") or {}
+    except (OSError, ValueError, AttributeError):
+        return None
+    rel = karta.get(ident)
+    return (LEGAL / rel).resolve() if rel else None
+
+
+@app.get("/api/doc", response_model=None)
+def doc_by_id(id: str = ""):
+    p = _link_path(id)
+    if p is None:
+        return JSONResponse({"ok": False, "error": "нет такой ссылки"}, status_code=404)
+    # Идентификатор пришёл снаружи: путь из карты всё равно обязан лежать внутри
+    # дел — иначе подменённая карта откроет любой файл машины.
+    if CASES_DIR.resolve() not in p.parents or not p.is_file():
+        return JSONResponse({"ok": False, "error": "нет такой ссылки"}, status_code=404)
+    return FileResponse(str(p), filename=p.name)
+
+
+@app.get("/api/hearings")
+def hearings() -> JSONResponse:
+    """Ближайшие события по всем делам: дата, дело, что назначено."""
+    segodnya = time.strftime("%Y-%m-%d")
+    out = []
+    if CASES_DIR.exists():
+        for ev in CASES_DIR.glob("*/*/02_hearings/*"):
+            if not ev.is_dir():
+                continue
+            m = _HEARING_DATE.match(ev.name)
+            if not m:
+                continue
+            d, mm, g, g2, m2, d2 = m.groups()
+            iso = f"{g}-{mm}-{d}" if g else f"{g2}-{m2}-{d2}"
+            if iso < segodnya:
+                continue
+            out.append({"date": iso, "client": ev.parts[-4], "case": ev.parts[-3],
+                        "event": ev.name.split("_", 1)[-1].replace("-", " ")})
+    out.sort(key=lambda x: x["date"])
+    return JSONResponse(out[:20])
+
+
+MINIAPP = """<!doctype html><html lang=ru><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>Фемида</title><style>
+:root{--fon:#0f1219;--kart:#171b24;--text:#e8e4dc;--tikho:#8b8f99;--zoloto:#c6a460}
+*{box-sizing:border-box}body{margin:0;background:var(--fon);color:var(--text);
+font:16px/1.45 -apple-system,system-ui,sans-serif;padding:16px 14px 40px}
+h1{font-size:19px;margin:0 0 4px;letter-spacing:.02em}
+.tikho{color:var(--tikho);font-size:13px}
+.blok{margin-top:22px}.blok h2{font-size:13px;text-transform:uppercase;
+letter-spacing:.08em;color:var(--zoloto);margin:0 0 8px;font-weight:600}
+.kart{background:var(--kart);border-radius:12px;padding:12px 14px;margin-bottom:8px}
+.kart b{font-weight:600}.data{color:var(--zoloto);font-variant-numeric:tabular-nums}
+button{width:100%;padding:13px;border:0;border-radius:11px;background:var(--zoloto);
+color:#141414;font:600 15px/1 -apple-system,system-ui;margin-top:6px}
+button.tihaya{background:#242a36;color:var(--text)}
+a{color:var(--zoloto);text-decoration:none}
+select{width:100%;padding:11px;border-radius:10px;background:#242a36;color:var(--text);
+border:0;font-size:15px;margin-bottom:6px}
+</style></head><body>
+<h1>Фемида</h1><div class=tikho id=svodka>смотрю…</div>
+<div class=blok id=sroki></div>
+<div class=blok><h2>Дела</h2><div id=dela></div></div>
+<div class=blok><h2>Сделать документ</h2>
+<select id=vybor></select>
+<button id=sdelat>Собрать документ по делу</button>
+<div class=tikho id=itog style="margin-top:8px"></div></div>
+<script>
+const q=(s)=>document.querySelector(s), esc=(t)=>String(t).replace(/[<>&]/g,'');
+const den=(iso)=>{const [g,m,d]=iso.split('-');return d+'.'+m+'.'+g};
+async function dai(u,o){const r=await fetch(u,o);if(!r.ok)throw new Error(r.status);return r.json()}
+(async()=>{
+ try{
+  const [kl,zas]=await Promise.all([dai('/api/clients'),dai('/api/hearings')]);
+  q('#svodka').textContent='Доверителей: '+kl.length+'. Ближайших событий: '+zas.length+'.';
+  q('#sroki').innerHTML='<h2>Ближайшее</h2>'+(zas.length?zas.slice(0,5).map(z=>
+    '<div class=kart><span class=data>'+den(z.date)+'</span> — '+esc(z.event)+
+    '<div class=tikho>'+esc(z.case)+'</div></div>').join(''):'<div class=kart>Пусто.</div>');
+  const dela=[];
+  for(const k of kl){
+    const c=await dai('/api/client/'+encodeURIComponent(k.slug)+'/cases');
+    c.forEach(x=>dela.push({klient:k.slug, imya:k.name, delo:x.slug||x.name||x, obj:x}));
+  }
+  q('#dela').innerHTML=dela.map(d=>'<div class=kart><b>'+esc(d.imya)+'</b>'+
+    '<div class=tikho>'+esc(d.delo)+'</div></div>').join('')||'<div class=kart>Дел нет.</div>';
+  q('#vybor').innerHTML=dela.map(d=>'<option value="'+esc(d.klient)+'/'+esc(d.delo)+'">'+
+    esc(d.imya)+' — '+esc(d.delo)+'</option>').join('');
+ }catch(e){q('#svodka').textContent='Панель не отвечает. Войдите заново.'}
+})();
+q('#sdelat').onclick=async()=>{
+ const v=q('#vybor').value; if(!v)return;
+ if(!confirm('Собрать документ по делу '+v+'?'))return;
+ q('#itog').textContent='Отдал в работу. Напишу, когда будет готово.';
+ try{await dai('/api/task',{method:'POST',headers:{'content-type':'application/json'},
+   body:JSON.stringify({text:'Собрать документ по делу '+v})});}
+ catch(e){q('#itog').textContent='Не отдалось. Откройте панель на компьютере.'}
+};
+</script></body></html>"""
+
+
+@app.get("/miniapp", response_class=HTMLResponse)
+def miniapp() -> HTMLResponse:
+    """Пульт с телефона: дела, ближайшие события, кнопка «собрать документ».
+
+    Живёт ВНУТРИ приватной сети и закрыт тем же токеном, что и остальная панель.
+    В Telegram уходит только ссылка сюда — не содержимое."""
+    return HTMLResponse(MINIAPP)
 
 
 @app.get("/faces/{fid}.png", response_model=None)
