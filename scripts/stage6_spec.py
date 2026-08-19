@@ -232,6 +232,18 @@ def check_rate():
             fails.append(("rate", f"перебор не пойман: коды {codes}"))
         if codes[0] == 429:
             fails.append(("rate", "первый же запрос отбит 429 — порог не работает"))
+    # Подделка адреса. Заголовок X-Forwarded-For ставит кто угодно, а панель за
+    # обратным прокси видит его как правду. Меняя фальшивый адрес на каждом запросе,
+    # клиент получает НОВОЕ ведро лимита — то есть лимита нет.
+    with Panel(THEMIS_PANEL_TOKEN=TOKEN, THEMIS_RATE_LIMIT="3") as p:
+        if not p.alive():
+            return fails + [("rate", "панель не поднялась")]
+        import httpx
+        codes = [httpx.post(p.base + "/api/open", timeout=15,
+                            headers={"X-Themis-Token": TOKEN, "X-Forwarded-For": f"10.0.0.{i}"},
+                            json={"path": "/tmp/net.docx"}).status_code for i in range(6)]
+        if 429 not in codes:
+            fails.append(("rate", f"смена фальшивого адреса обошла лимит: коды {codes}"))
     return fails
 
 
@@ -267,6 +279,21 @@ def check_audit():
             fails.append(("audit", "СЕКРЕТ ПОПАЛ В ЖУРНАЛ — журнал стал вторым местом тайны"))
         if "Иванова" in text:
             fails.append(("audit", "содержимое запроса (ФИО) попало в журнал доступа"))
+    # Адрес из заголовка — не адрес, а ЗАЯВЛЕНИЕ клиента. Журнал, записавший его
+    # как факт, врёт ровно тогда, когда его читают: при разборе чужого доступа.
+    with tempfile.TemporaryDirectory() as td:
+        log = Path(td) / "access.log"
+        with Panel(THEMIS_PANEL_TOKEN=TOKEN, THEMIS_ACCESS_LOG=str(log)) as p:
+            if not p.alive():
+                return fails + [("audit", "панель не поднялась")]
+            import httpx
+            httpx.post(p.base + "/api/open", timeout=15,
+                       headers={"X-Themis-Token": TOKEN, "X-Forwarded-For": "203.0.113.7"},
+                       json={"path": "/tmp/net.docx"})
+        text = log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
+        line = [l for l in text.splitlines() if "/api/open" in l]
+        if line and "203.0.113.7" in line[-1] and "заявл" not in line[-1]:
+            fails.append(("audit", f"подделанный адрес записан как факт: {line[-1]}"))
     return fails
 
 
