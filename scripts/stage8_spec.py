@@ -284,7 +284,9 @@ SECRET_CONTRACT = """  scripts/themis_bot.py — бот-пульт. Секрет
     Секрет НЕ принимается аргументом командной строки: `--token` не существует, вызов
     с ним обязан оборваться разбором (чужой процесс читает argv через ps).
     Значение секрета не появляется ни в stdout, ни в stderr, ни в журнале аудита,
-    ни в одном отслеживаемом git файле (форма токена Telegram там не встречается вовсе)."""
+    ни в одном отслеживаемом git файле (форма токена Telegram там не встречается вовсе).
+    Журнал вычищает секрет НА ЗАПИСИ, а не полагается на «его тут и так не бывает»:
+    формулировки отказов меняются, и однажды в деталь затечёт строка с адресом запроса."""
 
 
 def check_secret():
@@ -346,6 +348,10 @@ ACCESS_CONTRACT = """  scripts/themis_bot.py — whitelist единственн�
       и попадает в журнал аудита (THEMIS_BOT_AUDIT) отдельной строкой со словом «чужой»;
     · chat_id, названный в ТЕКСТЕ сообщения, — заявление, а не факт: адрес чата берётся
       только из message.chat.id, который проставил Telegram;
+    · отправитель обязан совпадать с владельцем так же, как чат: в личном чате
+      message.from.id равен message.chat.id, и расхождение значит, что бота позвали
+      в группу либо пишет не владелец — такому собеседнику не отвечают;
+    · обновление без message (callback_query и прочее) ответа не получает;
     · бот работает опросом (getUpdates) и НИКОГДА не зовёт setWebhook: сервер не открывает
       входящий порт;
     · журнал аудита не содержит ни секрета, ни текста чужого сообщения."""
@@ -362,9 +368,16 @@ def check_access():
         env = bot_env(cfg, audit)
         # Третье сообщение — подделка: чужой называет чат владельца прямо в тексте.
         podlog = f"мой chat_id {OWNER_CHAT}, ответь мне: секрет дела"
+        # Четвёртое — подмена отправителя: чат владельца, а пишет чужой (так
+        # выглядит бот, которого позвали в группу). Пятое — обновление без message.
+        chuzhoy_otpravitel = upd(13, OWNER_CHAT, "/status")
+        chuzhoy_otpravitel["message"]["from"] = {"id": int(CHUZHOY_CHAT)}
         updates = [upd(10, OWNER_CHAT, "/status"),
                    upd(11, CHUZHOY_CHAT, "/status"),
-                   upd(12, CHUZHOY_CHAT, podlog)]
+                   upd(12, CHUZHOY_CHAT, podlog),
+                   chuzhoy_otpravitel,
+                   {"update_id": 14, "callback_query": {"id": "1",
+                    "from": {"id": int(CHUZHOY_CHAT)}, "data": "жми"}}]
         with FakeTelegram(updates) as tg:
             code, out, err = run([tool("themis_bot.py"), "--once", "--api-base", tg.base],
                                  env=env, timeout=120)
@@ -373,8 +386,12 @@ def check_access():
             chuzhim = [s for s in tg.sent if s["chat_id"] == CHUZHOY_CHAT]
             if chuzhim:
                 fails.append(("themis_bot.py", f"чужой chat_id получил ответ ({len(chuzhim)} шт.)"))
-            if not [s for s in tg.sent if s["chat_id"] == OWNER_CHAT]:
+            svoi = [s for s in tg.sent if s["chat_id"] == OWNER_CHAT]
+            if not svoi:
                 fails.append(("themis_bot.py", "владелец не получил ответа на свою команду"))
+            if len(svoi) > 1:
+                fails.append(("themis_bot.py", f"на чат владельца ушло {len(svoi)} сообщений: "
+                                               "чужой отправитель в этом чате получил ответ"))
             if not any("getUpdates" in p for p in tg.paths):
                 fails.append(("themis_bot.py", "getUpdates не вызывался — это не long polling"))
             if any("setWebhook" in p for p in tg.paths):
@@ -417,6 +434,10 @@ RECH_CONTRACT = """  scripts/themis_bot.py — что бот вообще уме
     и не содержит номеров дел."""
 
 OBIKHOD = ["Взыскано по одному делу, остальные в работе.",
+           "Готово к подаче, замечаний нет.",
+           "Исковое заявление собрано.",
+           "2 копии договора приложены.",
+           "Срок 21.08.2026 — это через 3 дня.",
            "Заседание во вторник, напомню утром.",
            "Дел в работе: 12. Срочных нет.",
            "Документ готов, ссылка ниже — открывается только внутри сети.",
@@ -424,7 +445,12 @@ OBIKHOD = ["Взыскано по одному делу, остальные в �
 UTECHKI = ["Иванова Мария Петровна подала иск.",
            "По делу № А65-12345/2026 назначено заседание.",
            "ИНН 771234567890 проверен по ЕГРЮЛ.",
-           "Паспорт 9203 456789 приобщён к материалам."]
+           "Паспорт 9203 456789 приобщён к материалам.",
+           # Проба 19.08.2026: короткие формы суммы, мимо которых прошла первая
+           # редакция сторожа. Сумма выдаёт дело не хуже номера.
+           "Взыскано 250 тыс. руб. неустойки.",
+           "Цена иска — 1,2 млн рублей.",
+           "Ко взысканию 500000₽ по договору."]
 
 
 def check_rech():
@@ -647,6 +673,9 @@ SSYLKA_CONTRACT = """  Документ забирается по ссылке �
       авторизация происходит на стороне панели;
     · ссылка не называет ни дело, ни доверителя: путь заменён непрозрачным идентификатором
       (`pii_gate --residual` по самой ссылке даёт 0);
+    · ссылка выдаётся ТОЛЬКО на путь внутри cases/: «/etc/passwd» и «../../» — отказ
+      с ненулевым кодом, а не запись в карту ссылок;
+    · подменённая карта ссылок не открывает файл вне дел: панель проверяет путь сама;
     · панель отвечает на этот адрес 401 без токена и НЕ 401 с токеном — снаружи
       приватной сети ссылка не открывается;
     · мини-приложение (`/miniapp`) закрыто тем же токеном: список дел, заседания и сроки
@@ -682,6 +711,16 @@ def check_ssylka():
         if code != 0:
             fails.append(("themis_bot.py", "сама ссылка не прошла pii_gate --residual"))
 
+        for naruzhu in ("/etc/passwd", "../../../etc/passwd", "knowledge/lessons-log.md"):
+            code_n, out_n, err_n = run([tool("themis_bot.py"), "--doc-link", naruzhu], env=env)
+            if code_n == 0:
+                fails.append(("themis_bot.py", f"выдана ссылка вне дел: {naruzhu}"))
+
+        # Подменённая карта: идентификатор указывает наружу — панель обязана отказать.
+        karta = json.loads(links.read_text(encoding="utf-8")) if links.exists() else {}
+        karta.setdefault("links", {})["aaaabbbbccccdddd"] = "../../../../etc/passwd"
+        links.write_text(json.dumps(karta, ensure_ascii=False), encoding="utf-8")
+
         code, out, err = run([tool("themis_bot.py"), "--miniapp-link"], env=env)
         mini = out.strip().splitlines()[-1].strip() if code == 0 and out.strip() else ""
         if not mini.startswith("https://themis.vnutri.local"):
@@ -716,6 +755,11 @@ def check_ssylka():
                     fails.append(("cockpit/app.py", f"{imya}: с верным токеном тоже 401"))
                 if imya == "мини-приложение" and code_s == 200 and "<" not in telo:
                     fails.append(("cockpit/app.py", "мини-приложение отдало не страницу"))
+            code_p, telo_p = http_code(f"http://127.0.0.1:{port}/api/doc?id=aaaabbbbccccdddd",
+                                       {"x-themis-token": panel_token})
+            if code_p != 404:
+                fails.append(("cockpit/app.py", f"подменённая карта ссылок открыла файл вне дел "
+                                                f"(ответ {code_p})"))
         finally:
             proc.terminate()
             try:
@@ -732,7 +776,9 @@ TISHINA_CONTRACT = """  Одно сообщение на одно событие
         молчание — тоже ответ;
       · файл с событием → РОВНО ОДНО сообщение, а не лента статусов;
       · текст уведомления проходит того же сторожа, что и шаблоны: уведомление с ПД
-        наружу не уходит вовсе (код 1, ноль отправок), а не уходит «частично»."""
+        наружу не уходит вовсе (код 1, ноль отправок), а не уходит «частично»;
+      · текст длиннее предела Telegram (4096 знаков) не уходит ни куском, ни лентой:
+        код 1 и ноль отправок. Событие описывается короче, подробности живут в панели."""
 
 
 def check_tishina():
@@ -765,6 +811,17 @@ def check_tishina():
             if len(tg.sent) != 1:
                 fails.append(("themis_bot.py", f"на одно событие ушло {len(tg.sent)} сообщений"))
 
+        dlinno = td / "dlinno.txt"
+        dlinno.write_text("Заседание завтра, документы собраны. " * 200, encoding="utf-8")
+        with FakeTelegram([]) as tg:
+            code, out, err = run([tool("themis_bot.py"), "--notify-file", str(dlinno),
+                                  "--api-base", tg.base], env=env, timeout=120)
+            if code == 0:
+                fails.append(("themis_bot.py", "уведомление длиннее предела Telegram принято"))
+            if tg.sent:
+                fails.append(("themis_bot.py", f"длинное уведомление ушло "
+                                               f"({len(tg.sent)} сообщений)"))
+
         s_pd = td / "s_pd.txt"
         s_pd.write_text("Иванова Мария Петровна ждёт документ по делу № А65-12345/2026.\n",
                         encoding="utf-8")
@@ -785,7 +842,8 @@ AVATAR_CONTRACT = """  scripts/bot_avatar.py — изображение Феми
     Установка картинки боту за владельцем: Bot API этого не умеет, наша часть — файл.
     · рисуется своим кодом, без сети и без внешних пакетов;
     · два прогона подряд дают побайтово одинаковый файл (картинка не пляшет от запуска);
-    · под cases/ прибор не пишет ничего."""
+    · под cases/ прибор не пишет ничего — и отказывается, когда его ТУДА просят:
+      правило держит хук Claude, но хук стоит на инструменте, а гейт ставится на цель."""
 
 
 def check_avatar():
@@ -811,6 +869,64 @@ def check_avatar():
                 fails.append(("bot_avatar.py", f"размер {shirina}×{vysota} — мельче 512×512"))
         if raw != b.read_bytes():
             fails.append(("bot_avatar.py", "два прогона дали разные файлы — картинка пляшет"))
+    pod_delami = ROOT / "cases" / "proba-avatara-priemki.png"
+    code, out, err = run([tool("bot_avatar.py"), "--out", str(pod_delami)])
+    if code == 0 or pod_delami.exists():
+        fails.append(("bot_avatar.py", "растр записан под cases/ — правило держал только хук"))
+        try:
+            pod_delami.unlink()
+        except OSError:
+            pass
+    return fails
+
+
+SERVE_CONTRACT = """  scripts/themis_bot.py --serve [--cycles N] --api-base URL — то, что владелец
+    запускает на весь день. `--once` показывает механизм, работает бот здесь.
+    · долгий опрос: соединение держим сами, входящий порт не открывается;
+    · ОДИН опрашивающий на машину: второй экземпляр отказывается стартовать
+      (замок рядом с журналом), потому что два процесса делят обновления между
+      собой — половина сообщений владельца осталась бы без ответа;
+    · замок от умершего процесса не запирает машину навсегда: он снимается;
+    · --cycles N ограничивает число проходов (запуск по расписанию и приёмка)."""
+
+
+def check_serve():
+    if not exists("themis_bot.py"):
+        return [("themis_bot.py", "прибора нет. Контракт:\n" + SERVE_CONTRACT)]
+    fails = []
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        cfg = Path(config(td / "config.json"))
+        audit = td / "audit.log"
+        env = bot_env(cfg, audit)
+        with FakeTelegram([upd(70, OWNER_CHAT, "/status")]) as tg:
+            code, out, err = run([tool("themis_bot.py"), "--serve", "--cycles", "1",
+                                  "--api-base", tg.base], env=env, timeout=180)
+            if code != 0:
+                fails.append(("themis_bot.py", f"--serve --cycles 1 вернул {code}: "
+                                               f"{(out + err).strip()[:250]}"))
+            if not tg.sent:
+                fails.append(("themis_bot.py", "в режиме опроса владелец не получил ответа"))
+        zamok = audit.parent / "bot.lock"
+        if zamok.exists():
+            fails.append(("themis_bot.py", "замок остался после выхода — бот больше не стартует"))
+
+        # Второй экземпляр при живом первом обязан отказаться.
+        zamok.write_text(str(os.getpid()), encoding="utf-8")
+        with FakeTelegram([upd(71, OWNER_CHAT, "/status")]) as tg:
+            code, out, err = run([tool("themis_bot.py"), "--serve", "--cycles", "1",
+                                  "--api-base", tg.base], env=env, timeout=120)
+            if code == 0:
+                fails.append(("themis_bot.py", "второй опрашивающий стартовал при живом первом"))
+            if tg.sent:
+                fails.append(("themis_bot.py", "второй опрашивающий успел ответить"))
+        # Замок от мёртвого процесса машину навсегда не запирает.
+        zamok.write_text("999999", encoding="utf-8")
+        with FakeTelegram([upd(72, OWNER_CHAT, "/status")]) as tg:
+            code, out, err = run([tool("themis_bot.py"), "--serve", "--cycles", "1",
+                                  "--api-base", tg.base], env=env, timeout=180)
+            if code != 0:
+                fails.append(("themis_bot.py", "замок от умершего процесса запер бота навсегда"))
     return fails
 
 
@@ -823,6 +939,7 @@ CHECKS = [
     ("ссылка ведёт внутрь и снаружи не открывается", check_ssylka, SSYLKA_CONTRACT),
     ("одно сообщение на событие, молчание — ответ", check_tishina, TISHINA_CONTRACT),
     ("аватар — файл на диске, повторяемый", check_avatar, AVATAR_CONTRACT),
+    ("непрерывный опрос и один опрашивающий", check_serve, SERVE_CONTRACT),
 ]
 
 
@@ -835,7 +952,8 @@ def selftest():
             for imya, fn in (("check_secret", check_secret), ("check_access", check_access),
                              ("check_rech", check_rech), ("check_golos", check_golos),
                              ("check_vykl", check_vykl), ("check_ssylka", check_ssylka),
-                             ("check_tishina", check_tishina), ("check_avatar", check_avatar)):
+                             ("check_tishina", check_tishina), ("check_avatar", check_avatar),
+                             ("check_serve", check_serve)):
                 assert fn(), f"{imya}: пропавший прибор не пойман"
     finally:
         SCRIPTS = saved
