@@ -129,6 +129,72 @@ def _workflow_gate(p: str) -> None:
             )
 
 
+# ── Дисциплина содержимого дела (этап 4) ────────────────────────────────────
+# Под cases/ лежат материалы дела, а не программа. Два класса файлов туда не пишутся:
+#   код     — генератор документа внутри дела обходит DocBuilder и гейты формата.
+#             Так завелись 84 скрипта, 15 из них с запрещённым шрифтом Times New Roman:
+#             каждый — отдельная реализация оформления, мимо document_guard.
+#   растр   — рендер страницы производен от первички и восстанавливается за секунды;
+#             487 картинок кухни занимали место в дереве дел и лезли в бэкап наравне
+#             с доказательствами. Место рендера — кеш вне cases/ (--render-dir /tmp/…).
+# Первичка (00_intake) из растрового правила исключена: там картинка и есть
+# доказательство, и трогать её запрещено отдельным правилом выше.
+CODE_EXT = ("py", "sh", "bash", "zsh")
+RASTER_EXT = ("png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp")
+
+
+def _cases_write_gate(paths) -> None:
+    """Что нельзя класть под cases/. Пути — уже вычисленные цели записи."""
+    for p in paths:
+        norm = p.replace("\\", "/")
+        if "cases" not in norm.split("/"):
+            continue
+        ext = os.path.splitext(norm)[1].lower().lstrip(".")
+        if ext in CODE_EXT:
+            block(
+                f"БЛОК: код (.{ext}) внутри cases/ запрещён — там материалы дела, не программа. "
+                "Генератор документа мимо DocBuilder обходит гейты формата (так под cases/ "
+                "накопились 84 скрипта, 15 с запрещённым шрифтом). Прибор пишется в scripts/, "
+                "разовая обработка — во временный каталог."
+            )
+        if ext in RASTER_EXT and "/00_intake/" not in norm:
+            block(
+                f"БЛОК: растр (.{ext}) под cases/ вне 00_intake запрещён — рендер страницы "
+                "производен и место ему в кеше: --render-dir /tmp/{дело}/{имя}. "
+                "Картинка-доказательство кладётся в 00_intake новым файлом."
+            )
+
+
+# Тело heredoc — данные, а не команда. Сторож, читающий тело, ловит собственное
+# описание правил: 19.08.2026 запись приёмки была заблокирована за строки
+# «cp …» и «00_intake» ВНУТРИ текста файла. Цель записи (`> путь`) стрижку переживает.
+_HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_]\w*)\1.*?^\s*\2\s*$", re.S | re.M)
+
+
+def _strip_heredocs(cmd: str) -> str:
+    return _HEREDOC_RE.sub("<<HEREDOC", cmd)
+
+
+_REDIRECT_RE = re.compile(r">>?\s*([^\s;&|<>()]+)")
+_COPY_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(cp|mv|tee|install)\s+([^;&|<>]+)", re.M)
+
+
+def _write_targets(cmd: str) -> list:
+    """Пути, КУДА команда пишет. Упоминание пути в аргументе чтения целью не считается."""
+    body = _strip_heredocs(cmd)
+    targets = [t.strip("'\"") for t in _REDIRECT_RE.findall(body)]
+    for verb, args in _COPY_RE.findall(body):
+        try:
+            import shlex
+            parts = [a for a in shlex.split(args) if not a.startswith("-")]
+        except ValueError:
+            parts = [a for a in args.split() if not a.startswith("-")]
+        if not parts:
+            continue
+        targets += parts if verb == "tee" else parts[-1:]
+    return targets
+
+
 # Порог целикового чтения текстового файла. 48 КБ ≈ 12-15k токенов на один Read;
 # конституция велит крупные корпуса (practice_index.md, логи) брать грепом и срезами.
 BIG_READ_BYTES = 48 * 1024
@@ -207,10 +273,13 @@ def main() -> None:
                 "БЛОК: 00_intake/ неприкосновенен — исходники клиента "
                 "не редактировать и не перезаписывать (железное правило)."
             )
+        _cases_write_gate([p])
         _workflow_gate(p)
 
     if tool == "Bash":
         cmd = as_str(ti.get("command"))
+        _cases_write_gate(_write_targets(cmd))
+        cmd = _strip_heredocs(cmd)
         protected = re.search(r"00_intake|_baselines", cmd)
         # rm только в командной позиции (начало строки / после ; & | $( `) —
         # иначе ложные срабатывания на прозу со словом «rm» в heredoc
@@ -342,6 +411,45 @@ def selftest() -> int:
          run({"tool_name": "Write", "tool_input": {
              "file_path": "cases/klient/delo-2026/.agent/drafts/_working/review_log.md",
              "content": "x"}}), 0),
+        # Дисциплина содержимого дела: под cases/ не пишутся ни код, ни рендеры.
+        # Обе оси — и пропуск, и ложная тревога: сторож, срабатывающий на обиходе,
+        # будет снят в первый же день, а снятый не сторожит вовсе.
+        ("код .py под cases блокируется",
+         run({"tool_name": "Write", "tool_input": {
+             "file_path": "cases/klient/delo-2026/.agent/context/_working/build_isk.py",
+             "content": "x"}}), 2),
+        ("код .sh под cases блокируется",
+         run({"tool_name": "Write", "tool_input": {
+             "file_path": "cases/klient/delo-2026/gen.sh", "content": "x"}}), 2),
+        ("heredoc, кладущий .py в дело, блокируется",
+         run({"tool_name": "Bash", "tool_input": {"command":
+              "cat > cases/klient/delo-2026/build.py <<'EOF'\nprint(1)\nEOF"}}), 2),
+        ("cp .py в дело блокируется",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "cp /tmp/gen.py cases/klient/delo-2026/gen.py"}}), 2),
+        ("прибор в scripts/ пишется свободно",
+         run({"tool_name": "Write", "tool_input": {
+             "file_path": "scripts/novyy_pribor.py", "content": "x"}}), 0),
+        ("рендер .png в кухне дела блокируется",
+         run({"tool_name": "Write", "tool_input": {
+             "file_path": "cases/klient/delo-2026/.agent/context/_working/ocr/page_001.png",
+             "content": "x"}}), 2),
+        ("сайдкар .txt рядом с рендером пишется",
+         run({"tool_name": "Write", "tool_input": {
+             "file_path": "cases/klient/delo-2026/.agent/context/_working/ocr/page_001.txt",
+             "content": "x"}}), 0),
+        ("чтение картинки под cases разрешено (фолбэк vision)",
+         run({"tool_name": "Read", "tool_input": {
+             "file_path": "cases/klient/delo-2026/00_intake/foto.png"}}), 0),
+        ("рендер в /tmp разрешён",
+         run({"tool_name": "Bash", "tool_input": {"command":
+              "python3 scripts/markdown_extract.py cases/k/d/00_intake/isk.pdf "
+              "--render-dir /tmp/k/isk"}}), 0),
+        # Прецедент 19.08.2026: тело heredoc со строками «cp …» и «00_intake»
+        # блокировало запись файла приёмки. Тело — данные, цель записи — команда.
+        ("тело heredoc не принимается за команду",
+         run({"tool_name": "Bash", "tool_input": {"command":
+              "cat > scripts/spec.py <<'EOF'\nCONTRACT = 'cp a.pdf 00_intake/b.pdf блокируется'\nEOF"}}), 0),
         ("гейт совпадает с решением в practice_search.py",
          run({"tool_name": "Bash",
               "tool_input": {"command": "curl https://sudact.ru/regular/doc_ajax/?q=1"}}),

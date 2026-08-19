@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+"""model_policy.py — модель шага выводится из уровня дела, а не из пина в frontmatter.
+
+Зачем. `doc-drafter` запинен на Opus, потому что на L2/L3 составление документа —
+самая ответственная работа конвейера. Но на типовом документе (MICRO/L1) тот же пин
+означает пятикратную цену за ту же страницу текста: Opus $15/$75 против Sonnet $3/$15
+за миллион токенов. Пин не отменяется сам собой — его отменяет решение, принятое
+на шаге брифа, и это решение обязано быть машинным, а не «по памяти».
+
+    --level MICRO|L1|L2|L3 --step ШАГ   печатает алиас модели (haiku|sonnet|opus)
+    --brief ФАЙЛ                        сверяет таблицу ПЛАН брифа с политикой
+    --selftest                          проверка без сети
+
+Алиасы, не версии: `haiku`/`sonnet`/`opus` всегда разрешаются в самую продвинутую
+модель линейки, апгрейд подхватывается без правки файлов.
+
+Источник политики — раздел «Модели под шаги» в .claude/CLAUDE.md. Здесь он записан
+исполняемо: текст модель может пропустить, код возврата — нет.
+"""
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+import tempfile
+from pathlib import Path
+
+LEVELS = ("MICRO", "L1", "L2", "L3")
+
+# шаг → (модель по уровню | «-» там, где шаг на этом уровне не запускается вовсе)
+POLICY = {
+    # Составление и проверка: на типовом документе судит Sonnet, на споре — Opus.
+    "draft":         {"MICRO": "sonnet", "L1": "sonnet", "L2": "opus", "L3": "opus"},
+    "review":        {"MICRO": "sonnet", "L1": "sonnet", "L2": "opus", "L3": "opus"},
+    # Охота: сбор перспектив, разнообразие углов важнее силы. На MICRO запрещена
+    # триажем — тема уже покрыта practice_index.md.
+    "hunt":          {"MICRO": "-", "L1": "sonnet", "L2": "sonnet", "L3": "sonnet"},
+    # Совет: роли спорят (Sonnet), председатель сводит и решает (Opus).
+    "council-role":  {"MICRO": "-", "L1": "-", "L2": "sonnet", "L3": "sonnet"},
+    "council-chair": {"MICRO": "-", "L1": "-", "L2": "opus", "L3": "opus"},
+    # Механика: извлечение и классификация — дешёвой моделью.
+    "read-text":     {"MICRO": "haiku", "L1": "haiku", "L2": "haiku", "L3": "haiku"},
+    "classify":      {"MICRO": "haiku", "L1": "haiku", "L2": "haiku", "L3": "haiku"},
+    # Скан-читатели: у них фолбэк на облачный vision, дешевле не ставить.
+    "read-scan":     {"MICRO": "sonnet", "L1": "sonnet", "L2": "sonnet", "L3": "sonnet"},
+}
+
+# Исполнитель из брифа → шаг политики. Кого здесь нет, того политика не судит,
+# но модель назвать он обязан всё равно (пустая клетка = решение не принято).
+AGENT_STEP = {
+    "doc-drafter": "draft",
+    "doc-reviewer": "review",
+    "practice-hunter-classic": "hunt",
+    "practice-hunter-skeptic": "hunt",
+    "practice-hunter-tactical": "hunt",
+    "askacouncil": "council-role",
+    "position-council": "council-role",
+    "docx-reader": "read-text",
+    "pdf-reader": "read-scan",
+    "image-reader": "read-scan",
+}
+
+
+def model_for(level: str, step: str) -> str:
+    """Алиас модели либо «-», если шаг на этом уровне не запускается."""
+    return POLICY[step][level]
+
+
+def cmd_pair(level: str, step: str) -> int:
+    if level not in LEVELS:
+        print(f"ERROR: уровень «{level}» неизвестен, ожидались {', '.join(LEVELS)}", file=sys.stderr)
+        return 2
+    if step not in POLICY:
+        print(f"ERROR: шаг «{step}» неизвестен, ожидались {', '.join(sorted(POLICY))}", file=sys.stderr)
+        return 2
+    m = model_for(level, step)
+    if m == "-":
+        print(f"шаг «{step}» на уровне {level} запрещён триажем — не запускать", file=sys.stderr)
+        return 1
+    print(m)
+    return 0
+
+
+_LEVEL_RE = re.compile(r"Уровень\s*:\s*(MICRO|L1|L2|L3)", re.I)
+
+
+def check_brief(path: Path) -> int:
+    """Сверка плана брифа с политикой. Fail-closed: непонятно — код 1, не 0."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        print(f"ERROR: бриф не прочитан: {e}", file=sys.stderr)
+        return 1
+    m = _LEVEL_RE.search(text)
+    if not m:
+        print("ERROR: в брифе не назван уровень (строка КЛАССИФИКАЦИЯ, «Уровень: L2»). "
+              "Без уровня модель шага не выводится — бриф не принят.", file=sys.stderr)
+        return 1
+    level = m.group(1).upper()
+
+    rows, bad = 0, []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("|") or set(line) <= set("|-: "):
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if len(cells) < 3 or cells[0].lower().startswith("шаг"):
+            continue
+        rows += 1
+        executor, model = cells[1], cells[2].lower()
+        if not model:
+            bad.append(f"{executor}: колонка «Модель» пуста — решение о модели не принято")
+            continue
+        step = AGENT_STEP.get(executor)
+        if not step:
+            continue
+        want = model_for(level, step)
+        if want == "-":
+            bad.append(f"{executor}: шаг «{step}» на уровне {level} запрещён триажем, "
+                       f"а в плане стоит")
+        elif model != want:
+            note = " (перерасход: Opus дороже Sonnet впятеро)" if model == "opus" else ""
+            bad.append(f"{executor}: в плане «{model}», политика на {level} — «{want}»{note}")
+    if not rows:
+        print("ERROR: в брифе нет строк таблицы ПЛАН — сверять нечего, бриф не принят.",
+              file=sys.stderr)
+        return 1
+    if bad:
+        print(f"расхождений с политикой моделей ({level}): {len(bad)}", file=sys.stderr)
+        for b in bad:
+            print("  · " + b, file=sys.stderr)
+        return 1
+    print(f"план брифа сходится с политикой моделей ({level}), строк: {rows}")
+    return 0
+
+
+def selftest() -> int:
+    assert model_for("L1", "draft") == "sonnet"
+    assert model_for("L3", "draft") == "opus"
+    assert model_for("MICRO", "hunt") == "-"
+    for step, by_level in POLICY.items():
+        assert set(by_level) == set(LEVELS), f"{step}: политика не покрывает все уровни"
+        for lvl, m in by_level.items():
+            assert m in ("haiku", "sonnet", "opus", "-"), f"{step}/{lvl}: странная модель {m}"
+    for agent, step in AGENT_STEP.items():
+        assert step in POLICY, f"{agent} указывает на неизвестный шаг {step}"
+
+    ok = """КЛАССИФИКАЦИЯ  Уровень: L1 · Трек: FAST
+| Шаг | Исполнитель | Модель | Прогноз |
+|---|---|---|---|
+| 4 | doc-drafter | sonnet | 40k |
+"""
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "b.md"
+        p.write_text(ok, encoding="utf-8")
+        assert check_brief(p) == 0, "верный бриф отвергнут"
+        p.write_text(ok.replace("sonnet", "opus"), encoding="utf-8")
+        assert check_brief(p) == 1, "Opus на L1 пропущен"
+        p.write_text(ok.replace("Уровень: L1 · ", ""), encoding="utf-8")
+        assert check_brief(p) == 1, "бриф без уровня принят"
+        p.write_text(ok.replace("| sonnet ", "|  "), encoding="utf-8")
+        assert check_brief(p) == 1, "пустая модель принята"
+        p.write_text(ok.replace("| 4 | doc-drafter | sonnet | 40k |",
+                                "| 2 | practice-hunter-classic | sonnet | 60k |")
+                       .replace("Уровень: L1", "Уровень: MICRO"), encoding="utf-8")
+        assert check_brief(p) == 1, "охота на MICRO пропущена"
+    print("selftest пройден: политика полна, бриф судится fail-closed")
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Модель шага по уровню дела.")
+    ap.add_argument("--level", help="MICRO|L1|L2|L3")
+    ap.add_argument("--step", help="|".join(sorted(POLICY)))
+    ap.add_argument("--brief", help="сверить таблицу ПЛАН брифа с политикой")
+    ap.add_argument("--selftest", action="store_true")
+    a = ap.parse_args()
+    if a.selftest:
+        return selftest()
+    if a.brief:
+        return check_brief(Path(a.brief))
+    if a.level and a.step:
+        return cmd_pair(a.level.upper(), a.step)
+    ap.error("нужны --level и --step, либо --brief, либо --selftest")
+
+
+if __name__ == "__main__":
+    sys.exit(main())

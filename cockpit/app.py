@@ -26,7 +26,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, Fil
 
 # ── Пути (фиксированы на систему Фемида, НЕ Мнемозина) ──────────────────────
 HOME = Path.home()
-INBOX = HOME / "Desktop" / "inbox"            # Femida inbox (НЕ _ВХОДЯЩИЕ)
+INBOX = Path(os.environ.get("THEMIS_INBOX") or HOME / "Desktop" / "inbox")  # НЕ _ВХОДЯЩИЕ
 import shutil as _shutil
 # Корень проекта Themis: env THEMIS_HOME или каталог на уровень выше cockpit/
 LEGAL = Path(os.environ.get("THEMIS_HOME") or Path(__file__).resolve().parent.parent)
@@ -652,16 +652,51 @@ def task(payload: dict) -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
+# Лимиты загрузки — три оси. Один файл ограничивался и раньше, но без потолка на
+# число файлов и на объём запроса перетащенная в окно папка забивала диск, а инбокс
+# становился нечитаемым. Пороги вынесены в окружение: приёмка обязана проверять
+# лимит, не гоняя сотни мегабайт.
+def _limit(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.environ.get(name, "") or default))
+    except ValueError:
+        return default
+
+
+UPLOAD_MAX_BYTES = _limit("THEMIS_UPLOAD_MAX_BYTES", 50 * 1024 * 1024)
+UPLOAD_MAX_FILES = _limit("THEMIS_UPLOAD_MAX_FILES", 30)
+UPLOAD_MAX_TOTAL = _limit("THEMIS_UPLOAD_MAX_TOTAL", 200 * 1024 * 1024)
+
+
 @app.post("/api/upload")
 async def upload(files: list[UploadFile] = File(...)) -> JSONResponse:
-    MAX = 50 * 1024 * 1024  # лимит 50 МБ — защита от disk-fill
-    saved = []
+    def otkaz(why: str) -> JSONResponse:
+        # Отказ громкий и целиком: раньше файл сверх лимита молча пропускался,
+        # юрист видел половину дела и считал, что загрузил всё.
+        push("agent", "Не приняла загрузку: " + why, PEOPLE_BY_ID["gruzenberg"])
+        return JSONResponse({"ok": False, "error": why, "saved": []}, status_code=413)
+
+    mb = 1024 * 1024
+    if len(files) > UPLOAD_MAX_FILES:
+        return otkaz(f"файлов {len(files)}, разом принимаю не больше {UPLOAD_MAX_FILES}")
+
+    prinyato, total = [], 0
     for uf in files:
         data = await uf.read()
-        if len(data) > MAX:
-            continue  # слишком большой — пропускаем
+        total += len(data)
+        if len(data) > UPLOAD_MAX_BYTES:
+            return otkaz(f"«{uf.filename}» весит {len(data) / mb:.1f} МБ, "
+                         f"предел на файл — {UPLOAD_MAX_BYTES / mb:.0f} МБ")
+        if total > UPLOAD_MAX_TOTAL:
+            return otkaz(f"всего вышло больше {UPLOAD_MAX_TOTAL / mb:.0f} МБ — "
+                         "разбейте на несколько заходов")
+        prinyato.append((uf.filename, data))
+
+    saved = []
+    INBOX.mkdir(parents=True, exist_ok=True)
+    for filename, data in prinyato:
         # имя из последнего сегмента и для unix, и для windows-путей; срез до 200
-        raw = (uf.filename or "файл").replace("\\", "/")
+        raw = (filename or "файл").replace("\\", "/")
         name = (os.path.basename(raw) or "файл")[:200]
         dest = INBOX / name
         i = 1
