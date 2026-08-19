@@ -63,6 +63,12 @@ back for self-learning after you edit it.
   sequentially, and Femida speaks in the goddess's feminine voice.
 - **Knowledge graph** — `/graphify` surfaces cross-case links (shared opponent,
   same object, reusable arguments) so the growing base saves tokens.
+- **Telegram bot — a remote, not a shop window.** Anything sent to Telegram is
+  disclosed to Telegram, so the bot only ever says dates, counts and "done": no
+  names, case numbers or amounts (an outgoing guard enforces it). Documents are
+  fetched by a link into your private network, authorised by the panel. Voice
+  notes are transcribed on your machine. Your own bot, your own token
+  (`knowledge/bot-protocol.md`); empty config = no bot, and the system runs fine.
 - **Self-update** — `/themis-update` pulls the latest logic from GitHub **without
   touching your cases or knowledge base**.
 - **Privacy** — client data (`cases/`) stays local and never ships.
@@ -158,6 +164,12 @@ Themis ведёт судебные дела как живая юрфирма и�
   последовательно, Фемида говорит женским голосом богини.
 - **Граф знаний** — `/graphify` вскрывает межкейсовые связи (общий оппонент, один
   объект, переиспользуемые аргументы) — экономия токенов на росте базы.
+- **Бот в Telegram — пульт, а не витрина.** Всё, что ушло в Telegram, разглашено
+  Telegram, поэтому бот называет только даты, счёт и «готово»: ни имён, ни номеров
+  дел, ни сумм — держит сторож на выходе. Документ забирается ссылкой внутрь твоей
+  приватной сети, узнаёт тебя панель. Голосовые расшифровываются на твоей машине.
+  Бот свой, токен свой (`knowledge/bot-protocol.md`); пустой конфиг — бота нет,
+  система работает.
 - **Самообновление** — `/themis-update` тянет последнюю логику с GitHub, **не трогая
   твои дела и базу знаний**.
 - **Приватность** — данные клиентов (`cases/`) всегда локально, в публику не уходят.

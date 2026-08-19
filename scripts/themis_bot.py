@@ -354,6 +354,14 @@ def tg(c: dict, api_base: str, metod: str, telo: dict | None = None, taymaut: in
         raise Otkaz(f"ответ Telegram на {metod} не разобран")
 
 
+def _pismo(chat: str, text: str) -> dict:
+    """Тело sendMessage. Превью ссылки выключено намеренно: увидев ссылку, сервер
+    Telegram идёт по ней САМ, чтобы собрать карточку. Наш адрес ведёт внутрь
+    приватной сети — незачем звать туда чужой обходчик и незачем отдавать ему
+    заголовок документа, если панель однажды окажется на публичном имени."""
+    return {"chat_id": chat, "text": text, "disable_web_page_preview": True}
+
+
 def skazat(c: dict, api_base: str, text: str, chat: str = "") -> bool:
     """Единственная дверь наружу. Каждый текст проходит сторожа: не сдал — не уходит."""
     text = (text or "").strip()
@@ -363,7 +371,7 @@ def skazat(c: dict, api_base: str, text: str, chat: str = "") -> bool:
     if beda:
         audit("исходящее остановлено", chat or owner(c), "; ".join(beda))
         return False
-    tg(c, api_base, "sendMessage", {"chat_id": chat or owner(c), "text": text})
+    tg(c, api_base, "sendMessage", _pismo(chat or owner(c), text))
     return True
 
 
@@ -701,7 +709,7 @@ def cmd_notify(c: dict, api_base: str, text: str) -> int:
         print("ОТКАЗ: в уведомлении " + ", ".join(beda) + " — в Telegram это не уходит",
               file=sys.stderr)
         return 1
-    tg(c, api_base, "sendMessage", {"chat_id": owner(c), "text": text})
+    tg(c, api_base, "sendMessage", _pismo(owner(c), text))
     audit("уведомление отправлено", owner(c), f"знаков {len(text)}")
     return 0
 
@@ -766,6 +774,8 @@ def selftest() -> int:
     assert svodka_sobytiy.__doc__ and "молч" in svodka_sobytiy.__doc__, \
         "молчание при отсутствии событий не описано"
 
+    assert _pismo("1", "текст")["disable_web_page_preview"] is True, \
+        "превью ссылки включено — обходчик Telegram пойдёт по нашему адресу сам"
     assert _slovar("строка") == {} and _slovar({"a": 1}) == {"a": 1}, "разбор поля-объекта"
     assert _tseloe("девяносто") == 0 and _tseloe("7") == 7, "разбор числа из чужого ответа"
     assert (_skl(1, "день", "дня", "дней"), _skl(3, "день", "дня", "дней"),
