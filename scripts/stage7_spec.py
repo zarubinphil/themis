@@ -268,6 +268,28 @@ exit 0
                 fails.append(("foreign_cli.py", f"ЗА ГРАНИЦУ УШЛО «{utechka}» — "
                                                 "обезличивание не сработало"))
                 break
+
+        # Враждебная проба 19.08.2026: формы ПД, которых не было в первом контракте.
+        # Обе прошли границу процесса целиком.
+        formy = [
+            ("адрес объекта спора",
+             "Спор о квартире: г. Казань, ул. Баумана, д. 12, кв. 5, площадь 54 кв. м.\n",
+             "Баумана"),
+            ("путь к папке дела (фамилия доверителя в имени)",
+             "Материалы лежат в cases/kuznetsova-as/razvod-2026, карта готова.\n",
+             "kuznetsova-as"),
+        ]
+        for why, text, sled in formy:
+            f = td / f"proba_{abs(hash(why))}.txt"
+            f.write_text(text, encoding="utf-8")
+            o = td / f"o_{abs(hash(why))}.txt"
+            run([tool("foreign_cli.py"), "--provider", "proba", "--prompt", str(f),
+                 "--cmd", vidok, "--out", str(o)], timeout=180)
+            vid2 = otchet.read_text(encoding="utf-8", errors="replace")
+            if sled.lower() in vid2.lower():
+                fails.append(("foreign_cli.py", f"ЗА ГРАНИЦУ УШЁЛ {why}: «{sled}». "
+                                                "Адрес — место жительства, имя папки дела — "
+                                                "фамилия доверителя; и то и другое ПД"))
         if otvet.is_file() and "333" not in otvet.read_text(encoding="utf-8"):
             fails.append(("foreign_cli.py", "ответ чужого CLI не сохранён"))
         if log.is_file():
