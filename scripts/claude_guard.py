@@ -167,32 +167,85 @@ def _cases_write_gate(paths) -> None:
 
 # Тело heredoc — данные, а не команда. Сторож, читающий тело, ловит собственное
 # описание правил: 19.08.2026 запись приёмки была заблокирована за строки
-# «cp …» и «00_intake» ВНУТРИ текста файла. Цель записи (`> путь`) стрижку переживает.
-_HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_]\w*)\1.*?^\s*\2\s*$", re.S | re.M)
+# «cp …» и «00_intake» ВНУТРИ текста файла. Остаток ПЕРВОЙ строки стрижку переживает:
+# `cat <<'EOF' > файл` держит цель записи именно там, и съесть её значит открыть
+# обход (враждебная проба 19.08.2026 — форма прошла сторожа).
+_HEREDOC_RE = re.compile(r"<<-?\s*['\"]?([A-Za-z_]\w*)['\"]?([^\n]*)\n.*?^\s*\1\s*$", re.S | re.M)
 
 
 def _strip_heredocs(cmd: str) -> str:
-    return _HEREDOC_RE.sub("<<HEREDOC", cmd)
+    return _HEREDOC_RE.sub(lambda m: "<<HEREDOC" + m.group(2), cmd)
 
 
-_REDIRECT_RE = re.compile(r">>?\s*([^\s;&|<>()]+)")
-_COPY_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(cp|mv|tee|install)\s+([^;&|<>]+)", re.M)
+_REDIRECT_RE = re.compile(r">>?\s*\|?\s*([^\s;&|<>()]+)")
+# Цель — последний аргумент (cp SRC DST) либо каждый (tee A B, touch A B).
+_VERB_LAST = ("cp", "mv", "install", "rsync", "ditto")
+_VERB_ALL = ("tee", "touch")
+_VERB_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(" + "|".join(_VERB_LAST + _VERB_ALL)
+                      + r")\s+([^;&|<>]+)", re.M)
+# Загрузчики пишут в файл флагом, а не редиректом.
+_FETCH_RE = re.compile(r"(?:^|\s)(?:-o|--output|-O|--output-document)[=\s]+([^\s;&|<>]+)")
+# Однострочник интерпретатора обходит и редирект, и cp. Целью считаем путь
+# ТОЛЬКО когда в теле есть признак записи: чтение картинки дела разрешено.
+_INTERP_RE = re.compile(r"\b(?:python3?|node|ruby|perl|php)\b[^\n|;]*?\s-(?:c|e)\b")
+_WRITE_HINT_RE = re.compile(
+    r"open\s*\([^)]*['\"][wax]b?['\"]|write_bytes|write_text|savefig|to_csv"
+    r"|shutil\.(?:copy|move)|writeFileSync|File\.write|os\.rename")
+_PATH_RE = re.compile(r"[\w./\\~-]*cases/[\w./\\-]+\.\w+")
+
+
+def _split(args: str) -> list:
+    try:
+        import shlex
+        return [a for a in shlex.split(args) if not a.startswith("-")]
+    except ValueError:
+        return [a for a in args.split() if not a.startswith("-")]
 
 
 def _write_targets(cmd: str) -> list:
     """Пути, КУДА команда пишет. Упоминание пути в аргументе чтения целью не считается."""
     body = _strip_heredocs(cmd)
     targets = [t.strip("'\"") for t in _REDIRECT_RE.findall(body)]
-    for verb, args in _COPY_RE.findall(body):
-        try:
-            import shlex
-            parts = [a for a in shlex.split(args) if not a.startswith("-")]
-        except ValueError:
-            parts = [a for a in args.split() if not a.startswith("-")]
+    targets += [t.strip("'\"") for t in _FETCH_RE.findall(body)]
+    for verb, args in _VERB_RE.findall(body):
+        parts = _split(args)
         if not parts:
             continue
-        targets += parts if verb == "tee" else parts[-1:]
+        targets += parts if verb in _VERB_ALL else parts[-1:]
+    if _INTERP_RE.search(body) and _WRITE_HINT_RE.search(body):
+        targets += [t.strip("'\"") for t in _PATH_RE.findall(body)]
     return targets
+
+
+# Перенос ЦЕЛОГО каталога расширения не имеет: `mv /tmp/ocr дело/.../ocr` кладёт
+# в дело сотню рендеров, а по имени цели этого не видно. Смотрим на диск —
+# что в каталоге-источнике, то и приедет.
+_BULK_LIMIT = 400
+
+
+def _bulk_forbidden(cmd: str) -> str:
+    body = _strip_heredocs(cmd)
+    for verb, args in _VERB_RE.findall(body):
+        if verb in _VERB_ALL:
+            continue
+        parts = _split(args)
+        if len(parts) < 2:
+            continue
+        dst = parts[-1].strip("'\"")
+        if "cases" not in dst.replace("\\", "/").split("/"):
+            continue
+        for src in parts[:-1]:
+            src = os.path.expanduser(src.strip("'\""))
+            if not os.path.isdir(src):
+                continue
+            for i, (dirpath, _dirs, files) in enumerate(os.walk(src)):
+                if i > _BULK_LIMIT:
+                    break
+                for f in files:
+                    ext = os.path.splitext(f)[1].lower().lstrip(".")
+                    if ext in CODE_EXT or ext in RASTER_EXT:
+                        return f"{src} → {dst} (внутри {f})"
+    return ""
 
 
 # Порог целикового чтения текстового файла. 48 КБ ≈ 12-15k токенов на один Read;
@@ -279,6 +332,13 @@ def main() -> None:
     if tool == "Bash":
         cmd = as_str(ti.get("command"))
         _cases_write_gate(_write_targets(cmd))
+        bulk = _bulk_forbidden(cmd)
+        if bulk:
+            block(
+                f"БЛОК: перенос каталога с кодом или рендерами внутрь cases/ — {bulk}. "
+                "Рендеры живут в кеше (/tmp/{дело}/{имя}), приборы — в scripts/. "
+                "Нужны сами материалы — их место в 00_intake, по одному файлу."
+            )
         cmd = _strip_heredocs(cmd)
         protected = re.search(r"00_intake|_baselines", cmd)
         # rm только в командной позиции (начало строки / после ; & | $( `) —
@@ -445,6 +505,27 @@ def selftest() -> int:
          run({"tool_name": "Bash", "tool_input": {"command":
               "python3 scripts/markdown_extract.py cases/k/d/00_intake/isk.pdf "
               "--render-dir /tmp/k/isk"}}), 0),
+        # Формы записи, найденные враждебной пробой 19.08.2026: каждая проходила
+        # сторожа, пока правило смотрело только на Write, cp и редирект.
+        ("heredoc с редиректом ПОСЛЕ метки блокируется",
+         run({"tool_name": "Bash", "tool_input": {"command":
+              "cat <<'EOF' > cases/klient/delo-2026/build.py\nprint(1)\nEOF"}}), 2),
+        ("touch .py в деле блокируется",
+         run({"tool_name": "Bash", "tool_input": {"command": "touch cases/klient/delo-2026/gen.py"}}), 2),
+        ("touch заметки .md в деле пропускается",
+         run({"tool_name": "Bash", "tool_input": {"command": "touch cases/klient/delo-2026/n.md"}}), 0),
+        ("curl -o картинки в дело блокируется",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "curl -o cases/klient/delo-2026/foto.png https://example/1"}}), 2),
+        ("curl -o в /tmp пропускается",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "curl -o /tmp/foto.png https://example/1"}}), 0),
+        ("запись интерпретатором в дело блокируется",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "python3 -c \"open('cases/klient/delo-2026/g.py','w').write('x')\""}}), 2),
+        ("чтение картинки дела интерпретатором пропускается",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "python3 -c \"print(open('cases/k/d/00_intake/f.png','rb').read()[:4])\""}}), 0),
         # Прецедент 19.08.2026: тело heredoc со строками «cp …» и «00_intake»
         # блокировало запись файла приёмки. Тело — данные, цель записи — команда.
         ("тело heredoc не принимается за команду",
