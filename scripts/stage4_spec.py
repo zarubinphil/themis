@@ -135,6 +135,18 @@ def check_py_under_cases():
         ("рабочий файл кухни командой пишется",
          {"tool_name": "Bash", "tool_input": {"command":
           "cp /tmp/log.md " + c + "/.agent/drafts/_working/review_log.md"}}, 0),
+        # Третий круг: распаковка архива высыпает в дело содержимое, которого
+        # сторож не видит (в том числе код и рендеры), а `unzip -o` по первичке
+        # затирает оригиналы. Законный путь — распаковать во временный каталог
+        # и положить файлы по одному.
+        ("распаковка архива в кухню дела",
+         {"tool_name": "Bash", "tool_input": {"command":
+          "unzip materialy.zip -d " + c + "/.agent/context/_working"}}, 2),
+        ("распаковка архива в первичку",
+         {"tool_name": "Bash", "tool_input": {"command":
+          "tar -xf materialy.tar -C " + c + "/" + INTAKE}}, 2),
+        ("распаковка во временный каталог не трогается",
+         {"tool_name": "Bash", "tool_input": {"command": "unzip materialy.zip -d /tmp/mat"}}, 0),
     ])
 
 
