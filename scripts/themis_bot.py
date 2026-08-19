@@ -233,7 +233,10 @@ def shablony(d: dict) -> dict:
             "панель. Можно голосом: расшифрую здесь, на машине, звук никуда не уйдёт."
         ),
         "status": f"Дел в работе: {d['del_v_rabote']}. Ближайшее заседание {d['data']}.",
+        "status_bez_dat": f"Дел в работе: {d['del_v_rabote']}. Заседаний в календаре нет.",
         "status_pusto": "Дел в работе нет. Ничего не горит.",
+        "hearing_next": f"Ближайшее заседание {d['data']}.",
+        "hearing_none": "Заседаний в календаре нет.",
         "hearing": (f"Заседание {d['data']} в {d['vremya']}. Папку собрал, "
                     f"забрать здесь: {d['ssylka']}"),
         "deadline": (f"Срок {d['data']} — это через {d['dney']} "
@@ -246,6 +249,8 @@ def shablony(d: dict) -> dict:
         "error": ("Застрял. Что именно сломалось — смотрите в панели, "
                   "сюда такие подробности не пишу."),
         "miniapp": f"Панель здесь: {d['ssylka']}",
+        "digest": (f"Заседаний {d.get('srok', 'на завтра')}: {d.get('skolko', 1)} — "
+                   f"{d.get('kogda', d['data'])}. Что брать с собой, смотрите в панели."),
     }
 
 
@@ -296,6 +301,8 @@ def doc_id(put: str) -> str:
 
 def baza(c: dict) -> str:
     url = (c["server"].get("url") or "").strip().rstrip("/")
+    if not c["server"].get("enabled"):
+        raise Otkaz("панель выключена в конфиге (server.enabled) — ссылке некуда вести")
     if not url:
         raise Otkaz("адрес панели не задан (server.url) — ссылке некуда вести. "
                     "Пока панель только на этой машине, документы забираются с неё напрямую.")
@@ -415,8 +422,8 @@ def status_text() -> str:
     if not dela:
         return shablony(FIXTURE)["status_pusto"]
     blizh = _blizhaishee(dela)
-    hvost = f" Ближайшее заседание {blizh}." if blizh else " Заседаний в календаре нет."
-    return f"Дел в работе: {len(dela)}.{hvost}"
+    sh = shablony({**FIXTURE, "del_v_rabote": len(dela), "data": blizh or FIXTURE["data"]})
+    return sh["status" if blizh else "status_bez_dat"]
 
 
 # ── Голос ───────────────────────────────────────────────────────────────────
@@ -493,10 +500,11 @@ def otvet(c: dict, api_base: str, msg: dict) -> str:
         return status_text()
     if cmd in ("/hearings", "/zasedaniya"):
         blizh = _blizhaishee(_dela())
-        return f"Ближайшее заседание {blizh}." if blizh else "Заседаний в календаре нет."
+        return shablony({**FIXTURE, "data": blizh or FIXTURE["data"]})[
+            "hearing_next" if blizh else "hearing_none"]
     if cmd in ("/doc", "/panel", "/miniapp"):
         try:
-            return f"Панель здесь: {miniapp_link(c)}"
+            return shablony({**FIXTURE, "ssylka": miniapp_link(c)})["miniapp"]
         except Otkaz as e:
             audit("ссылка не выдана", owner(c), str(e))
             return "Панель пока только на рабочей машине — ссылку дать некуда."
@@ -656,7 +664,7 @@ def svodka_sobytiy(dney: int = 1) -> str:
         kogda += f" и ещё дней с заседаниями: {len(unikalnye) - len(pokazat)}"
     srok = ("на завтра" if dney <= 1
             else f"на ближайшие {dney} {_skl(dney, 'день', 'дня', 'дней')}")
-    return f"Заседаний {srok}: {len(daty)} — {kogda}. Что брать с собой, смотрите в панели."
+    return shablony({**FIXTURE, "srok": srok, "skolko": len(daty), "kogda": kogda})["digest"]
 
 
 # ── Команды ─────────────────────────────────────────────────────────────────
@@ -735,6 +743,43 @@ def cmd_chat_probe(c: dict, api_base: str) -> int:
     return 0
 
 
+def cmd_notify_doc(c: dict, api_base: str, put: str) -> int:
+    """Документ готов — одно сообщение со ссылкой внутрь сети. Зовётся, когда
+    составитель закончил: имя документа и дело в текст не попадают, ссылка
+    непрозрачна, забирается всё на панели."""
+    text = shablony({**FIXTURE, "ssylka": doc_link(c, put)})["doc_ready"]
+    return cmd_notify(c, api_base, text)
+
+
+def cmd_notify_hearing(c: dict, api_base: str, data: str, vremya: str, put: str) -> int:
+    """Заседание и собранная к нему папка — одно сообщение. Зовётся, когда готов
+    пакет подготовки: наружу идут дата, время и непрозрачная ссылка, а что за дело
+    и с кем спор — видно только на панели."""
+    if not re.fullmatch(r"\d{2}\.\d{2}\.\d{4}", data or ""):
+        print(f"ОТКАЗ: дата «{data}» не в формате ДД.ММ.ГГГГ", file=sys.stderr)
+        return 2
+    if not put:
+        print("ОТКАЗ: нужен путь к собранной папке (--doc)", file=sys.stderr)
+        return 2
+    text = shablony({**FIXTURE, "data": data, "vremya": vremya or FIXTURE["vremya"],
+                     "ssylka": doc_link(c, put)})["hearing"]
+    return cmd_notify(c, api_base, text)
+
+
+def cmd_notify_deadline(c: dict, api_base: str, data: str) -> int:
+    """Срок подходит. Дату считает scripts/sroki.py, бот только напоминает —
+    и называет только её: какой именно срок и по какому делу, видно в панели."""
+    try:
+        d, m, g = data.split(".")
+        kogda = time.mktime(time.strptime(f"{g}-{m}-{d}", "%Y-%m-%d"))
+    except (ValueError, OverflowError):
+        print(f"ОТКАЗ: дата «{data}» не в формате ДД.ММ.ГГГГ", file=sys.stderr)
+        return 2
+    ostalos = max(0, int((kogda - time.time()) // 86400) + 1)
+    return cmd_notify(c, api_base,
+                      shablony({**FIXTURE, "data": data, "dney": ostalos})["deadline"])
+
+
 def cmd_templates(as_json: bool) -> int:
     sh = shablony(FIXTURE)
     if as_json:
@@ -756,6 +801,14 @@ def selftest() -> int:
     assert not chisto("\n".join(str(v) for v in SAFE.values())), \
         "объявленное безопасным на деле похоже на ПД"
     assert not chisto(ves), f"корпус шаблонов не сдал сторожу: {chisto(ves)}"
+    # Шаблон без вызывающего — мёртвая речь: приёмка его проверяет, а владелец
+    # никогда не услышит, и он тихо расходится с тем, что уходит на самом деле.
+    tekst_fayla = Path(__file__).read_text(encoding="utf-8")
+    telo = tekst_fayla.split("def shablony(")[1].split("\ndef ")[0]
+    for imya in sh:
+        vne_opredeleniya = tekst_fayla.count(f'"{imya}"') - telo.count(f'"{imya}"')
+        assert vne_opredeleniya > 0, \
+            f"шаблон «{imya}» ничем не отправляется — мёртвая речь"
     assert chisto("Иванова Мария Петровна ждёт документ"), "сторож слеп к ФИО"
     assert chisto("Взыскано 1 250 000 руб."), "сторож слеп к сумме"
     assert not chisto("Взыскано по одному делу, остальные в работе."), \
@@ -843,6 +896,15 @@ def main() -> int:
                     help="сколько проходов сделать в --serve (по умолчанию без конца)")
     ap.add_argument("--notify", metavar="ТЕКСТ")
     ap.add_argument("--notify-file", metavar="ФАЙЛ")
+    ap.add_argument("--notify-doc", metavar="ПУТЬ",
+                    help="документ готов: одно сообщение со ссылкой внутрь сети")
+    ap.add_argument("--notify-deadline", metavar="ДД.ММ.ГГГГ",
+                    help="срок подходит: напоминание одной датой")
+    ap.add_argument("--notify-hearing", metavar="ДД.ММ.ГГГГ",
+                    help="заседание и собранная папка: дата, время и ссылка")
+    ap.add_argument("--at", metavar="ЧЧ:ММ", default="", help="время заседания")
+    ap.add_argument("--doc", metavar="ПУТЬ", default="",
+                    help="путь к собранному документу для --notify-hearing")
     ap.add_argument("--notify-hearings", action="store_true",
                     help="напоминание о ближайших заседаниях (запускается по расписанию)")
     ap.add_argument("--days", type=int, default=1, help="горизонт напоминания в сутках")
@@ -899,6 +961,12 @@ def main() -> int:
             return cmd_chat_probe(c, a.api_base)
         if a.notify_hearings:
             return cmd_notify(c, a.api_base, svodka_sobytiy(max(1, a.days)))
+        if a.notify_doc:
+            return cmd_notify_doc(c, a.api_base, a.notify_doc)
+        if a.notify_deadline:
+            return cmd_notify_deadline(c, a.api_base, a.notify_deadline)
+        if a.notify_hearing:
+            return cmd_notify_hearing(c, a.api_base, a.notify_hearing, a.at, a.doc)
         if a.notify is not None:
             return cmd_notify(c, a.api_base, a.notify)
         if a.notify_file:
