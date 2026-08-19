@@ -315,6 +315,27 @@ def uid_valid(uid: str) -> bool:
     return num % 97 == 1
 
 
+def _notify_deadline(end: date) -> None:
+    """Считанный срок → напоминание в Telegram, тем же путём, что и morning-briefing.sh:
+    секрета нет либо бот выключен — молча пропускаем, вычисление срока от бота не зависит.
+    Дата — единственное, что уходит наружу (themis_bot.cmd_notify_deadline сам режет ПД)."""
+    secret = os.path.expanduser("~/.secrets/themis-telegram.env")
+    if not os.path.isfile(secret):
+        return
+    bot = os.path.join(os.path.dirname(os.path.abspath(__file__)), "themis_bot.py")
+    env = dict(os.environ)
+    for line in open(secret, encoding="utf-8"):
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            env[k.strip()] = v.strip()
+    try:
+        subprocess.run([sys.executable, bot, "--notify-deadline", end.strftime("%d.%m.%Y")],
+                       env=env, capture_output=True, timeout=20)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Процессуальные сроки и УИД дела")
     ap.add_argument("--ot", metavar="ДД.ММ.ГГГГ", help="дата или событие, от которых срок")
@@ -327,6 +348,9 @@ def main() -> int:
     ap.add_argument("--uid", help="проверить УИД дела (ISO 7064 MOD 97-10)")
     ap.add_argument("--offline", action="store_true",
                     help="не ходить в сеть: резерв ст. 112 ТК РФ, расчёт приблизителен")
+    ap.add_argument("--notify", action="store_true",
+                    help="напомнить в Telegram (themis_bot --notify-deadline), "
+                         "если секрет бота настроен; бот выключен — молча пропустить")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
@@ -357,6 +381,9 @@ def main() -> int:
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return 2
+
+    if a.notify:
+        _notify_deadline(res["end"])
 
     if a.json:
         print(json.dumps({"start": start.isoformat(), "end": res["end"].isoformat(),

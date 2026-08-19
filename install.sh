@@ -95,6 +95,31 @@ echo ""
 echo "[6.5] Сторож персональных данных…"
 python3 scripts/pd_guard.py --install
 
+# ── 6.6. Расписание бота-уведомителя (launchd, только macOS) ────────────────
+# Без регистрации утренняя сводка (заседания + inbox, скрипт morning-briefing.sh)
+# не запускается НИЧЕМ на чистом клоне — владелец узнаёт об этом только тогда,
+# когда сводка ни разу не пришла. launchd есть только в macOS; на Windows/Linux
+# планировщик другой (Планировщик задач / systemd-таймеры), автоматическая
+# установка не разрабатывается — setup_doctor называет замену явно.
+echo ""
+echo "[6.6] Расписание бота-уведомителя (launchd)…"
+if [ "$(uname)" = "Darwin" ]; then
+  PLIST_DST="$HOME/Library/LaunchAgents/themis.morning-briefing.plist"
+  mkdir -p "$HOME/Library/LaunchAgents"
+  sed "s|__THEMIS_HOME__|$PWD|g" scripts/themis.morning-briefing.plist > "$PLIST_DST"
+  launchctl unload "$PLIST_DST" 2>/dev/null
+  if launchctl load "$PLIST_DST" 2>/dev/null; then
+    echo "      ✓ утренняя сводка запланирована на 9:00 ($PLIST_DST)"
+  else
+    echo "      ⚠ launchctl load не удался — поставить вручную: launchctl load $PLIST_DST"
+  fi
+  echo "      Секрет Telegram (необязателен) — ~/.secrets/themis-telegram.env, см. CLAUDE.md."
+else
+  echo "      ⚠ launchd есть только в macOS — расписание не поставлено автоматически."
+  echo "        Замена: Планировщик задач (Windows) / systemd-таймеры (Linux) на"
+  echo "        scripts/morning-briefing.sh; подробности — setup_doctor."
+fi
+
 # ── 7. Проверка фактом ───────────────────────────────────────────────────────
 # Установщик не имеет права печатать «готово», не проверив. Доктор гоняет
 # КОМАНДЫ (версии, импорты, запуск движка OCR, шрифты, каналы, десять selftest),
