@@ -61,8 +61,9 @@ back for self-learning after you edit it.
   (content *and* formatting) and stops repeating the same mistakes.
 - **Cockpit** — a local UI (FastAPI) where agents switch live, the chat flows
   sequentially, and Femida speaks in the goddess's feminine voice.
-- **Knowledge graph** — `/graphify` surfaces cross-case links (shared opponent,
-  same object, reusable arguments) so the growing base saves tokens.
+- **Knowledge graph** — `/graphify` (исполнитель вне репозитория — решение в knowledge/OWNER-TODO.md)
+  surfaces cross-case links (shared opponent, same object, reusable arguments)
+  so the growing base saves tokens.
 - **Telegram bot — a remote, not a shop window.** Anything sent to Telegram is
   disclosed to Telegram, so the bot only ever says dates, counts and "done": no
   names, case numbers or amounts (an outgoing guard enforces it). Documents are
@@ -78,7 +79,6 @@ back for self-learning after you edit it.
 | Persona (RU) | Role (EN) | Step |
 |---|---|---|
 | Грузенберг / Gruzenberg | Registry — inbox intake | 1 |
-| Лохвицкий / Lokhvitsky | Sorting | 1 |
 | Мейер / Meyer | Case mapping | 1 |
 | Гольмстен · Буринский · Покровский / Holmsten · Burinsky · Pokrovsky | Readers (scan / image / text) | 1 |
 | Шершеневич / Shershenevich | Reconciler — verify readers | 1 |
@@ -162,8 +162,9 @@ Themis ведёт судебные дела как живая юрфирма и�
   (содержание И форматирование) и больше не повторяет огрехи.
 - **Cockpit** — локальный UI (FastAPI), где агенты переключаются вживую, чат идёт
   последовательно, Фемида говорит женским голосом богини.
-- **Граф знаний** — `/graphify` вскрывает межкейсовые связи (общий оппонент, один
-  объект, переиспользуемые аргументы) — экономия токенов на росте базы.
+- **Граф знаний** — `/graphify` (исполнитель вне репозитория — решение в knowledge/OWNER-TODO.md)
+  вскрывает межкейсовые связи (общий оппонент, один объект, переиспользуемые
+  аргументы) — экономия токенов на росте базы.
 - **Бот в Telegram — пульт, а не витрина.** Всё, что ушло в Telegram, разглашено
   Telegram, поэтому бот называет только даты, счёт и «готово»: ни имён, ни номеров
   дел, ни сумм — держит сторож на выходе. Документ забирается ссылкой внутрь твоей
@@ -179,7 +180,6 @@ Themis ведёт судебные дела как живая юрфирма и�
 | Персонаж | Роль | Шаг |
 |---|---|---|
 | Грузенберг | Канцелярия — приём входящих | 1 |
-| Лохвицкий | Сортировка | 1 |
 | Мейер | Картирование дела | 1 |
 | Гольмстен · Буринский · Покровский | Читатели (скан / картинка / текст) | 1 |
 | Шершеневич | Сверка читателей | 1 |

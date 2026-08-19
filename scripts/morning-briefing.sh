@@ -15,11 +15,17 @@ HORIZON=$(date -v+${DAYS_AHEAD}d +%Y-%m-%d)
 echo "$(date '+%Y-%m-%d %H:%M') | BRIEFING | Старт" >> "$LOG"
 
 # --- Собрать ближайшие заседания ---
-# Ищем папки 02_hearings/ГГГГ-ММ-ДД_* во всех делах
+# Ищем папки 02_hearings/ГГГГ-ММ-ДД_* и 02_hearings/ДД-ММ-ГГГГ_* во всех делах:
+# второй формат пишется руками по шаблону события, без него часть заседаний терялась.
 HEARINGS=""
 while IFS= read -r -d '' dir; do
     DIRNAME=$(basename "$dir")
     DATE_PART=$(echo "$DIRNAME" | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2}')
+    if [[ -z "$DATE_PART" ]]; then
+        # Формат ДД-ММ-ГГГГ_ — приводим к ГГГГ-ММ-ДД для сравнения с горизонтом
+        RU_DATE=$(echo "$DIRNAME" | grep -o '^[0-9]\{2\}-[0-9]\{2\}-[0-9]\{4\}')
+        [[ -n "$RU_DATE" ]] && DATE_PART="${RU_DATE:6:4}-${RU_DATE:3:2}-${RU_DATE:0:2}"
+    fi
     [[ -z "$DATE_PART" ]] && continue
     # Только если дата >= сегодня и <= горизонт
     if [[ "$DATE_PART" > "$TODAY" || "$DATE_PART" == "$TODAY" ]] && \
@@ -32,7 +38,7 @@ while IFS= read -r -d '' dir; do
         LABEL=$(echo "$DIRNAME" | sed 's/^[0-9-]*_//' | tr '-' ' ')
         HEARINGS="$HEARINGS\n  • $DATE_PART — $CLIENT / $CASE ($LABEL)"
     fi
-done < <(find "$CASES" -type d -name "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*" -print0 2>/dev/null)
+done < <(find "$CASES" -type d \( -name "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*" -o -name "[0-9][0-9]-[0-9][0-9]-[0-9][0-9][0-9][0-9]_*" \) -print0 2>/dev/null)
 
 # --- Inbox ---
 INBOX_COUNT=$(find "$INBOX" -maxdepth 1 -type f ! -name ".*" ! -name "*.note.md" 2>/dev/null | wc -l | xargs)

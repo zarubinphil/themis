@@ -260,8 +260,6 @@ threading.Thread(target=_drainer, daemon=True).start()
 OFFICE = [
     {"id": "gruzenberg",  "name": "Грузенберг",   "role": "Канцелярия",   "step": 0,
      "markers": ["inbox-triage", "INBOX", "00_intake", "Грузенберг"]},
-    {"id": "lokhvitsky",  "name": "Лохвицкий",    "role": "Сортировка",   "step": 0,
-     "markers": ["case-sorter", "Лохвицкий", "раскладыва"]},
     {"id": "meyer",       "name": "Мейер",        "role": "Картирование", "step": 1,
      "markers": ["case-mapper", "Мейер", "Картир"]},
     {"id": "readers",     "name": "Читатели",     "role": "Чтение дела",  "step": 1,
