@@ -279,6 +279,44 @@ exit 0
              "Материалы лежат в cases/kuznetsova-as/razvod-2026, карта готова.\n",
              "kuznetsova-as"),
         ]
+        # Второй круг пробы: соседний каталог, размер запроса и подменённый файл.
+        sosed = stub(td / "sosed.sh", f'ls -A .. | wc -l > {td / "sosedi.txt"}\necho "ответ"\n')
+        chistyy = td / "chistyy.txt"
+        chistyy.write_text("Применима ли ст. 333 ГК РФ к неустойке?\n", encoding="utf-8")
+        run([tool("foreign_cli.py"), "--provider", "proba", "--prompt", str(chistyy),
+             "--cmd", sosed], timeout=120)
+        sosedi = (td / "sosedi.txt")
+        if sosedi.is_file():
+            try:
+                skolko = int(sosedi.read_text().strip())
+            except ValueError:
+                skolko = -1
+            if skolko > 2:
+                fails.append(("foreign_cli.py", f"на уровень выше рабочего каталога видно "
+                                                f"{skolko} записей — «только обезличенный "
+                                                "каталог» перестаёт быть правдой"))
+        # Запрос уходит аргументом командной строки: у него есть предел ОС, и упереться
+        # в него посреди прогона хуже, чем отказать сразу и внятно.
+        ogromnyy = td / "ogromnyy.txt"
+        ogromnyy.write_text("Вопрос про неустойку. " * 60000, encoding="utf-8")
+        code, out, err = run([tool("foreign_cli.py"), "--provider", "proba", "--prompt",
+                              str(ogromnyy), "--cmd", vidok], timeout=180)
+        if code == 0:
+            fails.append(("foreign_cli.py", "запрос в 1,3 МБ принят — предел аргумента ОС "
+                                            "рванёт в бою, а не на приёмке"))
+        elif "предел" not in (out + err).lower() and "велик" not in (out + err).lower():
+            fails.append(("foreign_cli.py", f"отказ по размеру без внятной причины: "
+                                            f"{(out + err).strip()[:150]}"))
+        # Симлинк вместо файла запроса: за ним может стоять что угодно, включая дело.
+        ssylka = td / "ssylka.txt"
+        if not ssylka.exists():
+            ssylka.symlink_to(chistyy)
+        code, out, err = run([tool("foreign_cli.py"), "--provider", "proba", "--prompt",
+                              str(ssylka), "--cmd", vidok], timeout=120)
+        if code == 0:
+            fails.append(("foreign_cli.py", "симлинк принят как файл запроса — за ним "
+                                            "может стоять материал дела"))
+
         for why, text, sled in formy:
             f = td / f"proba_{abs(hash(why))}.txt"
             f.write_text(text, encoding="utf-8")
