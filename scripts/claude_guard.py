@@ -239,6 +239,21 @@ def _write_targets(cmd: str) -> list:
 # что в каталоге-источнике, то и приедет.
 _BULK_LIMIT = 400
 
+# Распаковка архива — запись «вслепую»: что внутри, сторож не видит, а в дело
+# высыпается всё разом. По первичке `unzip -o` вдобавок затирает оригиналы.
+# Законный путь: распаковать во временный каталог и положить файлы по одному.
+_UNPACK_RE = re.compile(
+    r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(?:unzip|tar|bsdtar|7z|unrar)\b[^;&|<>]*?"
+    r"\s(?:-d|-C|--directory|-o(?=\s))\s*([^\s;&|<>]+)", re.M)
+
+
+def _unpack_into_cases(cmd: str) -> str:
+    for d in _UNPACK_RE.findall(_strip_heredocs(cmd)):
+        d = d.strip("'\"")
+        if "cases" in d.replace("\\", "/").split("/"):
+            return d
+    return ""
+
 
 def _bulk_forbidden(cmd: str) -> str:
     body = _strip_heredocs(cmd)
@@ -351,6 +366,13 @@ def main() -> None:
         _cases_write_gate(_write_targets(cmd))
         for t in _write_targets(cmd):
             _workflow_gate(t)      # документ въезжает в GOTOVO и обычным cp, не только Write
+        unpack = _unpack_into_cases(cmd)
+        if unpack:
+            block(
+                f"БЛОК: распаковка архива прямо в дело ({unpack}) запрещена — сторож не видит, "
+                "что внутри, а по первичке распаковка ещё и затирает оригиналы. Распаковать "
+                "во временный каталог, затем класть файлы по одному (материалы — в 00_intake)."
+            )
         bulk = _bulk_forbidden(cmd)
         if bulk:
             block(
@@ -548,6 +570,14 @@ def selftest() -> int:
         ("чтение картинки дела интерпретатором пропускается",
          run({"tool_name": "Bash", "tool_input": {
              "command": "python3 -c \"print(open('cases/k/d/00_intake/f.png','rb').read()[:4])\""}}), 0),
+        ("распаковка архива в кухню дела — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "unzip mat.zip -d cases/klient/delo-2026/.agent/context/_working"}}), 2),
+        ("распаковка архива в первичку — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "tar -xf mat.tar -C cases/klient/delo-2026/00_intake"}}), 2),
+        ("распаковка во временный каталог пропускается",
+         run({"tool_name": "Bash", "tool_input": {"command": "unzip mat.zip -d /tmp/mat"}}), 0),
         ("sed -i правит генератор в деле — блок",
          run({"tool_name": "Bash", "tool_input": {
              "command": "sed -i '' s/a/b/ cases/klient/delo-2026/gen.py"}}), 2),
