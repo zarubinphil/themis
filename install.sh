@@ -7,6 +7,22 @@ echo "════════════════════════�
 echo "  Themis — установка"
 echo "════════════════════════════════════════════"
 
+# SMLTLK — штатный компонент (диктовка → voice-to-brief → бриф задачи), но его
+# сборка тянет Xcode и ~500 МБ модели распознавания. Молча этого не делаем:
+# ставится только по явному флагу. Без флага — говорим, что компонент есть
+# и как его получить; молчание запрещено.
+WITH_SMLTLK=0
+for arg in "$@"; do
+  case "$arg" in
+    --with-smltlk) WITH_SMLTLK=1 ;;
+    --help|-h)
+      echo "bash install.sh [--with-smltlk]"
+      echo "  --with-smltlk   собрать и поставить SMLTLK (диктовка, только macOS;"
+      echo "                  нужен Xcode со Swift 6 и ~500 МБ под модель)"
+      exit 0 ;;
+  esac
+done
+
 # ── 0. Платформа ─────────────────────────────────────────────────────────────
 if [ "$(uname)" != "Darwin" ]; then
   echo "⚠  Apple Vision OCR работает только на macOS."
@@ -85,6 +101,24 @@ python3 scripts/pd_guard.py --install
 # а не предположения, и возвращает 1, если чего-то критичного нет.
 echo ""
 echo "[7/7] Проверка окружения…"
+# ── SMLTLK (диктовка) ────────────────────────────────────────────────────────
+echo ""
+echo "[SMLTLK] диктовка задач…"
+SMLTLK_SRC="$HOME/Проекты/smltlk"
+if [ "$(uname)" != "Darwin" ]; then
+  echo "      ⚠ SMLTLK — приложение строки меню macOS, здесь не запускается."
+  echo "        Замена: локальный распознаватель речи (на Linux — whisper, он уже"
+  echo "        поставлен выше); текст класть в скилл voice-to-brief как обычно."
+elif [ "$WITH_SMLTLK" != "1" ]; then
+  echo "      пропущено (нужен флаг --with-smltlk: сборка тянет Xcode и ~500 МБ модели)."
+  echo "      Поставить позже: bash install.sh --with-smltlk"
+elif [ ! -d "$SMLTLK_SRC" ]; then
+  echo "      ⚠ исходников $SMLTLK_SRC нет — взять их у владельца проекта."
+else
+  bash "$SMLTLK_SRC/scripts/build_app.sh" && echo "      ✓ SMLTLK собран" || \
+    echo "      ⚠ сборка SMLTLK не удалась — Фемида работает и без диктовки"
+fi
+
 python3 scripts/setup_doctor.py || DOCTOR_RC=$?
 
 echo ""

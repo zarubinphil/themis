@@ -324,13 +324,34 @@ def unavailable_on(plat: str) -> list[dict]:
     return obshchee
 
 
+SMLTLK_SRC = os.path.expanduser("~/Проекты/smltlk")
+
+
+def _smltlk_installed() -> bool:
+    """Факт с диска, а не пересказ: приложение собрано и лежит в Программах."""
+    for d in ("/Applications", os.path.expanduser("~/Applications")):
+        try:
+            if any(n.lower().startswith("smltlk") for n in os.listdir(d)):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def smltlk_on(plat: str) -> dict:
     """SMLTLK — штатный компонент Фемиды, а не отдельный продукт (владелец, 18.08.2026)."""
     if plat == "darwin":
+        est_istochnik = os.path.isdir(SMLTLK_SRC)
         return {"available": True,
-                "how": "ставится тем же онбордингом из ~/Проекты/smltlk (и smltlk-*); "
-                       "связка: диктовка → скилл voice-to-brief → бриф задачи; "
-                       "голосовые из бота расшифровываются той же локальной моделью",
+                "installed": _smltlk_installed(),
+                "source": SMLTLK_SRC if est_istochnik else "",
+                "how": ("bash install.sh --with-smltlk (собирает из ~/Проекты/smltlk "
+                        "скриптом scripts/build_app.sh: нужен Xcode со Swift 6 и ~500 МБ "
+                        "под модель распознавания). Связка: диктовка → скилл voice-to-brief "
+                        "→ бриф задачи; голосовые из бота расшифровываются той же локальной "
+                        "моделью" if est_istochnik else
+                       "исходников ~/Проекты/smltlk на этой машине нет — взять их у владельца "
+                       "проекта, затем bash install.sh --with-smltlk"),
                 "why": "приложение строки меню macOS, Neural Engine распознаёт локально",
                 "replacement": ""}
     zamena = ("«Голосовой ввод» Windows либо локальный распознаватель речи"
@@ -338,6 +359,7 @@ def smltlk_on(plat: str) -> dict:
               "локальный whisper — на Linux он ставится обязательно, им же "
               "расшифровываются голосовые из бота")
     return {"available": False,
+            "installed": False,
             "how": "",
             "why": "SMLTLK — приложение строки меню macOS, здесь оно не запускается",
             "replacement": f"{zamena}; дальше текст идёт в voice-to-brief как обычно"}
