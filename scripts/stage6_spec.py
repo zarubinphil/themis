@@ -334,8 +334,12 @@ def check_sync():
 
 # ── 6. Дисциплина секрета и протокол сервера ────────────────────────────────
 SECRET_CONTRACT = """  Секрет и протокол сервера
-    Значение токена панели не встречается ни в одном отслеживаемом git файле
-    (проверка прибором по всему дереву, а не глазами).
+    Ни один отслеживаемый git файл не ПРИСВАИВАЕТ значение переменной секрета
+    (`THEMIS_PANEL_TOKEN=…`): в коде живёт только имя переменной, значение —
+    в ~/.secrets. Читать сам файл секретов приёмка не имеет права, поэтому
+    проверяется форма, а не совпадение со значением.
+    Журнал доступа (access.log) закрыт .gitignore: в нём адреса и время обращений,
+    репозиторий публичный.
     knowledge/server-protocol.md существует и называет поимённо: отдельного
     непривилегированного пользователя, порядок перезагрузки/отзыва/восстановления
     ключа, закрытие открытого DNS-резолвера, что результат режима 2 на сервере —
@@ -351,12 +355,21 @@ PROTOCOL_MUST = [("непривилегированн", "отдельный по
 
 def check_secret_and_protocol():
     fails = []
-    code, out, err = run(["-c", "import subprocess,sys;"
-                          "r=subprocess.run(['git','grep','-I','-l','--',"
-                          f"'{TOKEN}'],capture_output=True,text=True);"
-                          "sys.stdout.write(r.stdout)"])
-    if out.strip():
-        fails.append(("секрет", f"токен приёмки найден в отслеживаемых файлах: {out.strip()[:200]}"))
+    # Присваивание значения переменной секрета в отслеживаемом файле — утечка.
+    # Само ИМЯ переменной встречается в коде и в документации законно.
+    r = subprocess.run(["git", "grep", "-I", "-n", "-E",
+                        r"THEMIS_PANEL_TOKEN\s*=\s*[\"\'A-Za-z0-9]", "--",
+                        ".", ":(exclude)scripts/stage6_spec.py"],
+                       cwd=str(ROOT), capture_output=True, text=True)
+    hits = [l for l in r.stdout.splitlines()
+            if "os.environ" not in l and "get(" not in l]
+    if hits:
+        fails.append(("секрет", "значение секрета присвоено в отслеживаемом файле: "
+                                + hits[0][:200]))
+    gi = ROOT / ".gitignore"
+    if not gi.is_file() or "access.log" not in gi.read_text(encoding="utf-8"):
+        fails.append(("секрет", "access.log не закрыт .gitignore — журнал доступа "
+                                "с адресами уедет в публичный репозиторий"))
     doc = ROOT / "knowledge" / "server-protocol.md"
     if not doc.is_file():
         fails.append(("server-protocol.md", "протокола сервера нет. Контракт:\n" + SECRET_CONTRACT))
