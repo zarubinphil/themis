@@ -44,7 +44,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE_DIR = os.path.join(ROOT, ".autoloop")
 
 # Этапы, покрытые приборами и не трогающие данные дел. Всё прочее — руками.
-AUTONOMOUS_STAGES = {"1", "2", "5"}
+# Этап 9 «замкнуть контур» легализован 19.08.2026 ТОЛЬКО в приборной части:
+# правки scripts/, приёмок, гейтов и документации. Владельческая часть этапа
+# (вывоз 84 файлов кода из-под cases/, 28 practice_context.md, 31 лок Word)
+# необратимо трогает данные дел и живёт в knowledge/OWNER-TODO.md — цикл её
+# не исполняет, заморозка cases/ отпечатком это дополнительно сторожит.
+AUTONOMOUS_STAGES = {"1", "2", "5", "9"}
 REQUIRED_GUARDS = ("max_iterations", "max_money", "wall_clock_seconds", "no_progress_limit")
 GENERATOR_KINDS = {"generator", "builder"}
 REVIEWER_KINDS = {"reviewer", "critic"}
@@ -433,6 +438,10 @@ def selftest():
     assert broken(stage="3"), "миграция принята к автономному исполнению"
     assert broken(stage="7"), "непокрытый приборами этап принят к автономному исполнению"
     assert not broken(stage="1") and not broken(stage="2"), "разрешённый этап отвергнут"
+    # Пара этапа 9 (19.08.2026): приборная часть исполняется, а снятие сторожа
+    # не расползлось — соседний необратимый этап 3 отвергается по-прежнему.
+    assert not broken(stage="9"), "этап 9 (приборная часть) отвергнут"
+    assert broken(stage="3"), "легализация этапа 9 сняла сторожа с этапа 3"
 
     # generator ≠ verifier
     c = json.loads(json.dumps(base))
