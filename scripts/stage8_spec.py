@@ -153,7 +153,12 @@ class FakeTelegram:
             def _rabota(self):
                 put = self.path.split("?")[0]
                 srv.paths.append(put)
-                if f"/bot{FAKE_TOKEN}" not in put and f"/file/bot{FAKE_TOKEN}" not in put:
+                # Токен сверяется ЦЕЛИКОМ отдельным сегментом пути. Проверка «верный
+                # токен встречается в строке» пропускала «…-nevernyy»: приписанный
+                # хвост её не ломал, и проба на отказ доступа ничего не проверяла.
+                chasti = put.strip("/").split("/")
+                nesu = chasti[1] if chasti[:1] == ["file"] else (chasti[0] if chasti else "")
+                if nesu != f"bot{FAKE_TOKEN}":
                     srv.bad_token += 1
                     return self._otvet({"ok": False, "description": "Unauthorized"}, 401)
                 metod = put.rsplit("/", 1)[-1]
@@ -390,11 +395,16 @@ def check_access():
 
 # ── 3. Речь: корпус исходящих и сторож на выходе ────────────────────────────
 RECH_CONTRACT = """  scripts/themis_bot.py — что бот вообще умеет сказать.
-    --templates --json        {"fixture": {...}, "templates": [{"name","text"}, ...]}
-                              Каждый шаблон отрендерен НА ХУДШИХ данных: в fixture лежат
+    --templates --json        {"fixture": {"pd": {...}, "safe": {...}},
+                               "templates": [{"name","text"}, ...]}
+                              Каждый шаблон отрендерен НА ХУДШИХ данных: в fixture.pd лежат
                               ФИО, номер дела, ИНН, сумма и адрес, и они поданы шаблонам
-                              на вход. Ни одно значение fixture не смеет появиться в тексте:
-                              бот — пульт, а не витрина дела. Обязательные имена шаблонов:
+                              на вход. Ни одно значение fixture.pd не смеет появиться
+                              в тексте: бот — пульт, а не витрина дела. В fixture.safe —
+                              то, что бот называть обязан (дата, время, счёт дел, ссылка);
+                              приёмка сама проверяет, что объявленное безопасным
+                              действительно безопасно, иначе объявлением можно обелить
+                              что угодно. Обязательные имена шаблонов:
                               start, hearing, deadline, doc_ready, voice_ok, error.
                               Шаблон start объясняет владельцу границу тайны: называет
                               Telegram и говорит, что документ забирается по ссылке.
@@ -427,7 +437,8 @@ def check_rech():
                                           f"{(out + err).strip()[:250]}")]
     try:
         d = json.loads(out)
-        fixture = d["fixture"]
+        pd = d["fixture"]["pd"]
+        safe = d["fixture"]["safe"]
         shablony = {t["name"]: t["text"] for t in d["templates"]}
     except (ValueError, KeyError, TypeError) as e:
         return fails + [("themis_bot.py", f"--templates --json не разобран ({e}): {out[:200]}")]
@@ -435,13 +446,25 @@ def check_rech():
     for name in ("start", "hearing", "deadline", "doc_ready", "voice_ok", "error"):
         if name not in shablony:
             fails.append(("themis_bot.py", f"нет обязательного шаблона «{name}»"))
-    if len(fixture) < 4:
-        fails.append(("themis_bot.py", f"fixture из {len(fixture)} значений — худший случай "
+    if len(pd) < 4:
+        fails.append(("themis_bot.py", f"fixture.pd из {len(pd)} значений — худший случай "
                                        "обязан нести ФИО, номер дела, ИНН, сумму и адрес"))
     ves = "\n".join(shablony.values())
-    for klyuch, znach in fixture.items():
+    for klyuch, znach in pd.items():
         if znach and str(znach) in ves:
-            fails.append(("themis_bot.py", f"значение fixture «{klyuch}» ушло бы в Telegram"))
+            fails.append(("themis_bot.py", f"значение fixture.pd «{klyuch}» ушло бы в Telegram"))
+    # Объявление «это безопасно» проверяется, а не принимается на веру.
+    with tempfile.TemporaryDirectory() as td_safe:
+        f = Path(td_safe) / "safe.txt"
+        f.write_text("\n".join(str(v) for v in safe.values()), encoding="utf-8")
+        code_s, out_s, err_s = run([tool("pii_gate.py"), "--residual", str(f)])
+        if code_s != 0:
+            fails.append(("themis_bot.py", "в fixture.safe объявлено безопасным то, что "
+                                           f"pii_gate считает ПД: {(out_s + err_s)[:150]}"))
+    for klyuch, znach in safe.items():
+        if DENGI.search(str(znach)) or NOMER_DELA.search(str(znach)):
+            fails.append(("themis_bot.py", f"fixture.safe «{klyuch}» объявлено безопасным, "
+                                           "а это сумма либо номер дела"))
     if DENGI.search(ves):
         fails.append(("themis_bot.py", f"в исходящем тексте сумма денег: "
                                        f"{DENGI.search(ves).group(0)!r}"))
