@@ -35,6 +35,7 @@ ORIGINAL_EXT = {"pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "rtf", "odt"
 # Что принимаем: результат извлечения и служебные выжимки.
 TEXT_EXT = {"md", "txt", "json", "csv", "yaml", "yml"}
 MAX_BYTES = 20 * 1024 * 1024      # выжимка дела столько не весит; больше — повод посмотреть
+MAX_DEPTH = 12                    # cases/клиент/дело/.agent/context/... — глубже незачем
 
 
 def _otkaz(why: str) -> int:
@@ -47,9 +48,18 @@ def accept(queue: Path, src: Path, rel: str) -> int:
     if not queue.is_dir():
         return _otkaz(f"очереди нет: {queue}")
 
-    # 1. Путь назначения обязан остаться внутри очереди.
+    # 1. Путь назначения обязан остаться внутри очереди и быть обычным путём.
     if rel.startswith("/") or rel.startswith("~"):
         return _otkaz(f"абсолютный путь назначения: {rel}")
+    if "\\" in rel:
+        # На сервере обратный слеш — обычный символ имени, и файл остаётся внутри
+        # очереди. Но на клиенте другой платформы то же имя читается как каталоги.
+        return _otkaz(f"обратные слеши в пути: {rel}")
+    if any(ord(c) < 32 for c in rel):
+        return _otkaz("управляющие символы в пути назначения")
+    if len(Path(rel).parts) > MAX_DEPTH:
+        return _otkaz(f"путь в {len(Path(rel).parts)} сегментов — глубже {MAX_DEPTH} "
+                      "выжимки не лежат")
     dst = (queue / rel).resolve()
     if queue not in dst.parents:
         return _otkaz(f"путь ведёт вне очереди: {rel}")
@@ -71,6 +81,10 @@ def accept(queue: Path, src: Path, rel: str) -> int:
                           f"({', '.join(sorted(TEXT_EXT))})")
 
     size = src.stat().st_size
+    if size == 0:
+        # Пустая выжимка поверх целой стирает содержимое на сервере, и выглядит
+        # это как обычная синхронизация. Обрезанный экстракт отправляют повторно.
+        return _otkaz(f"{src.name}: файл пуст — синхронизировать нечего")
     if size > MAX_BYTES:
         return _otkaz(f"{size / 1024 / 1024:.1f} МБ — больше потолка выжимки "
                       f"({MAX_BYTES // 1024 // 1024} МБ)")
@@ -114,6 +128,14 @@ def selftest() -> int:
         assert not (td / "beglec.md").exists(), "запись состоялась вне очереди"
         left = sorted(p.relative_to(q).as_posix() for p in q.rglob("*") if p.is_file())
         assert left == ["delo/karta.md"], f"в очереди лишнее: {left}"
+
+        pusto = td / "pusto.md"
+        pusto.write_bytes(b"")
+        assert accept(q, pusto, "delo/karta.md") == 1, "пустой файл принят поверх целого"
+        assert (q / "delo" / "karta.md").read_text(encoding="utf-8").startswith("#"), \
+            "принятый ранее текст затёрт пустым"
+        assert accept(q, good, "a\\b.md") == 1, "обратные слеши приняты"
+        assert accept(q, good, "/".join(["a"] * 300) + "/k.md") == 1, "путь-бомба принят"
 
         big = td / "big.md"
         big.write_text("я" * (MAX_BYTES + 1), encoding="utf-8")
