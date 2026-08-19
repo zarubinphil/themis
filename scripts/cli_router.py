@@ -11,6 +11,13 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_REGISTRY = HERE / "cli_registry.json"
+# Харнесс и то, что делает его харнессом. Оверлей вправе подкрутить model/effort
+# claude, но не вправе пересадить его на другой бинарник: pd-роль кончается
+# claude, подмена харнесса запрещена (инвариант этапа 7). Иначе строка
+# `{"claude": {"invoke": [...]}}` в ~/.themis/ уводит адвокатскую тайну на чужой
+# бинарник — доказано пробой скептика 19.08.2026.
+HARNESS = "claude"
+HARNESS_LOCKED = ("invoke", "probe")
 PD_ROLES = {
     "case-mapper", "case-reconciler", "pdf-reader", "image-reader", "docx-reader",
     "inbox-triage", "doc-drafter", "doc-reviewer", "hearing-prep", "archivist",
@@ -37,7 +44,12 @@ def load_registry(path: Path) -> dict:
     if not isinstance(base, dict) or not isinstance(extra, dict):
         raise ValueError("реестр и оверлей должны быть объектами")
     for name, entry in extra.items():
-        base[name] = {**base.get(name, {}), **entry}
+        merged = {**base.get(name, {}), **entry}
+        if name == HARNESS:
+            for key in HARNESS_LOCKED:
+                if key in base.get(name, {}):
+                    merged[key] = base[name][key]   # харнесс не пересаживается оверлеем
+        base[name] = merged
     return base
 
 
@@ -91,10 +103,38 @@ def decide(role: str, registry: dict, cache: str | None) -> dict:
 
 
 def selftest() -> int:
+    import tempfile
     assert role_class("case-mapper") == "pd"
     assert role_class("hunter-leaf") == "text"
     assert role_class("not-described") == "pd", "неизвестная роль не выходит за границу"
-    print("selftest пройден: классы ролей fail-closed")
+
+    # Оверлей ~/.themis/ не пересаживает харнесс: invoke/probe claude берутся из базы,
+    # что бы ни лежало в пользовательском слое (проба скептика 19.08.2026).
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        base = td / "reg.json"
+        base.write_text(json.dumps({"claude": {
+            "probe": ["real-probe"], "invoke": ["real-claude"],
+            "model": "opus", "effort": "max",
+            "data_classes": ["pd", "text", "public", "infra"]}}), encoding="utf-8")
+        home = td / "home"
+        (home / ".themis").mkdir(parents=True)
+        (home / ".themis" / "cli_registry.json").write_text(json.dumps({
+            "claude": {"invoke": ["evil"], "probe": ["evil"], "effort": "low"}}),
+            encoding="utf-8")
+        old = os.environ.get("HOME")
+        os.environ["HOME"] = str(home)
+        try:
+            reg = load_registry(base)
+        finally:
+            if old is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = old
+        assert reg["claude"]["invoke"] == ["real-claude"], "оверлей пересадил invoke харнесса"
+        assert reg["claude"]["probe"] == ["real-probe"], "оверлей пересадил probe харнесса"
+        assert reg["claude"]["effort"] == "low", "оверлей не смог подкрутить effort харнесса"
+    print("selftest пройден: классы ролей fail-closed, харнесс не пересаживается оверлеем")
     return 0
 
 
