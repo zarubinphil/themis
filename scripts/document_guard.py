@@ -13,6 +13,11 @@
   документе и БЕЗУСЛОВНО в нижнем колонтитуле.
 Плюс: текст .docx совпадает с .md, приложения пронумерованы сквозно и каждое
 упомянуто в тексте, запрещенная буква «ё», даты в формате ДД.ММ.ГГГГ.
+Плюс (этап 9.8, требование владельца): денежная сумма пишется цифрами и тут
+же прописью в КРУГЛЫХ скобках — «1 000 (одна тысяча) рублей» — и пропись
+обязана СОВПАДАТЬ с числом (сверяет `scripts/propis.py`, свой конвертер
+числительных). Прописи требует только сумма денег: даты, статьи, номера дел,
+ИНН, проценты и листы дела её не требуют.
 
     document_guard.py ДОКУМЕНТ.docx [--md ДОКУМЕНТ.md] [--l3]
     document_guard.py --selftest
@@ -204,6 +209,58 @@ def check_docx(path: str, l3: bool = False, dogovor: bool = False) -> list[str]:
     return problems
 
 
+# Денежная сумма: число (пробелы/неразрывные как разряды, запятая — копейки),
+# затем опционально пропись в круглых скобках, затем валюта. Якорь — слово
+# валюты: без него даты, статьи, номера дел, ИНН, ставки и листы дела сюда
+# не попадают, и правильно — прописи требует только сумма денег.
+_MONEY_RE = re.compile(
+    r"(?P<num>\d[\d\s]*\d(?:,\d{1,2})?|\d(?:,\d{1,2})?)"
+    r"(?:\s*\((?P<propis>[^()]*)\))?"
+    r"\s+(?P<cur>руб(?:\.|л[а-я]*)|коп(?:\.|е[а-я]*))\b",
+    re.I)
+
+
+def check_money_propis(text: str, where: str) -> list[str]:
+    """Денежная сумма обязана нести пропись в круглых скобках, и пропись обязана
+    совпадать с числом: «1 000 (сто тысяч) рублей» глазами не ловится, для того
+    и прибор. Конвертер — свой `scripts/propis.py`; недоступен — fail-closed,
+    непроверенный документ чистым не считается."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import propis as _propis
+    except ImportError:
+        return [f"{where}: scripts/propis.py недоступен — совпадение прописи "
+                f"с числом НЕ проверено (fail-closed)"]
+    problems = []
+    for m in _MONEY_RE.finditer(text):
+        num_raw = m.group("num")
+        int_str = re.sub(r"\s", "", num_raw).split(",")[0]
+        kop_str = num_raw.split(",")[1] if "," in num_raw else None
+        # «рублей 00 копеек» — нулевые копейки цифрами это обиход, не сумма.
+        if int(int_str) == 0:
+            continue
+        cur = m.group("cur")
+        words = m.group("propis")
+        if words is None:
+            problems.append(f"{where}: сумма {num_raw} {cur} без прописи в "
+                            f"круглых скобках — денежная сумма пишется цифрами "
+                            f"и прописью: «{num_raw} ({_propis.propis(int(int_str))}) {cur}»")
+            continue
+        expected = _propis.propis(int(int_str))
+        norm = re.sub(r"\s+", " ", words.strip().lower())
+        if kop_str is None or int(kop_str) == 0:
+            ok = norm == expected
+        else:
+            # Копейки: «одна тысяча двести тридцать четыре рубля пятьдесят
+            # шесть копеек» — сверяем обе части внутри одних скобок.
+            ok = norm.startswith(expected) and \
+                _propis.propis(int(kop_str)) in norm
+        if not ok:
+            problems.append(f"{where}: пропись «{words.strip()}» НЕ совпадает "
+                            f"с числом {num_raw} — ожидалось «{expected}»")
+    return problems
+
+
 def check_text(text: str, where: str, dogovor: bool = False) -> list[str]:
     problems = []
     yo = len(re.findall(r"[ёЁ]", text))
@@ -239,6 +296,7 @@ def check_text(text: str, where: str, dogovor: bool = False) -> list[str]:
     if blanks and not dogovor:
         problems.append(f"{where}: подчеркнутых пропусков {blanks} — в процессуальном "
                         "документе это незаполненное поле; если это договор, гнать с --dogovor")
+    problems += check_money_propis(text, where)
     return problems
 
 
@@ -546,6 +604,28 @@ def selftest() -> int:
          any("квадратные скобки" in p for p in check_text("(ст. 617 ГК РФ) [ст. 621 ГК РФ]", "t"))),
         ("круглые скобки претензий не вызывают",
          check_text("(ст. 617 ГК РФ)", "t") == []),
+        # Пропись денежной суммы (этап 9.8): обе оси — сумма без прописи и
+        # несовпадение ловятся, верная пропись и обиход молчат.
+        ("сумма без прописи поймана",
+         any("без прописи" in p for p in check_text(
+             "Прошу взыскать с ответчика 100 000 рублей неустойки (ст. 330 ГК РФ).", "t"))),
+        ("несовпадающая пропись поймана — «1 000 (сто тысяч)» глазами не ловится",
+         any("НЕ совпадает" in p for p in check_text(
+             "Прошу взыскать 1 000 (сто тысяч) рублей неустойки.", "t"))),
+        ("верная пропись проходит",
+         check_text("Прошу взыскать 1 000 (одна тысяча) рублей неустойки "
+                    "(ст. 330 ГК РФ).", "t") == []),
+        ("пропись с копейками проходит",
+         not any("пропис" in p or "совпадает" in p for p in check_text(
+             "Прошу взыскать 1 234,56 (одна тысяча двести тридцать четыре рубля "
+             "пятьдесят шесть копеек).", "t"))),
+        ("нулевые копейки цифрами — обиход, не нарушение",
+         not any("пропис" in p for p in check_text(
+             "Прошу взыскать 5 000 (пять тысяч) рублей 00 копеек.", "t"))),
+        ("даты, статьи, номера дел, ИНН, ставки и листы прописи НЕ требуют",
+         check_text("Заседание назначено на 21.08.2026 (ст. 333 ГК РФ, п. 71) "
+                    "по делу № А65-123/2026, ИНН 1655021805, ставка 7,5 % "
+                    "годовых, лист дела 82.", "t") == []),
     ]
     for name, ok in checks:
         print(f"  {'✓' if ok else '✗'} {name}")
@@ -587,11 +667,13 @@ def main() -> int:
         problems += check_md_vs_docx(a.md, a.docx)
         # Источник правят руками чаще, чем сборку: скобки ловим и в .md,
         # иначе они переживут пересборку и всплывут в следующей редакции.
-        md_square = len(re.findall(r"[\[\]]",
-                                   open(a.md, encoding="utf-8").read()))
+        md_text = open(a.md, encoding="utf-8").read()
+        md_square = len(re.findall(r"[\[\]]", md_text))
         if md_square:
             problems.append(f"{os.path.basename(a.md)}: квадратные скобки — "
                             f"{md_square} шт. Ссылки и вставки только в круглых")
+        # .md уходит доверителю тем же документом: ось прописи общая с .docx.
+        problems += check_money_propis(md_text, os.path.basename(a.md))
 
     if not problems:
         print(f"✓ {os.path.basename(a.docx)}: формат и согласованность в порядке")
