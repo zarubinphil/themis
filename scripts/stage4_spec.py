@@ -126,6 +126,15 @@ def check_py_under_cases():
           "python3 -c \"open('" + c + "/g.py','w').write('x')\""}}, 2),
         ("touch заметки .md в деле не трогается",
          {"tool_name": "Bash", "tool_input": {"command": "touch " + c + "/.agent/context/_working/n.md"}}, 0),
+        # Второй круг пробы: правка УЖЕ ЛЕЖАЩЕГО генератора мимо запрета на запись,
+        # и въезд документа в слой человека командой в обход маркеров конвейера.
+        ("sed -i правит генератор в деле",
+         {"tool_name": "Bash", "tool_input": {"command": "sed -i '' s/a/b/ " + c + "/gen.py"}}, 2),
+        ("документ заезжает в GOTOVO мимо маркеров",
+         {"tool_name": "Bash", "tool_input": {"command": "cp /tmp/isk.docx " + c + "/GOTOVO/isk.docx"}}, 2),
+        ("рабочий файл кухни командой пишется",
+         {"tool_name": "Bash", "tool_input": {"command":
+          "cp /tmp/log.md " + c + "/.agent/drafts/_working/review_log.md"}}, 0),
     ])
 
 
