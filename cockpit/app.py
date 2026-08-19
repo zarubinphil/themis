@@ -72,6 +72,27 @@ COOKIE_NAME = "X-Themis-Token"
 MUTATING = ("/api/task", "/api/run", "/api/new-case", "/api/learn-redline",
             "/api/open", "/api/upload")
 _HITS: dict = {}
+# Адрес клиента — сокет, а не заголовок. За обратным прокси uvicorn подставляет
+# X-Forwarded-For в scope, и заголовок начинает выглядеть правдой: клиент меняет
+# фальшивый адрес на каждом запросе и получает НОВОЕ ведро лимита, а в журнале
+# остаётся выдуманный след. Доверяем заголовку только когда прокси назван явно
+# (THEMIS_TRUSTED_PROXY); иначе заявленный адрес помечается и делит одно ведро.
+TRUSTED_PROXY = (os.environ.get("THEMIS_TRUSTED_PROXY") or "").strip()
+
+
+def _client_of(request) -> str:
+    peer = request.client.host if request.client else "?"
+    zayavlen = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    if not zayavlen or TRUSTED_PROXY:
+        return peer
+    return f"{zayavlen}(заявлен)"
+
+
+def _rate_key(request) -> str:
+    """Ключ ведра. Непроверяемый адрес — одно общее ведро на всех: подделка
+    заголовка не должна умножать лимит."""
+    client = _client_of(request)
+    return "заявленные" if client.endswith("(заявлен)") else client
 
 
 def _rate_ok(client: str) -> bool:
@@ -103,7 +124,7 @@ def _audit(method: str, path: str, client: str, dopusk: str) -> None:
 async def strazh(request, call_next):
     path = request.url.path
     mutating = any(path.startswith(p) for p in MUTATING)
-    client = request.client.host if request.client else "?"
+    client = _client_of(request)
     if PANEL_TOKEN and path.startswith("/api/"):
         given = (request.headers.get("x-themis-token")
                  or request.cookies.get(COOKIE_NAME) or "")
@@ -111,7 +132,7 @@ async def strazh(request, call_next):
             _audit(request.method, path, client, "401")
             return JSONResponse({"ok": False, "error": "нужен токен панели"}, status_code=401)
     if mutating:
-        if not _rate_ok(client):
+        if not _rate_ok(_rate_key(request)):
             _audit(request.method, path, client, "429")
             return JSONResponse({"ok": False, "error": "слишком часто, подождите минуту"},
                                 status_code=429)
