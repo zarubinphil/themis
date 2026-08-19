@@ -114,6 +114,18 @@ def check_py_under_cases():
         ("рабочая заметка .md в кухне пишется",
          {"tool_name": "Write", "tool_input": {"file_path": c + "/.agent/context/_working/note.md",
                                                "content": "x"}}, 0),
+        # Враждебная проба 19.08.2026: формы записи, которых не было в первом
+        # контракте. Каждая найдена рабочей — то есть сторож их пропускал.
+        ("heredoc с редиректом ПОСЛЕ метки",
+         {"tool_name": "Bash", "tool_input": {"command":
+          "cat <<'EOF' > " + c + "/build.py\nprint(1)\nEOF"}}, 2),
+        ("touch .py в деле",
+         {"tool_name": "Bash", "tool_input": {"command": "touch " + c + "/gen.py"}}, 2),
+        ("интерпретатор пишет .py в дело одной строкой",
+         {"tool_name": "Bash", "tool_input": {"command":
+          "python3 -c \"open('" + c + "/g.py','w').write('x')\""}}, 2),
+        ("touch заметки .md в деле не трогается",
+         {"tool_name": "Bash", "tool_input": {"command": "touch " + c + "/.agent/context/_working/n.md"}}, 0),
     ])
 
 
@@ -157,7 +169,48 @@ def check_png_guard():
         ("сайдкар .txt рядом с рендером пишется",
          {"tool_name": "Write", "tool_input": {"file_path": c + "/.agent/context/_working/ocr/page_001.txt",
                                                "content": "x"}}, 0),
+        ("скачивание картинки прямо в дело",
+         {"tool_name": "Bash", "tool_input": {"command":
+          "curl -o " + c + "/.agent/context/_practice/foto.png https://example/1"}}, 2),
+        ("скачивание в /tmp не трогается",
+         {"tool_name": "Bash", "tool_input": {"command":
+          "curl -o /tmp/foto.png https://example/1"}}, 0),
+        ("чтение картинки дела интерпретатором разрешено",
+         {"tool_name": "Bash", "tool_input": {"command":
+          "python3 -c \"print(open('" + c + "/" + INTAKE + "/foto.png','rb').read()[:4])\""}}, 0),
     ])
+    # Перенос ЦЕЛОГО каталога рендеров — путь без расширения, по имени не судится.
+    # Сторож обязан посмотреть на диск: что в каталоге, то и приедет в дело.
+    with tempfile.TemporaryDirectory() as td:
+        full = Path(td) / "ocr_gotovyy"
+        full.mkdir()
+        (full / "page_001.png").write_bytes(b"R")
+        empty = Path(td) / "pusto"
+        empty.mkdir()
+        (empty / "zametka.md").write_text("текст", encoding="utf-8")
+        fails += probes("guard:png", [
+            ("перенос каталога с рендерами в дело",
+             {"tool_name": "Bash", "tool_input": {
+                 "command": f"mv {full} {c}/.agent/context/_working/ocr"}}, 2),
+            ("перенос каталога без растра и кода разрешён",
+             {"tool_name": "Bash", "tool_input": {
+                 "command": f"mv {empty} {c}/.agent/context/_working/zametki"}}, 0),
+        ])
+    # render_tail.py дорисовывает хвост скана и тоже принимает каталог аргументом:
+    # запрет, живущий только в markdown_extract, обходится соседним прибором.
+    if exists("render_tail.py"):
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td) / "obrazec.pdf"
+            src.write_bytes(b"%PDF-1.4\n%%EOF\n")
+            bad = (CASES / "ivanov-ivan" / "razdel-imushchestva-2026" / ".agent" / "context"
+                   / "_working" / "spec_tail")
+            code, out, err = run([tool("render_tail.py"), str(src), str(bad), "1"], timeout=120)
+            if code == 0:
+                fails.append(("render_tail.py", "каталог под cases/ принят (ждали отказ)"))
+            if bad.exists():
+                fails.append(("render_tail.py", f"каталог рендера под cases/ создан: {bad}"))
+            if "cases" not in (out + err).lower():
+                fails.append(("render_tail.py", f"отказ не назвал причину cases/: {(out + err).strip()[:200]}"))
     # markdown_extract обязан отказать до работы, если каталог рендера ведёт в дело
     with tempfile.TemporaryDirectory() as td:
         src = Path(td) / "obrazec.png"
