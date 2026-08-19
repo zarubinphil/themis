@@ -205,20 +205,55 @@ def validate(cfg):
 # ── Изоляция ролей ───────────────────────────────────────────────────────────
 
 def worktree_add(name, root=ROOT):
+    """Рабочая копия роли НА ВЕТКЕ `autoloop/<имя>` от текущего HEAD основного дерева.
+
+    Два эффекта сразу. Изоляция тайны: в worktree попадают только отслеживаемые
+    файлы, а `cases/` под .gitignore — чужой CLI (codex/kimi) материалов дел в своём
+    рабочем каталоге не видит вовсе. Перенос работы: роль коммитит в свою ветку,
+    координатор забирает её мержем (`worktree_merge`) — правки не теряются вместе
+    с detached HEAD, как было бы без ветки.
+    """
     path = os.path.join(STATE_DIR, "worktrees", name)
+    branch = f"autoloop/{name}"
+    code, head, _ = run(["git", "rev-parse", "HEAD"], cwd=root, timeout=60)
+    head = head.strip()
     if os.path.isdir(path):
+        # Итерация N+1 стартует от СВЕЖЕГО HEAD основного дерева, а не от вчерашнего:
+        # иначе роль чинит уже починенное и мерж возит конфликты.
+        run(["git", "reset", "--hard", "-q"], cwd=path, timeout=300)
+        run(["git", "clean", "-fdq"], cwd=path, timeout=300)
+        code, _, err = run(["git", "checkout", "-q", "-B", branch, head], cwd=path, timeout=300)
+        if code != 0:
+            raise RuntimeError(f"рабочая копия роли `{name}` не обновлена: {err.strip()[:200]}")
         return path
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    code, _, err = run(["git", "worktree", "add", "--detach", path, "HEAD"], cwd=root, timeout=300)
+    code, _, err = run(["git", "worktree", "add", "-B", branch, path, head],
+                       cwd=root, timeout=300)
     if code != 0:
         raise RuntimeError(f"рабочая копия для роли `{name}` не создана: {err.strip()[:200]}")
     return path
+
+
+def worktree_merge(name, root=ROOT):
+    """Забрать коммиты роли из её ветки в основное дерево. Конфликт — не катастрофа:
+    мерж откатывается, роль теряет итерацию, причина остаётся в журнале."""
+    branch = f"autoloop/{name}"
+    code, out, _ = run(["git", "rev-list", "--count", f"HEAD..{branch}"], cwd=root, timeout=60)
+    ahead = int(out.strip() or 0) if code == 0 else 0
+    if ahead == 0:
+        return True, 0          # роль ничего не закоммитила — мержить нечего
+    code, _, err = run(["git", "merge", "--no-edit", branch], cwd=root, timeout=300)
+    if code != 0:
+        run(["git", "merge", "--abort"], cwd=root, timeout=300)
+        return False, ahead
+    return True, ahead
 
 
 def worktree_remove(name, root=ROOT):
     path = os.path.join(STATE_DIR, "worktrees", name)
     run(["git", "worktree", "remove", "--force", path], cwd=root, timeout=300)
     shutil.rmtree(path, ignore_errors=True)
+    run(["git", "branch", "-D", f"autoloop/{name}"], cwd=root, timeout=60)
 
 
 # ── Задание роли: дайджест вверх, без бокового обмена ────────────────────────
@@ -356,6 +391,15 @@ def loop(cfg, root=ROOT, dry=False):
                 journal({"event": "role", "iteration": it, "role": role["name"],
                          "kind": role["kind"], "code": code, "cwd": cwd,
                          "tail": (out or err)[-800:]}, root)
+                if cwd != root:
+                    # Работа worktree-роли въезжает в основное дерево мержем её ветки.
+                    # Код роли != 0 — её коммитам не доверяем, ветка остаётся в журнале.
+                    if code == 0:
+                        merged, ahead = worktree_merge(role["name"], root)
+                    else:
+                        merged, ahead = False, -1
+                    journal({"event": "role_merge", "iteration": it, "role": role["name"],
+                             "merged": merged, "commits": ahead}, root)
             role_names.append(role["name"])
 
         code, out, _ = run(gate_argv, cwd=root, timeout=3600)
@@ -498,12 +542,65 @@ def selftest():
 
     assert env_fingerprint() == env_fingerprint(), "отпечаток окружения не воспроизводим"
 
+    # Worktree-роль: ветка, мерж в main, изоляция gitignored, конфликт не рушит main
+    with tempfile.TemporaryDirectory(prefix="autoloop-wt-") as tmp:
+        def g(*args, cwd=tmp):
+            return run(["git", "-c", "user.email=t@t", "-c", "user.name=t", *args], cwd=cwd)
+        g("init", "-q")
+        with open(os.path.join(tmp, ".gitignore"), "w", encoding="utf-8") as f:
+            f.write("cases/\n.autoloop/\n")
+        os.makedirs(os.path.join(tmp, "cases", "taynoe-delo"))
+        with open(os.path.join(tmp, "cases", "taynoe-delo", "x.md"), "w", encoding="utf-8") as f:
+            f.write("персональные данные\n")
+        with open(os.path.join(tmp, "a.txt"), "w", encoding="utf-8") as f:
+            f.write("база\n")
+        g("add", ".gitignore", "a.txt")
+        g("commit", "-qm", "start")
+
+        global STATE_DIR
+        saved_state = STATE_DIR
+        STATE_DIR = os.path.join(tmp, ".autoloop")
+        try:
+            wt = worktree_add("proba", tmp)
+            assert not os.path.isdir(os.path.join(wt, "cases")), \
+                "gitignored cases/ ПОПАЛ в worktree — чужой CLI увидит материалы дел"
+            with open(os.path.join(wt, "b.txt"), "w", encoding="utf-8") as f:
+                f.write("работа роли\n")
+            g("add", "b.txt", cwd=wt)
+            g("commit", "-qm", "правка роли", cwd=wt)
+            ok, ahead = worktree_merge("proba", tmp)
+            assert ok and ahead == 1, f"коммит роли не въехал в main: {ok}, {ahead}"
+            assert os.path.isfile(os.path.join(tmp, "b.txt")), \
+                "мерж прошёл, а файла роли в main нет"
+            # Итерация N+1: worktree обновляется до нового HEAD main
+            wt = worktree_add("proba", tmp)
+            assert os.path.isfile(os.path.join(wt, "b.txt")), \
+                "worktree второй итерации отстал от HEAD — роль чинит уже починенное"
+            # Конфликт: main и ветка правят один файл — мерж откатывается, main цел
+            with open(os.path.join(wt, "a.txt"), "w", encoding="utf-8") as f:
+                f.write("версия роли\n")
+            g("add", "a.txt", cwd=wt)
+            g("commit", "-qm", "роль правит a", cwd=wt)
+            with open(os.path.join(tmp, "a.txt"), "w", encoding="utf-8") as f:
+                f.write("версия main\n")
+            g("add", "a.txt")
+            g("commit", "-qm", "main правит a")
+            ok, _ = worktree_merge("proba", tmp)
+            assert not ok, "конфликтный мерж объявлен успешным"
+            assert not os.path.isfile(os.path.join(tmp, ".git", "MERGE_HEAD")), \
+                "после отказа мержа main остался в состоянии конфликта"
+            assert open(os.path.join(tmp, "a.txt"), encoding="utf-8").read() == "версия main\n", \
+                "конфликтный мерж затёр main"
+            worktree_remove("proba", tmp)
+        finally:
+            STATE_DIR = saved_state
+
     # Человеческий гейт только у координатора: роль не должна дотянуться до терминала
     code, out, _ = run(["bash", "-c", "read -r x && echo ПОЛУЧИЛ:$x || echo STDIN-ЗАКРЫТ"],
                        cwd=ROOT, timeout=30)
     assert "STDIN-ЗАКРЫТ" in out, f"роль дотянулась до stdin владельца: {out!r}"
     print("selftest: четыре сторожа, generator≠verifier, рельсы этапов, запрет установки, "
-          "изоляция, дайджест вверх, заморозка cases/, детект спина — ок")
+          "изоляция, ветка+мерж worktree-ролей, дайджест вверх, заморозка cases/, детект спина — ок")
     return 0
 
 
