@@ -23,6 +23,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -58,12 +59,13 @@ def journal_path(md):
 def scan(md):
     """Гейт humanizer-legal по `.md`. Возвращает список сработавших блокирующих категорий.
 
-    Скрипта нет → пустой список и громкое предупреждение: молча считать документ
-    проверенным нельзя, но и держать всю систему заложником одного скилла тоже.
+    Скрипта нет → `None` (fail-closed), не пустой список. Скилл живёт вне репозитория
+    (`~/.claude/skills/`) — на чужой машине его может не быть, и пустой список
+    неотличим от «прогнали и чисто»: анти-AI-гейт молча пропускал бы всё (этап 9).
     """
     if not SCAN.is_file():
-        print(f"ВНИМАНИЕ: {SCAN} не найден — humanizer-legal НЕ проверен", file=sys.stderr)
-        return []
+        print(f"⛔ {SCAN} не найден — humanizer-legal не проверен, fail-closed", file=sys.stderr)
+        return None
     try:
         p = subprocess.run(["bash", str(SCAN), str(md)], capture_output=True,
                            text=True, timeout=300, stdin=subprocess.DEVNULL)
@@ -74,7 +76,42 @@ def scan(md):
     return [c for c in BLOCKING if c in out]
 
 
+# Сумма, за ней (необязательно) круглые скобки, за ними слово валюты. Пропись
+# обязана стоять МЕЖДУ числом и словом валюты: «1 000 (одна тысяча) рублей» —
+# решение владельца 19.08.2026. Даты, номера статей/дел/страниц, проценты и
+# ИНН — не деньги, этот шаблон их не задевает (требует слова «рубл*»/«коп*»).
+_MONEY_RE = re.compile(
+    r"(\d{1,3}(?:[  ]\d{3})*(?:[.,]\d+)?)\s*(\([^()]*\))?\s*(рубл\w*|руб\.|коп\w*|коп\.)")
+
+
+def format_problems(md):
+    """Скобки и наличие прописи — минимальный формат перед финальным вердиктом.
+
+    Точное СОВПАДЕНИЕ прописи с числом — отдельная, более глубокая проверка
+    scripts/document_guard.py (этап 9.8); здесь — что расшифровка вообще есть,
+    без неё документ уже брак и до сверки дело можно не доводить.
+    """
+    text = Path(md).read_text(encoding="utf-8", errors="replace")
+    problems = []
+    square = len(re.findall(r"[\[\]]", text))
+    if square:
+        problems.append(f"квадратные скобки — {square} шт. (в практике проекта — "
+                        "только круглые)")
+    for num, parens, currency in _MONEY_RE.findall(text):
+        if not parens or not re.search(r"[а-яёА-ЯЁ]", parens):
+            problems.append(f"сумма «{num} {currency}» без прописи в круглых скобках "
+                            f"между числом и словом валюты")
+    return problems
+
+
 def record(md, verdict, round_no):
+    if verdict == READY:
+        problems = format_problems(md)
+        if problems:
+            print("⛔ ВЕРДИКТ «ГОТОВ К ПОДАЧЕ» НЕ ЗАПИСАН — брак формата:", file=sys.stderr)
+            for p in problems:
+                print(f"   · {p}", file=sys.stderr)
+            return None
     md = Path(md)
     entry = {
         "document": md.name,
@@ -169,15 +206,42 @@ def selftest():
         assert len(history(md)) == 3, history(md)   # r1 правки, r2 и r3 готов
         assert check(d / "net.md"), "несуществующий файл признан готовым"
 
-        # Гейт humanizer не должен молча считать документ чистым при отсутствии скрипта
+        # Гейт humanizer — fail-closed: нет скрипта, значит СТОП, а не тихий пропуск.
         global SCAN
         saved, SCAN = SCAN, Path(tmp) / "net-skripta.sh"
         try:
-            assert scan(md) == [], "отсутствие скрипта дало ложные блокировки"
+            assert scan(md) is None, "отсутствие скрипта не дало fail-closed сигнала"
         finally:
             SCAN = saved
+
+        # Формат перед финальным вердиктом: скобки и наличие прописи.
+        chisto = d / "chisto.md"
+        chisto.write_text("# Ходатайство\n\nПрошу суд отложить заседание "
+                          "(ст. 158 АПК РФ).\n", encoding="utf-8")
+        assert format_problems(chisto) == [], format_problems(chisto)
+        assert record(chisto, READY, 1) is not None, "чистый документ не записан"
+
+        skobki = d / "skobki.md"
+        skobki.write_text("# Ходатайство\n\nПрошу суд [указать дату] отложить.\n",
+                          encoding="utf-8")
+        assert format_problems(skobki), "квадратные скобки не пойманы"
+        assert record(skobki, READY, 1) is None, "брак со скобками получил вердикт"
+        assert record(skobki, "ТРЕБУЕТ ПРАВОК", 1) is not None, \
+            "рабочий вердикт заблокирован форматным гейтом"
+
+        summa = d / "summa.md"
+        summa.write_text("# Заявление\n\nВзыскать 100 000 рублей неустойки "
+                         "(ст. 330 ГК РФ).\n", encoding="utf-8")
+        assert format_problems(summa), "сумма без прописи не поймана"
+        assert record(summa, READY, 1) is None, "сумма без прописи получила вердикт"
+
+        propisano = d / "propisano.md"
+        propisano.write_text("# Заявление\n\nВзыскать 100 000 (сто тысяч) рублей "
+                             "неустойки (ст. 330 ГК РФ).\n", encoding="utf-8")
+        assert format_problems(propisano) == [], format_problems(propisano)
     print("selftest: журнал рядом с черновиком, отказ без вердикта, отказ на ТРЕБУЕТ ПРАВОК, "
-          "детект правки после одобрения, новый раунд, возврат к одобренному тексту — ок")
+          "детект правки после одобрения, новый раунд, возврат к одобренному тексту, "
+          "humanizer fail-closed, формат перед финальным вердиктом — ок")
     return 0
 
 
@@ -200,6 +264,10 @@ def main():
 
     if a.scan:
         blockers = scan(a.md)
+        if blockers is None:
+            print(f"❌ humanizer-legal: скрипт скилла не найден ({SCAN}) — проверка "
+                  "не выполнена, fail-closed. Поставить скилл humanizer-legal.")
+            return 1
         if blockers:
             print(f"❌ humanizer-legal: сработали блокирующие категории — {', '.join(blockers)}")
             print(f"   Прогнать скилл humanizer-legal по тексту и повторить.")
@@ -212,6 +280,8 @@ def main():
             print("--record требует --verdict", file=sys.stderr)
             return 2
         e = record(a.md, a.verdict, a.round)
+        if e is None:
+            return 1
         print(f"вердикт записан: {e['document']} r{e['round']} «{e['verdict']}» "
               f"отпечаток {e['sha256'][:12]}…")
         return 0

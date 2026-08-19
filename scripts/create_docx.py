@@ -956,8 +956,9 @@ class DocBuilder:
         версия; правки доверителя сравниваются именно с ней.
 
         Guard (урок 14.07.2026): если выданный файл отличается от baseline —
-        его правил доверитель; перезапись вслепую запрещена
-        (обход: THEMIS_FORCE_OVERWRITE=1).
+        его правил доверитель; перезапись вслепую запрещена безусловно
+        (этап 9: env-обход снят, сторож не должен уметь себя выключать
+        переменной, о которой claude_guard не знает).
         """
         import filecmp
         import os
@@ -990,7 +991,7 @@ class DocBuilder:
         # Вердикт Кони привязан к SHA-256 редакции .md. Собирать .docx в GOTOVO/
         # из неодобренной или изменённой после одобрения редакции запрещено:
         # прежде старое одобрение разрешало сборку любого последующего текста.
-        if _cp.READY in parts and os.environ.get("THEMIS_SKIP_VERDICT") != "1":
+        if _cp.READY in parts:
             import verdict as _v
             md = None
             for cand in ([_cp.drafts(case_root) / (p.stem + ".md")] if case_root else []):
@@ -1012,12 +1013,10 @@ class DocBuilder:
                 return
 
         if (is_case_doc and p.exists() and bfile.exists()
-                and not filecmp.cmp(p, bfile, shallow=False)
-                and os.environ.get("THEMIS_FORCE_OVERWRITE") != "1"):
+                and not filecmp.cmp(p, bfile, shallow=False)):
             print(f"СТОП, НЕ СОХРАНЕНО: {p} отличается от _baselines/ — "
                   f"вероятны правки доверителя, внесенные напрямую в файл. "
-                  f"Сначала redline-разбор («изучи мои правки»), "
-                  f"либо повторить с THEMIS_FORCE_OVERWRITE=1.")
+                  f"Сначала redline-разбор («изучи мои правки»).")
             return
 
         # Нумерация обязательна по ГОСТ Р 7.0.97 для документов 2+ страниц
@@ -1032,7 +1031,7 @@ class DocBuilder:
         # конвейера (тесты, разовые сборки) остаётся здесь как последний рубеж.
         if not is_case_doc:
             blockers = self._humanizer_gate()
-            if blockers and os.environ.get("THEMIS_SKIP_HUMANIZER") != "1":
+            if blockers:
                 print(f"СТОП, НЕ СОХРАНЕНО: документ не прошел humanizer-legal.\n"
                       f"  Сработали блокирующие категории: {', '.join(blockers)}.\n"
                       f"  Прогнать `python3 scripts/verdict.py ФАЙЛ.md --scan`, затем повторить.")

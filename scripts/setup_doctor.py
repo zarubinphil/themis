@@ -221,6 +221,24 @@ def check_corpus() -> list[dict]:
     return out
 
 
+HUMANIZER_SCAN = os.path.expanduser("~/.claude/skills/humanizer-legal/scripts/scan_legal.sh")
+
+
+def check_humanizer() -> dict:
+    """Гейт humanizer-legal (verdict.py --scan) работает fail-closed: нет скрипта —
+    вердикт «ГОТОВ К ПОДАЧЕ» не выдаётся вовсе ни на одном документе. Скилл живёт
+    вне репозитория (~/.claude/skills/) — свежий клон обязан узнать об этом здесь,
+    а не молчаливой деградацией на первом же документе (этап 9)."""
+    if os.path.isfile(HUMANIZER_SCAN):
+        return check("humanizer-legal (анти-AI гейт)", OK, "scan_legal.sh на месте")
+    return check(
+        "humanizer-legal (анти-AI гейт)", CRIT,
+        f"{HUMANIZER_SCAN} не найден — verdict.py --scan работает fail-closed и "
+        "блокирует вердикт «ГОТОВ К ПОДАЧЕ» на любом документе",
+        "поставить скилл humanizer-legal (у владельца — ~/.claude/skills/humanizer-legal/) "
+        "либо перенести scan_legal.sh на эту машину по тому же пути")
+
+
 def check_selftests() -> dict:
     """Проверки самих скриптов. Красный selftest на чистой машине — это дефект установки."""
     names = ["cite.py", "gosposhlina.py", "quality_gate.py", "document_guard.py",
@@ -372,6 +390,7 @@ def collect(offline: bool = False) -> dict:
     checks += check_corpus()
     checks += check_net(offline)
     checks.append(check_selftests())
+    checks.append(check_humanizer())
 
     crit = [c for c in checks if c["статус"] == CRIT]
     warn = [c for c in checks if c["статус"] == WARN]
@@ -459,7 +478,16 @@ def main() -> int:
 
 
 def selftest() -> int:
+    global HUMANIZER_SCAN
+    saved_scan = HUMANIZER_SCAN
+    HUMANIZER_SCAN = "/нет/такого/файла/scan_legal.sh"
+    humanizer_missing = check_humanizer()
+    HUMANIZER_SCAN = saved_scan
+
     checks = [
+        ("humanizer-legal без скрипта — КРИТИЧНО", humanizer_missing["статус"] == CRIT),
+        ("humanizer-legal без скрипта несёт команду починки",
+         bool(humanizer_missing["как починить"])),
         ("платформа опознаётся", platform_id() in ("darwin", "windows", "linux")),
         ("планировщик назван для каждой платформы",
          all("неизвестен" not in scheduler_of(p) for p in ("darwin", "windows", "linux"))),
