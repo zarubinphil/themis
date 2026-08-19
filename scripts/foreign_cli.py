@@ -48,6 +48,11 @@ SAFE_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 SECRET_RE = re.compile(r"THEMIS|TOKEN|SECRET|API_?KEY|PASSWORD|CREDENTIAL|ANTHROPIC|OPENAI",
                        re.I)
 OTKAZ_MARKERY = ("error:", "ошибка:", "rate limit", "quota", "not logged", "unauthorized")
+# Запрос уходит аргументом командной строки, а у аргумента есть предел ОС
+# (macOS ~1 МБ на всё). Упереться в него посреди прогона — молчаливый отказ
+# в бою; отказываем сразу и внятно. Правовой вопрос столько не весит: 200 КБ —
+# это уже не вопрос, а материалы дела, которым за границу процесса нельзя.
+MAX_PROMPT = 200 * 1024
 
 
 def _otkaz(why: str) -> int:
@@ -119,8 +124,17 @@ def zapisat_zhurnal(log: Path | None, provider: str, dlina: int, otpechatok: str
 
 def call(provider: str, prompt: Path, cmd=None, timeout: int = 300,
          out: Path | None = None, log: Path | None = None) -> int:
+    if prompt.is_symlink():
+        # За ссылкой может стоять что угодно, включая материал дела: решение
+        # о том, что уходит наружу, принимается по файлу, а не по указателю.
+        return _otkaz(f"файл запроса — симлинк ({prompt}); дать обычный файл")
     if not prompt.is_file():
         return _otkaz(f"файла запроса нет: {prompt}")
+    razmer = prompt.stat().st_size
+    if razmer > MAX_PROMPT:
+        return _otkaz(f"запрос велик: {razmer // 1024} КБ при пределе "
+                      f"{MAX_PROMPT // 1024} КБ — это уже материалы дела, "
+                      "а не правовой вопрос")
     argv = cmd if isinstance(cmd, list) else ([cmd] if cmd else None)
     if not argv:
         argv = {"codex": ["codex", "exec", "--skip-git-repo-check"],
@@ -130,7 +144,10 @@ def call(provider: str, prompt: Path, cmd=None, timeout: int = 300,
         return _otkaz(f"неизвестный провайдер {provider} и не задан --cmd")
 
     with tempfile.TemporaryDirectory(prefix="themis-foreign-") as td:
-        work = Path(td)
+        # Рабочий каталог — ВНУТРИ временного, чтобы и на уровень выше чужому CLI
+        # было видно только его: системный temp содержит десятки тысяч чужих записей.
+        work = Path(td) / "work"
+        work.mkdir()
         masked, why = obezlichit(prompt, work)
         if masked is None:
             zapisat_zhurnal(log, provider, 0, "", "отказ: обезличивание")
@@ -203,6 +220,18 @@ def selftest() -> int:
         log = td / "otpravki.log"
         os.environ["THEMIS_PROBA_SEKRET"] = "ne-dolzhen-utech"
         assert call("proba", pd, vidok, out=out, log=log) == 0, "герметичный вызов не прошёл"
+        sosedi = td / "sosedi.txt"
+        sosed = sh("sosed.sh", f'ls -A .. | wc -l > {sosedi}\necho "ответ"\n')
+        chistyy = td / "chistyy.txt"
+        chistyy.write_text("Применима ли ст. 333 ГК РФ к неустойке?\n", encoding="utf-8")
+        assert call("proba", chistyy, sosed) == 0
+        assert int(sosedi.read_text().strip()) <= 2, "выше рабочего каталога видно лишнее"
+        ogromnyy = td / "ogromnyy.txt"
+        ogromnyy.write_text("Вопрос про неустойку. " * 60000, encoding="utf-8")
+        assert call("proba", ogromnyy, vidok) == 1, "запрос сверх предела принят"
+        ssylka = td / "ssylka.txt"
+        ssylka.symlink_to(chistyy)
+        assert call("proba", ssylka, vidok) == 1, "симлинк принят как файл запроса"
         vid = vidok_out.read_text(encoding="utf-8")
         for utechka in ("Иванова", "771234567890", "А65-1234/2026"):
             assert utechka not in vid, f"за границу ушло «{utechka}»"
