@@ -192,6 +192,28 @@ def check_smltlk():
                 fails.append(("setup_doctor.py", f"{plat}: SMLTLK без замены — молчаливая деградация"))
     if SKILL.is_file() and "smltlk" not in SKILL.read_text(encoding="utf-8").lower():
         fails.append(("themis-setup", "скилл молчит про SMLTLK, хотя он штатный компонент"))
+    # Обещание «ставится тем же онбордингом» обязано иметь исполнителя. Установщик,
+    # не знающий про SMLTLK, превращает штатный компонент в слова: человек прочтёт,
+    # что он ставится, и не получит его.
+    ustanovshchik = ROOT / "install.sh"
+    if not ustanovshchik.is_file():
+        fails.append(("install.sh", "установщика нет, а скилл велит его запускать"))
+    else:
+        text = ustanovshchik.read_text(encoding="utf-8").lower()
+        if "smltlk" not in text:
+            fails.append(("install.sh", "установщик не знает про SMLTLK — обещание "
+                                        "«ставится тем же онбордингом» некому исполнить"))
+        elif "--with-smltlk" not in text:
+            fails.append(("install.sh", "шаг SMLTLK без явного согласия: сборка тянет Xcode "
+                                        "и ~500 МБ модели, молча этого делать нельзя"))
+    # Состояние компонента — факт с диска, а не обещание: доктор обязан сказать,
+    # установлен он или нет, и назвать команду установки.
+    code, d, err = doctor("darwin")
+    if d is not None:
+        s = d.get("smltlk") or {}
+        if "installed" not in s:
+            fails.append(("setup_doctor.py", "smltlk без поля installed — состояние "
+                                             "компонента не проверено, а пересказано"))
     return fails
 
 
