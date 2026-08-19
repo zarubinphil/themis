@@ -367,6 +367,12 @@ BRIEF_OK = """## БРИФ — типовое ходатайство             
 BRIEF_BAD = BRIEF_OK.replace("| 4 | doc-drafter | sonnet | 40k |", "| 4 | doc-drafter | opus | 40k |")
 BRIEF_NOLEVEL = "\n".join(l for l in BRIEF_OK.splitlines() if "КЛАССИФИКАЦИЯ" not in l)
 BRIEF_NOMODEL = BRIEF_OK.replace("| 4 | doc-drafter | sonnet | 40k |", "| 4 | doc-drafter |  | 40k |")
+# Бриф зовёт исполнителя как в чате — персоной или персоной с именем агента.
+# Политика, знающая только машинное имя, молча пропускает такую строку.
+BRIEF_PERSONA = BRIEF_OK.replace("| 4 | doc-drafter | sonnet | 40k |",
+                                 "| 4 | Сперанский | opus | 40k |")
+BRIEF_BOTH = BRIEF_OK.replace("| 4 | doc-drafter | sonnet | 40k |",
+                              "| 4 | Сперанский (doc-drafter) | opus | 40k |")
 
 
 def check_model_policy():
@@ -394,7 +400,9 @@ def check_model_policy():
                 ("ok.md", BRIEF_OK, 0, "верный бриф отвергнут"),
                 ("bad.md", BRIEF_BAD, 1, "Opus на L1 пропущен — пятикратная цена"),
                 ("nolevel.md", BRIEF_NOLEVEL, 1, "бриф без уровня принят (нужен fail-closed)"),
-                ("nomodel.md", BRIEF_NOMODEL, 1, "пустая колонка модели принята")):
+                ("nomodel.md", BRIEF_NOMODEL, 1, "пустая колонка модели принята"),
+                ("persona.md", BRIEF_PERSONA, 1, "Opus на L1 пропущен из-за имени персоны"),
+                ("both.md", BRIEF_BOTH, 1, "Opus на L1 пропущен при «персона (агент)»")):
             p = Path(td) / name
             p.write_text(text, encoding="utf-8")
             code, out, err = run([tool("model_policy.py"), "--brief", str(p)])
