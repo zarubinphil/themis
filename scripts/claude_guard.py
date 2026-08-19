@@ -143,13 +143,24 @@ CODE_EXT = ("py", "sh", "bash", "zsh")
 RASTER_EXT = ("png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp")
 
 
+def _service_dir(parts) -> bool:
+    """cases/_assets, cases/_templates, cases/_logs — служебное хозяйство системы,
+    а не дело. Там растр законен: `cases/_assets/подпись.png` — подпись владельца,
+    её читает sign_and_pdf.py. Правило рендеров туда не распространяется."""
+    i = parts.index("cases")
+    return len(parts) > i + 1 and parts[i + 1].startswith("_")
+
+
 def _cases_write_gate(paths) -> None:
     """Что нельзя класть под cases/. Пути — уже вычисленные цели записи."""
     for p in paths:
         norm = p.replace("\\", "/")
-        if "cases" not in norm.split("/"):
+        parts = norm.split("/")
+        if "cases" not in parts:
             continue
         ext = os.path.splitext(norm)[1].lower().lstrip(".")
+        if ext in RASTER_EXT and _service_dir(parts):
+            continue
         if ext in CODE_EXT:
             block(
                 f"БЛОК: код (.{ext}) внутри cases/ запрещён — там материалы дела, не программа. "
@@ -523,6 +534,9 @@ def selftest() -> int:
         ("запись интерпретатором в дело блокируется",
          run({"tool_name": "Bash", "tool_input": {
              "command": "python3 -c \"open('cases/klient/delo-2026/g.py','w').write('x')\""}}), 2),
+        ("подпись владельца в служебном cases/_assets пишется",
+         run({"tool_name": "Write", "tool_input": {
+             "file_path": "cases/_assets/podpis.png", "content": "x"}}), 0),
         ("чтение картинки дела интерпретатором пропускается",
          run({"tool_name": "Bash", "tool_input": {
              "command": "python3 -c \"print(open('cases/k/d/00_intake/f.png','rb').read()[:4])\""}}), 0),

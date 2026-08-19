@@ -37,6 +37,17 @@ INTAKE = "00_intake"          # неприкосновенная первичк�
 CACHE = Path(os.path.expanduser("~/.cache/legal_extract/case_renders"))
 
 
+def _service(p: Path, root: Path) -> bool:
+    """cases/_assets, cases/_templates, cases/_logs — хозяйство системы, не дело.
+    Подпись владельца (cases/_assets/подпись.png) вывозу не подлежит: её читает
+    sign_and_pdf.py, и вывоз молча сломал бы подписание документов."""
+    try:
+        first = p.relative_to(root).parts[0]
+    except ValueError:
+        return False
+    return first.startswith("_")
+
+
 def find_renders(root: Path) -> list:
     """Растровые файлы под корнем, кроме первички. Симлинки не трогаем: цель
     может лежать где угодно, а перенос ссылки выглядит как перенос файла."""
@@ -44,7 +55,7 @@ def find_renders(root: Path) -> list:
     for p in sorted(root.rglob("*")):
         if p.is_symlink() or not p.is_file():
             continue
-        if INTAKE in p.parts:
+        if INTAKE in p.parts or _service(p, root):
             continue
         if p.suffix.lower().lstrip(".") in RASTER:
             out.append(p)
@@ -116,6 +127,9 @@ def selftest() -> int:
         (work / "page_002.PNG").write_bytes(b"R2")       # регистр расширения не спасает
         (work / "page_001.txt").write_text("текст", encoding="utf-8")
         (intake / "dokazatelstvo.png").write_bytes(b"PERV")
+        assets = td / "cases" / "_assets"
+        assets.mkdir(parents=True)
+        (assets / "podpis.png").write_bytes(b"PODPIS")
         cache = td / "cache"
         man = td / "man.json"
 
@@ -126,6 +140,7 @@ def selftest() -> int:
         assert (work / "page_001.txt").is_file(), "сайдкар .txt пострадал"
         assert (intake / "dokazatelstvo.png").read_bytes() == b"PERV", "первичка тронута"
         assert man.is_file(), "манифест не записан"
+        assert (assets / "podpis.png").read_bytes() == b"PODPIS", "служебный _assets тронут"
 
         assert do_restore(man) == 0
         assert (work / "page_001.png").read_bytes() == b"R1", "откат не побайтовый"
