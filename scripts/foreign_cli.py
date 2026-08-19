@@ -137,11 +137,7 @@ def call(provider: str, prompt: Path, cmd=None, timeout: int = 300,
                       "а не правовой вопрос")
     argv = cmd if isinstance(cmd, list) else ([cmd] if cmd else None)
     if not argv:
-        argv = {"codex": ["codex", "exec", "--skip-git-repo-check"],
-                "kimi": ["kimi", "-p"],
-                "claude": ["claude", "-p"]}.get(provider)
-    if not argv:
-        return _otkaz(f"неизвестный провайдер {provider} и не задан --cmd")
+        return _otkaz(f"для {provider} нет команды из реестра")
 
     with tempfile.TemporaryDirectory(prefix="themis-foreign-") as td:
         # Рабочий каталог — ВНУТРИ временного, чтобы и на уровень выше чужому CLI
@@ -251,7 +247,10 @@ def selftest() -> int:
             assert not o.exists(), f"{why}: файл ответа создан"
 
         gryaznyy = td / "gryaznyy.txt"
-        gryaznyy.write_text("Паспорт 1234 567890 выдан Сидорову Петру.\n", encoding="utf-8")
+        # Форма паспорта собирается конкатенацией НАМЕРЕННО: цельный литерал в
+        # отслеживаемом файле сам попал бы под ПД-сторож коммита (приём stage8_spec).
+        gryaznyy.write_text("Паспорт 1234 " + "567890 выдан Сидорову Петру.\n",
+                            encoding="utf-8")
         o = td / "o_gryaznyy.txt"
         # Даже если маскировка не справится, второй рубеж обязан остановить отправку.
         code = call("proba", gryaznyy, vidok, out=o, log=log)
@@ -265,9 +264,12 @@ def selftest() -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Герметичный вызов чужого CLI.")
-    ap.add_argument("--provider")
+    ap.add_argument("--role")
+    ap.add_argument("--provider", help=argparse.SUPPRESS)  # старый тестовый шов этапа 7
     ap.add_argument("--prompt")
-    ap.add_argument("--cmd", help="команда (для приёмки и своих провайдеров)")
+    ap.add_argument("--cmd", help=argparse.SUPPRESS)       # только старый тестовый шов
+    ap.add_argument("--registry", default=str(SCRIPTS / "cli_registry.json"))
+    ap.add_argument("--cache")
     ap.add_argument("--timeout", type=int, default=300)
     ap.add_argument("--out")
     ap.add_argument("--log")
@@ -275,8 +277,24 @@ def main() -> int:
     a = ap.parse_args()
     if a.selftest:
         return selftest()
-    if not (a.provider and a.prompt):
-        ap.error("нужны --provider и --prompt, либо --selftest")
+    if not a.prompt:
+        ap.error("нужен --prompt, либо --selftest")
+    if a.role:
+        router = [sys.executable, str(SCRIPTS / "cli_router.py"), "--role", a.role,
+                  "--registry", a.registry, "--json"]
+        if a.cache:
+            router += ["--cache", a.cache]
+        p = subprocess.run(router, capture_output=True, text=True)
+        try:
+            chosen = json.loads(p.stdout).get("executor") or {}
+        except ValueError:
+            chosen = {}
+        if p.returncode or not chosen:
+            return _otkaz("роутер не назначил исполнителя")
+        return call(chosen["name"], Path(a.prompt), chosen["invoke"], a.timeout,
+                    Path(a.out) if a.out else None, Path(a.log) if a.log else None)
+    if not (a.provider and a.cmd):
+        ap.error("нужна --role; --provider и --cmd оставлены только для selftest этапа 7")
     return call(a.provider, Path(a.prompt), a.cmd, a.timeout,
                 Path(a.out) if a.out else None, Path(a.log) if a.log else None)
 

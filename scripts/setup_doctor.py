@@ -37,8 +37,10 @@ import platform
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REGISTRY = Path(ROOT) / "scripts" / "cli_registry.json"
 
 CRIT, WARN, OK = "КРИТИЧНО", "ПРЕДУПРЕЖДЕНИЕ", "ок"
 
@@ -240,41 +242,27 @@ def check_selftests() -> dict:
     return check("самопроверки скриптов", OK, f"{len(names)}/{len(names)} зелёные")
 
 
-# ── Опознание машины и CLI фактом (этап 6.5) ────────────────────────────────
-# «Есть ли у вас codex» — вопрос, а не проверка: человек ответит по памяти,
-# а установка пойдёт по его памяти. Спрашиваем машину, не владельца.
-# Авторизация проверяется командой самого инструмента; из ответа берём ТОЛЬКО
-# признак «вошёл», без почты и идентификаторов — это чужие персональные данные.
-# (имя, команда, зачем, сообщает ли команда САМУ авторизацию)
-CLI_PROBES = [
-    ("claude", ["claude", "auth", "status"], "Фемида работает поверх Claude Code", True),
-    ("codex", ["codex", "login", "status"], "второе мнение и сиденья ролей", True),
-    ("gemini", ["gemini", "--version"], "второе мнение", False),
-    ("kimi", ["kimi", "--version"], "второе мнение", False),
-]
-
-
 def probe_cli() -> list[dict]:
+    try:
+        registry = json.loads(REGISTRY.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        return [{"name": "registry", "present": False, "authorized": False,
+                 "how": str(e), "why": "реестр CLI не прочитан"}]
     out = []
-    for name, cmd, why, govorit_ob_avторizacii in CLI_PROBES:
+    for name, entry in registry.items():
+        cmd = entry.get("probe") or []
         how = " ".join(cmd)
-        if not shutil.which(cmd[0]):
+        if not cmd or not shutil.which(cmd[0]):
             out.append({"name": name, "present": False, "authorized": False,
-                        "how": f"which {cmd[0]} → не найден", "why": why})
+                        "how": f"which {cmd[0] if cmd else '?'} → не найден", "why": "из реестра"})
             continue
         rc, text = run(cmd, timeout=30)
         low = text.lower()
-        if not govorit_ob_avторizacii:
-            # Команда только подтверждает, что инструмент установлен. Выдавать это
-            # за проверку входа нельзя: «authorized: true» по коду --version — ложь.
-            out.append({"name": name, "present": True, "authorized": None,
-                        "how": f"{how} (вход этой командой не проверяется)", "why": why})
-            continue
-        voshel = rc == 0 and not any(w in low for w in
-                                     ("not logged", "login required", "не выполнен вход",
-                                      '"loggedin": false', "logged out"))
-        out.append({"name": name, "present": True, "authorized": bool(voshel),
-                    "how": how, "why": why})
+        authorized = rc == 0 and not any(w in low for w in
+                                         ("not logged", "login required", "не выполнен вход",
+                                          '"loggedin": false', "logged out"))
+        out.append({"name": name, "present": True, "authorized": bool(authorized),
+                    "how": how, "why": "из реестра"})
     return out
 
 
