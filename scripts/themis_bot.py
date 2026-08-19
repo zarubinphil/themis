@@ -59,7 +59,9 @@ import themis_config       # noqa: E402
 
 # Деньги в тексте. Валютная метка обязательна: без неё под правило попали бы даты,
 # счётчики дел и время заседания — сторож, кричащий на обиходе, будет выключен.
-DENGI = re.compile(r"\d[\d\s  ]{2,}(?:[.,]\d{1,2})?\s*(?:руб|₽|рубл)", re.I)
+DENGI = re.compile(
+    r"\d[\d  ]*(?:[.,]\d{1,2})?\s*(?:тыс\.?|млн\.?|млрд\.?)?\s*(?:руб\w*|₽|коп\.|копе\w*)"
+    r"|\d[\d  ]*\s*(?:тыс\.|млн|млрд)\b", re.I)
 # Дата в имени папки события: и 04-08-2026_, и 2026-08-14_.
 DATA_PAPKI = re.compile(r"^(?:(\d{2})-(\d{2})-(\d{4})|(\d{4})-(\d{2})-(\d{2}))[_-]")
 
@@ -80,7 +82,10 @@ def _konfig_est(path: str | None = None) -> bool:
 
 
 def token(c: dict) -> str:
-    return (os.environ.get(c["bot"].get("token_env") or "") or "").strip()
+    t = (os.environ.get(c["bot"].get("token_env") or "") or "").strip()
+    if t:
+        _SEKRET["tok"] = t
+    return t
 
 
 def owner(c: dict) -> str:
@@ -111,6 +116,11 @@ def gotovnost(c: dict, path: str | None = None) -> list:
 
 
 # ── Журнал доступа ──────────────────────────────────────────────────────────
+# Значение токена, известное этому процессу. Держится в одном месте, чтобы журнал
+# и печать вычищали его, не таская конфиг за собой.
+_SEKRET: dict = {"tok": ""}
+
+
 def audit_path() -> Path:
     return Path(os.environ.get("THEMIS_BOT_AUDIT") or (Path.home() / ".themis" / "bot-audit.log"))
 
@@ -118,6 +128,11 @@ def audit_path() -> Path:
 def audit(sobytie: str, chat: str = "", detal: str = "") -> None:
     """Строка журнала: что произошло, с какого чата. БЕЗ текста сообщения и БЕЗ секрета —
     иначе журнал станет вторым местом хранения тайны, а читают его чаще, чем дела."""
+    # Токен вычищается на записи, а не «его тут и так не бывает»: формулировки
+    # отказов меняются, и однажды в деталь затечёт строка с адресом запроса.
+    t = _SEKRET.get("tok") or ""
+    if t:
+        detal = detal.replace(t, "…")
     line = (f"{time.strftime('%d.%m.%Y %H:%M:%S')}\t{sobytie}\t{chat or '-'}\t{detal[:120]}\n")
     try:
         p = audit_path()
@@ -251,9 +266,21 @@ def baza(c: dict) -> str:
     return url
 
 
+def _v_delakh(put: str) -> bool:
+    """Путь ведёт внутрь cases/. Проверяется ЗДЕСЬ, а не только у панели: карта
+    ссылок иначе копит записи на «../../etc/passwd», и любой её недосмотр
+    превращается в готовую ссылку."""
+    p = Path(put)
+    p = (p if p.is_absolute() else ROOT / p).resolve()
+    return CASES.resolve() in p.parents
+
+
 def doc_link(c: dict, put: str) -> str:
     # Токен в ссылку НЕ кладём: отправить его в Telegram значит его разгласить.
     # Владельца узнаёт панель — по своему входу, на своей стороне.
+    if not _v_delakh(put):
+        raise Otkaz("ссылку даю только на документ внутри дел (cases/) — "
+                    f"путь «{put}» ведёт наружу")
     return f"{baza(c)}/api/doc?id={doc_id(put)}"
 
 
@@ -420,13 +447,17 @@ def otvet(c: dict, api_base: str, msg: dict) -> str:
     return sh["unknown"]
 
 
-def once(c: dict, api_base: str) -> int:
+def once(c: dict, api_base: str, dolgiy: bool = False) -> int:
     st = state_path()
     try:
         offset = int(json.loads(st.read_text(encoding="utf-8")).get("offset") or 0)
     except (OSError, ValueError, TypeError):
         offset = 0
-    r = tg(c, api_base, "getUpdates", {"offset": offset, "timeout": 0, "limit": 50})
+    # Долгий опрос: держим соединение сами и ждём ответа Telegram, а не дёргаем
+    # его в цикле. Свой таймаут заведомо больше — иначе рвём собственный запрос.
+    zhdat = 25 if dolgiy else 0
+    r = tg(c, api_base, "getUpdates", {"offset": offset, "timeout": zhdat, "limit": 50},
+           taymaut=TAYMAUT + zhdat)
     updates = (r or {}).get("result") or []
     svoy = owner(c)
     for u in updates:
@@ -435,10 +466,19 @@ def once(c: dict, api_base: str) -> int:
         # Адрес чата — только от Telegram. Тот же номер, названный в тексте сообщения,
         # остаётся заявлением: им и подделывают доступ.
         chat = str(((msg.get("chat") or {}).get("id") or ""))
+        otpravitel = str(((msg.get("from") or {}).get("id") or ""))
         if not chat:
+            audit("обновление без чата — пропускаю", "", u.get("update_id") and
+                  f"update {u['update_id']}" or "")
             continue
         if chat != svoy:
             audit("чужой чат — не отвечаю", chat, "молчание")
+            continue
+        # Личный чат — это чат самого владельца, там отправитель равен чату. Если
+        # они разошлись, бот оказался в группе либо сообщение прислал не владелец:
+        # разговаривать с таким собеседником нельзя, даже если чат «правильный».
+        if otpravitel and otpravitel != svoy:
+            audit("чужой отправитель в чате владельца", otpravitel, "молчание")
             continue
         try:
             skazat(c, api_base, otvet(c, api_base, msg), chat)
@@ -450,6 +490,67 @@ def once(c: dict, api_base: str) -> int:
         st.write_text(json.dumps({"offset": offset}), encoding="utf-8")
     except OSError:
         pass
+    return 0
+
+
+def _zamok() -> Path:
+    return audit_path().parent / "bot.lock"
+
+
+def _vzyat_zamok() -> bool:
+    """Один опрашивающий на машину. Два процесса, тянущие getUpdates, делят
+    обновления между собой случайным образом: половина сообщений владельца
+    осталась бы без ответа, а другая половина получила бы два."""
+    z = _zamok()
+    z.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(z, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        return True
+    except FileExistsError:
+        try:
+            chuzhoy = int(z.read_text(encoding="utf-8").strip() or 0)
+            os.kill(chuzhoy, 0)          # процесс жив — уступаем
+            return False
+        except (ValueError, OSError):
+            # Замок от процесса, которого больше нет: снимаем и берём себе.
+            try:
+                z.unlink()
+            except OSError:
+                return False
+            return _vzyat_zamok()
+
+
+def serve(c: dict, api_base: str, cycles: int | None = None) -> int:
+    """Непрерывный опрос. Именно это владелец и запускает — `--once` показывает
+    механизм, но день бот живёт здесь. Порт наружу не открывается: инициатива
+    всегда наша."""
+    if not _vzyat_zamok():
+        print(f"ОТКАЗ: бот уже опрашивает Telegram (замок {_zamok()}). "
+              "Два опрашивающих делят сообщения между собой — половина ответов пропадёт.",
+              file=sys.stderr)
+        return 1
+    audit("опрос начат", owner(c), f"pid {os.getpid()}")
+    sdelano = 0
+    try:
+        while cycles is None or sdelano < cycles:
+            try:
+                once(c, api_base, dolgiy=True)
+            except Otkaz as e:
+                audit("проход не удался", owner(c), str(e))
+                if cycles is not None:
+                    raise
+                time.sleep(15)          # сеть моргнула — не колотиться в дверь
+            sdelano += 1
+    except KeyboardInterrupt:
+        pass
+    finally:
+        try:
+            _zamok().unlink()
+        except OSError:
+            pass
+        audit("опрос остановлен", owner(c), f"проходов {sdelano}")
     return 0
 
 
@@ -481,11 +582,22 @@ def cmd_check_out(src: str) -> int:
     return 0
 
 
+PREDEL = 4096          # жёсткий предел Telegram на одно сообщение
+
+
 def cmd_notify(c: dict, api_base: str, text: str) -> int:
     text = (text or "").strip()
     if not text:
         # Молчание — тоже ответ. Сказать нечего — бот не пишет.
         return 0
+    if len(text) > PREDEL:
+        # Резать на куски нельзя: это лента статусов вместо одного события, и
+        # сторож на выходе проверял бы каждый кусок по отдельности, теряя контекст.
+        audit("уведомление не отправлено", owner(c), f"длина {len(text)} > {PREDEL}")
+        print(f"ОТКАЗ: уведомление длиной {len(text)} знаков не влезает в одно сообщение "
+              f"({PREDEL}) — событие описывается короче, подробности живут в панели",
+              file=sys.stderr)
+        return 1
     beda = chisto(text)
     if beda:
         audit("уведомление остановлено", owner(c), "; ".join(beda))
@@ -524,6 +636,14 @@ def selftest() -> int:
         "ложная тревога на обиходе"
     assert not chisto("Дел в работе: 12. Ближайшее заседание 21.08.2026."), \
         "ложная тревога на счёте и дате"
+    # Проба 19.08.2026: короткие формы суммы, которых первая редакция не видела.
+    for summa in ("250 тыс. руб. взыскано", "1,2 млн рублей неустойки",
+                  "цена иска — 3 млн", "500000₽ по договору", "45 коп. пени"):
+        assert chisto(summa), f"сторож слеп к сумме: {summa!r}"
+    for obikhod in ("Заседание 21.08.2026 в 10:00.", "Дел в работе: 12.",
+                    "Срок 21.08.2026 — это через 3 дня.", "Готово, забирайте.",
+                    "2 копии договора приложены."):
+        assert not chisto(obikhod), f"ложная тревога на обиходе: {obikhod!r}"
 
     m = DATA_PAPKI.match("04-08-2026_zasedanie")
     assert m and m.group(3) == "2026", "дата ДД-ММ-ГГГГ не разобрана"
@@ -546,6 +666,12 @@ def selftest() -> int:
             assert doc_link(c, put) == ssylka, "идентификатор пляшет между запусками"
             assert not any(ch.isdigit() for ch in ssylka.split("id=")[1]), \
                 "в идентификаторе цифры — длинный ряд цифр сторож примет за ИНН"
+            for naruzhu in ("/etc/passwd", "../../../etc/passwd", "knowledge/lessons-log.md"):
+                try:
+                    doc_link(c, naruzhu)
+                    raise AssertionError(f"выдана ссылка наружу дел: {naruzhu}")
+                except Otkaz:
+                    pass
             karta = json.loads((td / "links.json").read_text(encoding="utf-8"))
             assert put in karta["links"].values(), "карта ссылок не сохранила путь"
 
@@ -574,6 +700,10 @@ def main() -> int:
     ap.add_argument("--api-base", default=API, help="адрес Telegram Bot API")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--once", action="store_true")
+    ap.add_argument("--serve", action="store_true",
+                    help="непрерывный опрос (то, что запускается на весь день)")
+    ap.add_argument("--cycles", type=int,
+                    help="сколько проходов сделать в --serve (по умолчанию без конца)")
     ap.add_argument("--notify", metavar="ТЕКСТ")
     ap.add_argument("--notify-file", metavar="ФАЙЛ")
     ap.add_argument("--templates", action="store_true")
@@ -610,6 +740,8 @@ def main() -> int:
             return 1
         if a.once:
             return once(c, a.api_base)
+        if a.serve:
+            return serve(c, a.api_base, a.cycles)
         if a.notify is not None:
             return cmd_notify(c, a.api_base, a.notify)
         if a.notify_file:
@@ -622,8 +754,8 @@ def main() -> int:
     except Otkaz as e:
         print("ОТКАЗ: " + bez_sekreta(str(e), c), file=sys.stderr)
         return 1
-    ap.error("нужна команда: --check, --once, --notify, --templates, --check-out, "
-             "--doc-link, --miniapp-link или --selftest")
+    ap.error("нужна команда: --check, --once, --serve, --notify, --templates, "
+             "--check-out, --doc-link, --miniapp-link или --selftest")
     return 2
 
 
