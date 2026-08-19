@@ -6,6 +6,7 @@
 """
 
 import re
+import os
 import sys
 from pathlib import Path
 from scripts.create_docx import DocBuilder
@@ -174,7 +175,10 @@ def main():
 
     # Подпись
     b.add_empty()
-    b.add_signature("Ахметгалиев А.Р.", "10.06.2026")
+    # Подписант не зашивается в код публичного репозитория: фамилия доверителя —
+    # персональные данные. Передавать окружением при сборке конкретного документа.
+    b.add_signature(os.environ.get("THEMIS_SIGNER", "Представитель по доверенности"),
+                    os.environ.get("THEMIS_SIGN_DATE", ""))
 
     b.save(out_path)
     print(f"✓ Создано: {out_path}")

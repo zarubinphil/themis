@@ -414,7 +414,7 @@ import case_paths as _cp   # контракт раскладки: где гот�
 
 
 def _initials(fio: str) -> str:
-    """«Ахметгалиев Азат Рамазанович» → «Ахметгалиев А.Р.»"""
+    """«Иванов Иван Иванович» → «Иванов И.И.»"""
     parts = fio.split()
     if not parts:
         return fio
