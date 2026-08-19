@@ -20,6 +20,8 @@ knowledge/LAST_UPDATED.md
 cockpit/.state.json
 cockpit/.state.tmp
 audit.log
+# журнал доступа к панели: адреса и время обращений
+access.log
 scripts/.inbox.lock
 bin/vision-ocr
 graphify-out/

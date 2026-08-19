@@ -18,6 +18,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -51,6 +52,84 @@ async def _lifespan(app):
 
 
 app = FastAPI(title="Femida Cockpit", lifespan=_lifespan)
+
+# ── Сторож панели (этап 6) ──────────────────────────────────────────────────
+# Панель запускает конвейер по делам, открывает файлы и принимает загрузки.
+# Пока она слушает петлю на Маке владельца, её защищает сама машина; как только
+# она окажется на сервере, любой запрос снаружи станет командой Фемиде.
+# Отсюда три вещи: секрет, ограничение частоты и журнал доступа.
+#
+# Секрет живёт в ~/.secrets/themis-panel.env (переменная THEMIS_PANEL_TOKEN);
+# в коде и git — только ИМЯ переменной. Секрет не задан = локальный режим:
+# аутентификации нет, но и слушать не-петлевой интерфейс панель откажется.
+import hmac as _hmac
+from collections import deque as _deque
+
+PANEL_TOKEN = (os.environ.get("THEMIS_PANEL_TOKEN") or "").strip()
+ACCESS_LOG = Path(os.environ.get("THEMIS_ACCESS_LOG") or (LEGAL / "access.log"))
+COOKIE_NAME = "X-Themis-Token"
+# Маршруты, которые ЧТО-ТО ДЕЛАЮТ: запускают прогон, пишут на диск, открывают файл.
+MUTATING = ("/api/task", "/api/run", "/api/new-case", "/api/learn-redline",
+            "/api/open", "/api/upload")
+_HITS: dict = {}
+
+
+def _rate_ok(client: str) -> bool:
+    """Скользящее окно в минуту на клиента. Порог — THEMIS_RATE_LIMIT."""
+    limit = _limit("THEMIS_RATE_LIMIT", 60)
+    now = time.time()
+    q = _HITS.setdefault(client, _deque())
+    while q and now - q[0] > 60:
+        q.popleft()
+    if len(q) >= limit:
+        return False
+    q.append(now)
+    return True
+
+
+def _audit(method: str, path: str, client: str, dopusk: str) -> None:
+    """Журнал доступа: кто и куда стучался. БЕЗ секрета и БЕЗ содержимого запроса —
+    журнал читают чаще, чем дела, и он не должен стать вторым местом хранения тайны."""
+    line = f"{time.strftime('%d.%m.%Y %H:%M:%S')}\t{method}\t{path}\t{client}\t{dopusk}\n"
+    try:
+        ACCESS_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(ACCESS_LOG, "a", encoding="utf-8") as f:
+            f.write(line)
+    except OSError:
+        pass          # журнал не должен ронять панель, но и молчать о себе не будет
+
+
+@app.middleware("http")
+async def strazh(request, call_next):
+    path = request.url.path
+    mutating = any(path.startswith(p) for p in MUTATING)
+    client = request.client.host if request.client else "?"
+    if PANEL_TOKEN and path.startswith("/api/"):
+        given = (request.headers.get("x-themis-token")
+                 or request.cookies.get(COOKIE_NAME) or "")
+        if not _hmac.compare_digest(given, PANEL_TOKEN):
+            _audit(request.method, path, client, "401")
+            return JSONResponse({"ok": False, "error": "нужен токен панели"}, status_code=401)
+    if mutating:
+        if not _rate_ok(client):
+            _audit(request.method, path, client, "429")
+            return JSONResponse({"ok": False, "error": "слишком часто, подождите минуту"},
+                                status_code=429)
+        _audit(request.method, path, client, "ok")
+    return await call_next(request)
+
+
+@app.get("/login")
+def login(token: str = ""):
+    """Вход по ссылке: юрист открывает панель с токеном один раз, дальше cookie
+    носит браузер. Заголовки руками никто вводить не будет."""
+    if not PANEL_TOKEN:
+        return JSONResponse({"ok": True, "error": "токен не задан — локальный режим"})
+    if not _hmac.compare_digest(token.strip(), PANEL_TOKEN):
+        return JSONResponse({"ok": False, "error": "неверный токен"}, status_code=401)
+    r = JSONResponse({"ok": True})
+    r.set_cookie(COOKIE_NAME, PANEL_TOKEN, httponly=True, samesite="lax", max_age=30 * 24 * 3600)
+    return r
 
 # Состояние текущего прогона (один за раз — high-stakes юр-логика)
 RUN: dict = {"active": False, "started": None, "proc": None}
@@ -787,7 +866,30 @@ async def stream(after: int = 0) -> StreamingResponse:
                              headers={"Cache-Control": "no-cache"})
 
 
+def _bind_or_refuse(host: str) -> None:
+    """Без секрета панель слушает только петлю.
+
+    Панель — пульт: она запускает конвейер по живым делам и открывает файлы.
+    Выставленная на чужой интерфейс без токена, она отдаёт этот пульт любому,
+    кто знает адрес. Отказ происходит ДО приёма первого запроса, а не после
+    первого чужого. Локальная работа владельца при этом не меняется:
+    умолчание — 127.0.0.1, токен не нужен.
+    """
+    local = host in ("127.0.0.1", "localhost", "::1")
+    if not local and not PANEL_TOKEN:
+        sys.exit(
+            f"ОТКАЗ: панель просят слушать {host}, а секрет не задан — "
+            "отличить владельца от чужого нечем. Положить токен в "
+            "~/.secrets/themis-panel.env (переменная THEMIS_PANEL_TOKEN) и "
+            "передать его в окружение запуска. Значение в git не хранить."
+        )
+
+
 if __name__ == "__main__":
     import uvicorn
-    print("Femida Cockpit → http://localhost:8800   (Ctrl+C стоп)")
-    uvicorn.run(app, host="127.0.0.1", port=8800, log_level="warning")
+    host = os.environ.get("THEMIS_PANEL_HOST", "127.0.0.1")
+    port = _limit("THEMIS_PANEL_PORT", 8800)
+    _bind_or_refuse(host)
+    rezhim = "с токеном" if PANEL_TOKEN else "локальный, без токена"
+    print(f"Femida Cockpit → http://{host}:{port}   ({rezhim}; Ctrl+C стоп)")
+    uvicorn.run(app, host=host, port=port, log_level="warning")
