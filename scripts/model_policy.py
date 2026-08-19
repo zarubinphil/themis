@@ -48,6 +48,17 @@ POLICY = {
 # Исполнитель из брифа → шаг политики. Кого здесь нет, того политика не судит,
 # но модель назвать он обязан всё равно (пустая клетка = решение не принято).
 AGENT_STEP = {
+    # Персоны конвейера: в брифе и в чате исполнителя зовут по имени роли,
+    # и политика, знающая только машинное имя, молча пропускает такую строку.
+    "сперанский": "draft",
+    "кони": "review",
+    "спасович": "hunt",
+    "плевако": "hunt",
+    "карабчевский": "hunt",
+    "урусов": "council-chair",
+    "покровский": "read-text",
+    "гольмстен": "read-scan",
+    "буринский": "read-scan",
     "doc-drafter": "draft",
     "doc-reviewer": "review",
     "practice-hunter-classic": "hunt",
@@ -59,6 +70,16 @@ AGENT_STEP = {
     "pdf-reader": "read-scan",
     "image-reader": "read-scan",
 }
+
+
+def _step_of(executor: str) -> str:
+    """Шаг по исполнителю: точное имя, «Персона (агент)» и просто персона.
+    Совпадение по вхождению, чтобы форма записи не решала, судить строку или нет."""
+    low = executor.lower()
+    for key, step in AGENT_STEP.items():
+        if key == low or key in low:
+            return step
+    return ""
 
 
 def model_for(level: str, step: str) -> str:
@@ -111,7 +132,7 @@ def check_brief(path: Path) -> int:
         if not model:
             bad.append(f"{executor}: колонка «Модель» пуста — решение о модели не принято")
             continue
-        step = AGENT_STEP.get(executor)
+        step = _step_of(executor)
         if not step:
             continue
         want = model_for(level, step)
@@ -164,6 +185,9 @@ def selftest() -> int:
                                 "| 2 | practice-hunter-classic | sonnet | 60k |")
                        .replace("Уровень: L1", "Уровень: MICRO"), encoding="utf-8")
         assert check_brief(p) == 1, "охота на MICRO пропущена"
+        p.write_text(ok.replace("doc-drafter", "Сперанский").replace("sonnet", "opus"),
+                     encoding="utf-8")
+        assert check_brief(p) == 1, "исполнитель-персона не узнан"
     print("selftest пройден: политика полна, бриф судится fail-closed")
     return 0
 
