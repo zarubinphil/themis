@@ -600,6 +600,7 @@ border:0;font-size:15px;margin-bottom:6px}
 </style></head><body>
 <h1>Фемида</h1><div class=tikho id=svodka>смотрю…</div>
 <div class=blok id=sroki></div>
+<div class=blok id=golos></div>
 <div class=blok><h2>Дела</h2><div id=dela></div></div>
 <div class=blok><h2>Сделать документ</h2>
 <select id=vybor></select>
@@ -616,6 +617,9 @@ async function dai(u,o){const r=await fetch(u,o);if(!r.ok)throw new Error(r.stat
   q('#sroki').innerHTML='<h2>Ближайшее</h2>'+(zas.length?zas.slice(0,5).map(z=>
     '<div class=kart><span class=data>'+den(z.date)+'</span> — '+esc(z.event)+
     '<div class=tikho>'+esc(z.case)+'</div></div>').join(''):'<div class=kart>Пусто.</div>');
+  const gol=await dai('/api/voice-queue').catch(()=>[]);
+  if(gol.length)q('#golos').innerHTML='<h2>Надиктовано</h2>'+gol.slice(0,5).map(g=>
+    '<div class=kart>'+esc(g.text)+'<div class=tikho>'+esc(g.kogda)+'</div></div>').join('');
   const dela=[];
   for(const k of kl){
     const c=await dai('/api/client/'+encodeURIComponent(k.slug)+'/cases');
@@ -636,6 +640,26 @@ q('#sdelat').onclick=async()=>{
  catch(e){q('#itog').textContent='Не отдалось. Откройте панель на компьютере.'}
 };
 </script></body></html>"""
+
+
+VOICE_QUEUE = Path(os.environ.get("THEMIS_BOT_QUEUE") or (HOME / ".themis" / "voice-queue.jsonl"))
+
+
+@app.get("/api/voice-queue")
+def voice_queue() -> JSONResponse:
+    """Надиктованное боту. Расшифровка живёт только здесь, внутри сети: в чат она
+    не возвращается, потому что в надиктовке звучат фамилии и суммы."""
+    out = []
+    try:
+        for line in VOICE_QUEUE.read_text(encoding="utf-8").splitlines()[-20:]:
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            out.append({"kogda": d.get("kogda", ""), "text": (d.get("text") or "")[:400]})
+    except OSError:
+        pass
+    return JSONResponse(list(reversed(out)))
 
 
 @app.get("/miniapp", response_class=HTMLResponse)

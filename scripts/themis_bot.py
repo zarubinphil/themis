@@ -71,6 +71,28 @@ class Otkaz(Exception):
     """Беда, о которой говорим владельцу словами, а не трассировкой."""
 
 
+def _slovar(x) -> dict:
+    """Поле, которое ОБЯЗАНО быть объектом. Пришло не оно — считаем, что пусто."""
+    return x if isinstance(x, dict) else {}
+
+
+def _tseloe(x) -> int:
+    try:
+        return int(x)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _skl(n: int, odin: str, dva: str, mnogo: str) -> str:
+    """Согласование числа со словом. Мелочь, по которой сразу видно машину."""
+    n = abs(int(n))
+    if n % 10 == 1 and n % 100 != 11:
+        return odin
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return dva
+    return mnogo
+
+
 # ── Настройки и секрет ──────────────────────────────────────────────────────
 def cfg(path: str | None = None) -> dict:
     p = Path(path) if path else themis_config.DEFAULT_PATH
@@ -214,10 +236,11 @@ def shablony(d: dict) -> dict:
         "status_pusto": "Дел в работе нет. Ничего не горит.",
         "hearing": (f"Заседание {d['data']} в {d['vremya']}. Папку собрал, "
                     f"забрать здесь: {d['ssylka']}"),
-        "deadline": (f"Срок {d['data']} — это через {d['dney']} дня. "
+        "deadline": (f"Срок {d['data']} — это через {d['dney']} "
+                     f"{_skl(d['dney'], 'день', 'дня', 'дней')}. "
                      "Что именно, смотрите в панели."),
         "doc_ready": f"Документ готов. Открывается только внутри сети: {d['ssylka']}",
-        "voice_ok": "Записал. Возьмусь — напишу.",
+        "voice_ok": "Записал. Лежит в панели, в надиктованном — оттуда и заберу в работу.",
         "unknown": ("Не понял. Умею: /status, /hearings, /doc. "
                     "Или надиктуйте голосом — расшифрую здесь."),
         "error": ("Застрял. Что именно сломалось — смотрите в панели, "
@@ -256,10 +279,14 @@ def doc_id(put: str) -> str:
     ident = "".join(chr(97 + b % 26) for b in syroe[:16])
     d.setdefault("links", {})[ident] = put
     p = links_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(p)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(p)
+    except OSError as e:
+        raise Otkaz(f"карта ссылок не пишется ({p}): {e.strerror}. "
+                    "Без неё панель не узнает, какой документ отдавать.")
     try:
         p.chmod(0o600)        # карта ссылок называет дела — читает её только владелец
     except OSError:
@@ -479,18 +506,23 @@ def once(c: dict, api_base: str, dolgiy: bool = False) -> int:
     zhdat = 25 if dolgiy else 0
     r = tg(c, api_base, "getUpdates", {"offset": offset, "timeout": zhdat, "limit": 50},
            taymaut=TAYMAUT + zhdat)
-    updates = (r or {}).get("result") or []
+    updates = (r or {}).get("result")
+    if not isinstance(updates, list):
+        updates = []
     svoy = owner(c)
     for u in updates:
-        offset = max(offset, int(u.get("update_id") or 0) + 1)
-        msg = u.get("message") or u.get("edited_message") or {}
+        # Форма обновления — заявление той стороны, а не факт. Одно кривое поле
+        # не должно убивать проход: в --serve это тихая смерть канала уведомлений,
+        # которую владелец заметит только по молчанию бота.
+        u = _slovar(u)
+        offset = max(offset, _tseloe(u.get("update_id")) + 1)
+        msg = _slovar(u.get("message")) or _slovar(u.get("edited_message"))
         # Адрес чата — только от Telegram. Тот же номер, названный в тексте сообщения,
         # остаётся заявлением: им и подделывают доступ.
-        chat = str(((msg.get("chat") or {}).get("id") or ""))
-        otpravitel = str(((msg.get("from") or {}).get("id") or ""))
+        chat = str(_slovar(msg.get("chat")).get("id") or "")
+        otpravitel = str(_slovar(msg.get("from")).get("id") or "")
         if not chat:
-            audit("обновление без чата — пропускаю", "", u.get("update_id") and
-                  f"update {u['update_id']}" or "")
+            audit("обновление без чата — пропускаю", "", f"update {u.get('update_id')}")
             continue
         if chat != svoy:
             audit("чужой чат — не отвечаю", chat, "молчание")
@@ -506,6 +538,11 @@ def once(c: dict, api_base: str, dolgiy: bool = False) -> int:
         except Otkaz as e:
             audit("ответ не отправлен", chat, str(e))
             raise
+        except Exception as e:                                  # noqa: BLE001
+            # Своя ошибка на одном сообщении — беда этого сообщения, а не всего
+            # опроса. Пишем в журнал ТИП, не текст: в тексте бывает чужое.
+            audit("сообщение не обработано", chat, type(e).__name__)
+            continue
     try:
         st.parent.mkdir(parents=True, exist_ok=True)
         st.write_text(json.dumps({"offset": offset}), encoding="utf-8")
@@ -602,8 +639,15 @@ def svodka_sobytiy(dney: int = 1) -> str:
     daty = blizhaishie(dney)
     if not daty:
         return ""
-    kogda = ", ".join(f"{i[8:10]}.{i[5:7]}.{i[:4]}" for i in sorted(set(daty)))
-    srok = "на завтра" if dney <= 1 else f"на ближайшие {dney} дня"
+    unikalnye = sorted(set(daty))
+    pokazat = unikalnye[:8]
+    kogda = ", ".join(f"{i[8:10]}.{i[5:7]}.{i[:4]}" for i in pokazat)
+    if len(unikalnye) > len(pokazat):
+        # Перечислять всё нельзя: длинное уведомление не уйдёт вовсе (предел
+        # Telegram), и владелец останется вообще без напоминания.
+        kogda += f" и ещё дней с заседаниями: {len(unikalnye) - len(pokazat)}"
+    srok = ("на завтра" if dney <= 1
+            else f"на ближайшие {dney} {_skl(dney, 'день', 'дня', 'дней')}")
     return f"Заседаний {srok}: {len(daty)} — {kogda}. Что брать с собой, смотрите в панели."
 
 
@@ -722,6 +766,12 @@ def selftest() -> int:
     assert svodka_sobytiy.__doc__ and "молч" in svodka_sobytiy.__doc__, \
         "молчание при отсутствии событий не описано"
 
+    assert _slovar("строка") == {} and _slovar({"a": 1}) == {"a": 1}, "разбор поля-объекта"
+    assert _tseloe("девяносто") == 0 and _tseloe("7") == 7, "разбор числа из чужого ответа"
+    assert (_skl(1, "день", "дня", "дней"), _skl(3, "день", "дня", "дней"),
+            _skl(7, "день", "дня", "дней"), _skl(11, "день", "дня", "дней")) == \
+        ("день", "дня", "дней", "дней"), "число со словом не согласовано"
+
     m = DATA_PAPKI.match("04-08-2026_zasedanie")
     assert m and m.group(3) == "2026", "дата ДД-ММ-ГГГГ не разобрана"
     assert DATA_PAPKI.match("2026-08-14_zasedanie"), "дата ГГГГ-ММ-ДД не разобрана"
@@ -821,7 +871,18 @@ def main() -> int:
                   file=sys.stderr)
             return 1
         if a.once:
-            return once(c, a.api_base)
+            if not _vzyat_zamok():
+                print(f"ОТКАЗ: Telegram уже опрашивает другой процесс (замок {_zamok()}). "
+                      "Два опрашивающих делят обновления — часть сообщений пропала бы.",
+                      file=sys.stderr)
+                return 1
+            try:
+                return once(c, a.api_base)
+            finally:
+                try:
+                    _zamok().unlink()
+                except OSError:
+                    pass
         if a.serve:
             return serve(c, a.api_base, a.cycles)
         if a.chat_probe:
