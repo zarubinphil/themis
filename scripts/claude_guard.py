@@ -190,7 +190,7 @@ def _strip_heredocs(cmd: str) -> str:
 
 _REDIRECT_RE = re.compile(r">>?\s*\|?\s*([^\s;&|<>()]+)")
 # Цель — последний аргумент (cp SRC DST) либо каждый (tee A B, touch A B).
-_VERB_LAST = ("cp", "mv", "install", "rsync", "ditto")
+_VERB_LAST = ("cp", "mv", "install", "rsync", "ditto", "ln")
 _VERB_ALL = ("tee", "touch")
 # Правка на месте — тоже запись: sed -i меняет уже лежащий под cases/ генератор,
 # и запрет «не создавать» без «не править» держится ровно до первого созданного файла.
@@ -221,6 +221,8 @@ def _write_targets(cmd: str) -> list:
     body = _strip_heredocs(cmd)
     targets = [t.strip("'\"") for t in _REDIRECT_RE.findall(body)]
     targets += [t.strip("'\"") for t in _FETCH_RE.findall(body)]
+    targets += _git_checkout_targets(body)
+    targets += [t.strip("'\"") for t in _DD_OF_RE.findall(body)]
     for verb, args in _VERB_RE.findall(body):
         parts = _split(args)
         if not parts:
@@ -232,6 +234,98 @@ def _write_targets(cmd: str) -> list:
     if _INTERP_RE.search(body) and _WRITE_HINT_RE.search(body):
         targets += [t.strip("'\"") for t in _PATH_RE.findall(body)]
     return targets
+
+
+# Обёртки, которыми враждебная проба 19.08.2026 провела запись мимо сторожа:
+# sh -c/bash -c (тело — строка, не команда), var=cmd;$var (глагол через переменную),
+# $(echo cmd) (глагол через сабшелл) и функция оболочки f(){...};f. Ни одна не меняет
+# ЦЕЛЬ записи — только прячет ГЛАГОЛ от regexp, который её вычисляет. Разворачиваем
+# рекурсивно (глубина 4 — щедрый потолок против случайного бесконечного цикла) и
+# отдаём дальше плоский текст: вся остальная логика файла работает с ним как обычно.
+_ASSIGN_RE = re.compile(r"(?:^|[;&\n])\s*([A-Za-z_]\w*)=([^\s;&|]+)")
+_VAR_REF_RE = re.compile(r"\$\{?(\w+)\}?")
+_ECHO_SUBST_RE = re.compile(r"\$\(\s*echo\s+([^\s)]+)\s*\)")
+_SHC_RE = re.compile(r"\b(?:sh|bash|zsh)\s+-c\s+([\"'])(.*?)\1", re.S)
+_FUNC_RE = re.compile(r"\b\w+\s*\(\)\s*\{(.*?)\}", re.S)
+
+
+def _normalize(cmd: str, depth: int = 0) -> str:
+    """Разворачивает типовые обёртки shell до плоского текста. Не полноценный
+    интерпретатор — эвристика под обходы, которые реально нашла проба."""
+    if depth > 4:
+        return cmd
+    out = cmd
+    assigns = dict(_ASSIGN_RE.findall(out))
+    out = _VAR_REF_RE.sub(lambda m: assigns.get(m.group(1), m.group(0)), out)
+    out = _ECHO_SUBST_RE.sub(lambda m: m.group(1), out)
+    out = _SHC_RE.sub(lambda m: _normalize(m.group(2), depth + 1), out)
+    out = _FUNC_RE.sub(lambda m: "; " + _normalize(m.group(1), depth + 1) + " ;", out)
+    return out
+
+
+# git checkout/restore пишут (перезаписывают) файл рабочего дерева из индекса/истории —
+# такая же перезапись, как cp/dd/sed -i, просто именем команды не похожая ни на одну.
+_GIT_CO_RE = re.compile(
+    r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?git\s+(?:checkout|restore)\b([^;&|<>]*)", re.M)
+
+
+def _git_checkout_targets(body: str) -> list:
+    out = []
+    for args in _GIT_CO_RE.findall(body):
+        try:
+            import shlex
+            toks = shlex.split(args)
+        except ValueError:
+            toks = args.split()
+        if "--" in toks:
+            out += toks[toks.index("--") + 1:]
+        else:
+            # Без «--»: путь узнаём по «/», чтобы не принять ветку/HEAD за файл.
+            out += [t for t in toks if "/" in t and not t.startswith("-")]
+    return [t.strip("'\"") for t in out]
+
+
+# dd пишет через `of=ПУТЬ`, не позиционным аргументом — отдельный разбор.
+_DD_OF_RE = re.compile(
+    r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?dd\b[^;&|<>]*?\bof=([^\s;&|<>]+)", re.M)
+
+# git apply / patch пишут файл, указанный ВНУТРИ содержимого патча — командная строка
+# его не называет. Сторож не может проверить конкретную цель, поэтому судит по
+# ОБЛАСТИ действия (-C у git apply, -d у patch): если она внутри cases/, применение
+# патча запрещено целиком — патч непрозрачен, а дело не терпит правки мимо конвейера.
+_PATCH_SCOPE_RE = re.compile(
+    r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?git\s+-C\s+(\S+)\s+apply\b"
+    r"|(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?patch\b(?:\s+-\w+)*\s+-d\s+(\S+)"
+)
+
+
+def _patch_scope_hits_cases(cmd: str) -> bool:
+    for m in _PATCH_SCOPE_RE.finditer(cmd):
+        d = (m.group(1) or m.group(2) or "").strip("'\"")
+        if "cases" in d.replace("\\", "/").split("/"):
+            return True
+    return False
+
+
+def _under_protected(path: str) -> bool:
+    """Цель лежит внутри 00_intake/ или _baselines/ — первичка и база «ДО»."""
+    norm = path.replace(os.sep, "/").strip("'\"")
+    return bool(re.search(r"(?:^|/)(?:00_intake|_baselines)(?:/|$)", norm))
+
+
+# mv УДАЛЯЕТ источник — перенос СУЩЕСТВУЮЩЕГО файла ИЗ 00_intake/_baselines
+# так же разрушителен, как перезапись, хотя цель записи (последний аргумент)
+# лежит вне охраняемых папок и по ней одной это не видно.
+_MV_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?mv\s+([^;&|<>]+)", re.M)
+
+
+def _mv_sources(body: str) -> list:
+    out = []
+    for args in _MV_RE.findall(body):
+        parts = _split(args)
+        if len(parts) >= 2:
+            out += parts[:-1]
+    return out
 
 
 # Перенос ЦЕЛОГО каталога расширения не имеет: `mv /tmp/ocr дело/.../ocr` кладёт
@@ -362,10 +456,15 @@ def main() -> None:
         _workflow_gate(p)
 
     if tool == "Bash":
-        cmd = as_str(ti.get("command"))
-        _cases_write_gate(_write_targets(cmd))
-        for t in _write_targets(cmd):
+        raw_cmd = as_str(ti.get("command"))
+        stripped = _strip_heredocs(raw_cmd)     # для _is_new_intake_file — узкая легитимность
+        cmd = _normalize(stripped)              # sh -c/bash -c/var=/$( echo )/функция — плоско
+
+        targets = _write_targets(cmd)
+        _cases_write_gate(targets)
+        for t in targets:
             _workflow_gate(t)      # документ въезжает в GOTOVO и обычным cp, не только Write
+
         unpack = _unpack_into_cases(cmd)
         if unpack:
             block(
@@ -380,12 +479,17 @@ def main() -> None:
                 "Рендеры живут в кеше (/tmp/{дело}/{имя}), приборы — в scripts/. "
                 "Нужны сами материалы — их место в 00_intake, по одному файлу."
             )
-        cmd = _strip_heredocs(cmd)
-        protected = re.search(r"00_intake|_baselines", cmd)
+        if _patch_scope_hits_cases(cmd):
+            block(
+                "БЛОК: применение патча внутри cases/ (git apply / patch) запрещено — "
+                "цель правки не видна из командной строки (она внутри самого патча), "
+                "а дело может измениться мимо конвейера. Патч — во временный каталог, "
+                "материалы дела кладутся по одному новым файлом."
+            )
         # rm только в командной позиции (начало строки / после ; & | $( `) —
         # иначе ложные срабатывания на прозу со словом «rm» в heredoc
         rm_cmd = re.search(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(?:rm|rmdir)\s", cmd, re.M)
-        if rm_cmd and protected:
+        if rm_cmd and re.search(r"00_intake|_baselines", cmd):
             block(
                 "БЛОК: удаление в 00_intake/ или _baselines/ запрещено "
                 "(железное правило). Действительно нужно — только пользователь вручную."
@@ -395,19 +499,20 @@ def main() -> None:
         # правило рубило и его: сторож видел «mv … 00_intake/…» и блокировал
         # перенос НОВОГО файла наравне с затиранием существующего (прецедент
         # 04.08.2026 — сертификат ЭЦП не удалось положить в дело). Послабление
-        # узкое: ровно cp/mv, ровно два аргумента, источник вне охраняемых папок,
-        # а целевого файла на диске ещё НЕТ. Существует — блок как прежде.
-        # Затирание не менее разрушительно, чем удаление: `> файл`, cp, mv, tee,
-        # truncate, dd, sed -i переписывают первичку и базу «ДО» так же безвозвратно.
-        # Каждая альтернатива — только в КОМАНДНОЙ позиции. Без этого «sed -i»
-        # и «cp» внутри текста (сообщение коммита, heredoc, комментарий) блокировали
-        # безобидную команду: сторож ловил собственное описание правил.
-        write_cmd = re.search(
-            r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?"
-            r"(?:cp|mv|tee|truncate|dd|install|sed\s+(?:-\w+\s+)*-i)\b"
-            r"|>\s*\S*(?:00_intake|_baselines)",
-            cmd, re.M)
-        if write_cmd and protected and not _is_new_intake_file(cmd):
+        # узкое: ровно cp/mv, ровно два аргумента (в СЫРОЙ, необёрнутой команде —
+        # sh -c/var-subst/... легитимности не получают), источник вне охраняемых
+        # папок, а целевого файла на диске ещё НЕТ. Существует — блок как прежде.
+        #
+        # Сторож судит ЦЕЛЬ записи, а не имя команды (этап 9, аудит 19.08.2026):
+        # раньше здесь стояло регэксп-угадывание глагола (cp/mv/tee/dd/sed -i) —
+        # 16 форм (git checkout/restore, git apply, patch, ln, sh -c, bash -c,
+        # var=/$(echo)/функция, python3 -c) обходили его, не будучи похожими ни на
+        # один из перечисленных глаголов. Теперь источник истины один — ТЕ ЖЕ
+        # targets, что уже посчитаны выше для code/raster-гейта и workflow-гейта:
+        # что реально пишется, а не как это названо в командной строке.
+        protected_targets = [t for t in targets if _under_protected(t)]
+        removed_sources = [s for s in _mv_sources(cmd) if _under_protected(s)]
+        if (protected_targets or removed_sources) and not _is_new_intake_file(stripped):
             block(
                 "БЛОК: перезапись в 00_intake/ или _baselines/ запрещена — исходники "
                 "клиента и база «ДО» для разбора правок неприкосновенны. Класть новое "

@@ -146,6 +146,68 @@ def check_pd(root=ROOT):
     return fails
 
 
+def _anchor_paths(root=ROOT):
+    """Якорь приёмки лежит ВНЕ рабочего дерева git — HEAD двигает сам исполнитель
+    атомарным коммитом, а якорь двигает только координатор явной командой."""
+    d = os.path.join(root, ".autoloop")
+    return d, os.path.join(d, "spec-anchors.json"), os.path.join(d, "spec-anchor-log.jsonl")
+
+
+def _load_anchors(store_path):
+    if not os.path.isfile(store_path):
+        return {}
+    try:
+        with open(store_path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def anchor_spec(spec, root=ROOT):
+    """Фиксирует текущую редакцию приёмки как базу сверки, оставляет след в журнале."""
+    path = os.path.join(root, spec) if not os.path.isabs(spec) else spec
+    if not os.path.isfile(path):
+        print(f"приёмка {spec} не найдена — нечего якорить", file=sys.stderr)
+        return 1
+    with open(path, encoding="utf-8", errors="replace") as f:
+        content = f.read()
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    d, store_path, log_path = _anchor_paths(root)
+    os.makedirs(d, exist_ok=True)
+    anchors = _load_anchors(store_path)
+    rel = os.path.relpath(path, root)
+    anchors[rel] = digest
+    with open(store_path, "w", encoding="utf-8") as f:
+        json.dump(anchors, f, ensure_ascii=False, indent=1)
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"spec": rel, "sha256": digest}, ensure_ascii=False) + "\n")
+    print(f"приёмка {rel} заякорена: {digest[:12]}…")
+    return 0
+
+
+def check_hooks(root=ROOT):
+    """Регистрация сторожей, а не их наличие на диске: пустой settings.json или
+    снесённый pre-commit оставляли гейт зелёным, хотя сторож не сторожит вовсе."""
+    fails = []
+    checks = (
+        (os.path.join(root, ".git", "hooks", "pre-commit"), "pd_guard", "pre-commit"),
+        (os.path.join(root, ".git", "hooks", "commit-msg"), "pd_guard", "commit-msg"),
+        (os.path.join(root, ".claude", "settings.json"), "claude_guard", ".claude/settings.json"),
+    )
+    for path, needle, what in checks:
+        if not os.path.isfile(path):
+            fails.append((f"hooks:missing-{what}", f"{what} не зарегистрирован — файла нет"))
+            continue
+        try:
+            with open(path, encoding="utf-8", errors="ignore") as f:
+                text = f.read()
+        except OSError:
+            text = ""
+        if needle not in text:
+            fails.append((f"hooks:empty-{what}", f"{what} есть, но не подключает {needle}"))
+    return fails
+
+
 def check_spec(spec, root=ROOT):
     """Внешняя приёмка этапа: контракт задан координатором, исполнитель его не правит."""
     if not spec:
@@ -154,17 +216,27 @@ def check_spec(spec, root=ROOT):
     if not os.path.isfile(path):
         return [("spec:missing", f"приёмка {spec} не найдена")]
 
-    # Приёмку правит только координатор. Просьба «не трогай» исполняется вероятностно,
-    # сверка с зафиксированной в git редакцией — детерминированно. Подогнанная под
-    # результат приёмка не отличается от отсутствующей.
     rel = os.path.relpath(path, root)
-    code, committed = run(["git", "show", f"HEAD:{rel}"], cwd=root)
-    if code == 0 and committed:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            if f.read() != committed:
-                return [("spec:tampered",
-                         f"{rel} изменён относительно зафиксированного в git — приёмку правит "
-                         f"только координатор. Вернуть: git checkout HEAD -- {rel}")]
+    with open(path, encoding="utf-8", errors="replace") as f:
+        current = f.read()
+
+    # Заякоренная редакция — база сверки ВНЕ подвижного HEAD, который двигает
+    # сам исполнитель атомарным коммитом. Якорь есть — сверяем с ним, а не с git.
+    _, store_path, _ = _anchor_paths(root)
+    anchors = _load_anchors(store_path)
+    if rel in anchors:
+        digest = hashlib.sha256(current.encode("utf-8")).hexdigest()
+        if digest != anchors[rel]:
+            return [("spec:tampered",
+                     f"{rel} изменён относительно заякоренной редакции — приёмку правит "
+                     f"только координатор. Переякорить: --anchor-spec {rel}")]
+    else:
+        # Без якоря — прежнее поведение: сверка с зафиксированной в git редакцией.
+        code, committed = run(["git", "show", f"HEAD:{rel}"], cwd=root)
+        if code == 0 and committed and current != committed:
+            return [("spec:tampered",
+                     f"{rel} изменён относительно зафиксированного в git — приёмку правит "
+                     f"только координатор. Вернуть: git checkout HEAD -- {rel}")]
     code, out = run([sys.executable, path], cwd=root, timeout=1800)
     if code == 0:
         return []
@@ -173,7 +245,16 @@ def check_spec(spec, root=ROOT):
                             f"Подробно: python3 {spec}")]
 
 
-def gate(base="HEAD", root=ROOT, every=False, spec=None):
+def gate(base="HEAD", root=ROOT, every=False, spec=None, spec_only=False,
+         selftests_only=False, hooks_only=False):
+    if spec_only:
+        return check_spec(spec, root)
+    if selftests_only:
+        # Герметичная проверка: ВСЕ селфтесты, независимо от того, что "затронуто"
+        # от base — атомарный коммит роли делает touched-детект пустым (см. --all-selftests).
+        return check_selftests(base, root, every=True)
+    if hooks_only:
+        return check_hooks(root)
     fails = []
     fails += check_compile(root)
     fails += check_selftests(base, root, every)
@@ -268,7 +349,51 @@ def selftest():
         with open(os.path.join(tmp, ".claude", "agents", "kto.md"), "w", encoding="utf-8") as f:
             f.write("---\nname: kto\ndescription: проба\n---\n\nтело\n")
         assert check_prompts(tmp), "отсутствующее производное не покрасило гейт"
-    print("selftest: детект приборов, устойчивость отпечатка, компиляция, smoke — ок")
+
+        # Регистрация сторожей: голое дерево краснеет, зарегистрированное — зеленеет.
+        assert check_hooks(tmp), "голое дерево без хуков объявлено зарегистрированным"
+        hooks_dir = os.path.join(tmp, ".git", "hooks")
+        os.makedirs(hooks_dir, exist_ok=True)
+        for hname, arg in (("pre-commit", "--staged"), ("commit-msg", '--msg "$1"')):
+            with open(os.path.join(hooks_dir, hname), "w", encoding="utf-8") as f:
+                f.write(f"#!/bin/sh\nexec python3 scripts/pd_guard.py {arg}\n")
+        os.makedirs(os.path.join(tmp, ".claude"), exist_ok=True)
+        with open(os.path.join(tmp, ".claude", "settings.json"), "w", encoding="utf-8") as f:
+            f.write('{"hooks": {"PreToolUse": [{"command": "python3 scripts/claude_guard.py"}]}}')
+        assert check_hooks(tmp) == [], "зарегистрированные сторожа не признаны"
+
+    # Якорь приёмки: своя песочница-репозиторий, вне текущего tmp выше (нужен git).
+    with tempfile.TemporaryDirectory(prefix="loopgate-anchor-") as agit:
+        os.makedirs(os.path.join(agit, "scripts"))
+        spec_path = os.path.join(agit, "scripts", "priemka.py")
+        with open(spec_path, "w", encoding="utf-8") as f:
+            f.write("import sys\nsys.exit(0)\n")
+        for cmd in (["init", "-q"], ["add", "-A"],
+                    ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "spec"]):
+            subprocess.run(["git", *cmd], cwd=agit, capture_output=True)
+        assert anchor_spec("scripts/priemka.py", agit) == 0, "якорение чистой приёмки отказало"
+        anchors_log = [p for p in os.listdir(os.path.join(agit, ".autoloop")) if "anchor" in p]
+        assert anchors_log, "якорение не оставило следа в .autoloop/"
+        assert check_spec("scripts/priemka.py", agit) == [], "заякоренная нетронутая приёмка красна"
+
+        # Подгонка + обычный коммит — HEAD двигается, якорь нет.
+        with open(spec_path, "a", encoding="utf-8") as f:
+            f.write("# подгонка под результат\n")
+        for cmd in (["add", "-A"], ["-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "-qm", "podgonka"]):
+            subprocess.run(["git", *cmd], cwd=agit, capture_output=True)
+        ids = {i for i, _ in check_spec("scripts/priemka.py", agit)}
+        assert "spec:tampered" in ids, "подмена приёмки после коммита не поймана якорем"
+
+        # Легитимное переякорение снимает провал.
+        assert anchor_spec("scripts/priemka.py", agit) == 0
+        assert check_spec("scripts/priemka.py", agit) == [], "переякоренная приёмка не принята"
+
+        # gate(spec_only=True) изолирует ТОЛЬКО приёмку — без smoke/compile/pd.
+        assert gate(root=agit, spec="scripts/priemka.py", spec_only=True) == []
+
+    print("selftest: детект приборов, устойчивость отпечатка, компиляция, smoke, "
+         "регистрация сторожей, якорь приёмки — ок")
     return 0
 
 
@@ -278,14 +403,25 @@ def main():
     ap.add_argument("--all-selftests", action="store_true",
                     help="гонять selftest ВСЕХ приборов, а не только затронутых")
     ap.add_argument("--spec", help="внешняя приёмка этапа (например scripts/stage5_spec.py)")
+    ap.add_argument("--spec-only", action="store_true",
+                    help="гонять ТОЛЬКО приёмку из --spec, без компиляции/smoke/селфтестов")
+    ap.add_argument("--anchor-spec", metavar="SPEC",
+                    help="заякорить текущую редакцию приёмки вне HEAD (журнал в .autoloop/) и выйти")
+    ap.add_argument("--selftests-only", action="store_true",
+                    help="гонять ТОЛЬКО селфтесты, герметично — все, а не только затронутые")
+    ap.add_argument("--hooks-only", action="store_true",
+                    help="гонять ТОЛЬКО проверку РЕГИСТРАЦИИ сторожей (pre-commit/commit-msg/settings.json)")
     ap.add_argument("--fingerprint", action="store_true", help="печатать только отпечаток вердикта")
     ap.add_argument("--json", action="store_true", help="машинный вывод")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
+    if a.anchor_spec:
+        return anchor_spec(a.anchor_spec, ROOT)
     if a.selftest:
         return selftest()
 
-    fails = gate(a.base, ROOT, a.all_selftests, a.spec)
+    fails = gate(a.base, ROOT, a.all_selftests, a.spec, a.spec_only,
+                a.selftests_only, a.hooks_only)
     fp = fingerprint(fails)
     if a.fingerprint:
         print(fp)
