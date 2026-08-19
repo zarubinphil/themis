@@ -82,12 +82,22 @@ def check(name: str, status: str, detail: str = "", fix: str = "") -> dict:
 
 
 def platform_id() -> str:
+    """Один словарь платформ на весь проект: darwin | windows | linux.
+
+    Раньше macOS звалась здесь «macos», а в отчётах и промптах — «darwin»; два имени
+    одного и того же расходятся ровно тогда, когда по ним что-то сравнивают.
+    Подстановка чужой платформы (--platform) нужна и разбору с владельцем, и приёмке:
+    доктор, выдающий на Windows тот же ответ, что на Маке, ничего не проверил.
+    """
+    forced = (os.environ.get("THEMIS_PLATFORM") or "").strip().lower()
+    if forced:
+        return {"macos": "darwin", "mac": "darwin", "osx": "darwin"}.get(forced, forced)
     s = platform.system()
-    return {"Darwin": "macos", "Windows": "windows", "Linux": "linux"}.get(s, s.lower())
+    return {"Darwin": "darwin", "Windows": "windows", "Linux": "linux"}.get(s, s.lower())
 
 
 def scheduler_of(plat: str) -> str:
-    return {"macos": "launchd (scripts/*.plist)",
+    return {"darwin": "launchd (scripts/*.plist)",
             "windows": "Планировщик задач (schtasks /create)",
             "linux": "systemd-таймеры (systemctl --user enable --now)"}.get(plat, "неизвестен")
 
@@ -124,7 +134,7 @@ def check_module(mod: str, why: str, critical: bool = True) -> dict:
 def check_ocr(plat: str) -> list[dict]:
     """OCR-движок. На macOS обязан быть собран; на других платформах его нет."""
     doc = os.path.join(ROOT, "bin", "vision-doc")
-    if plat != "macos":
+    if plat != "darwin":
         return [check(
             "OCR сканов (Apple Vision)", CRIT,
             f"платформа {plat}: bin/vision-doc — системный фреймворк Apple, здесь его НЕТ. "
@@ -157,7 +167,7 @@ def check_ocr(plat: str) -> list[dict]:
 
 def check_fonts(plat: str) -> dict:
     """Шрифты стандарта. Читаются из системы, а не предполагаются."""
-    if plat == "macos":
+    if plat == "darwin":
         rc, out = run(["system_profiler", "SPFontsDataType"], timeout=60)
         haystack = out
     elif plat == "linux":
@@ -230,6 +240,109 @@ def check_selftests() -> dict:
     return check("самопроверки скриптов", OK, f"{len(names)}/{len(names)} зелёные")
 
 
+# ── Опознание машины и CLI фактом (этап 6.5) ────────────────────────────────
+# «Есть ли у вас codex» — вопрос, а не проверка: человек ответит по памяти,
+# а установка пойдёт по его памяти. Спрашиваем машину, не владельца.
+# Авторизация проверяется командой самого инструмента; из ответа берём ТОЛЬКО
+# признак «вошёл», без почты и идентификаторов — это чужие персональные данные.
+# (имя, команда, зачем, сообщает ли команда САМУ авторизацию)
+CLI_PROBES = [
+    ("claude", ["claude", "auth", "status"], "Фемида работает поверх Claude Code", True),
+    ("codex", ["codex", "login", "status"], "второе мнение и сиденья ролей", True),
+    ("gemini", ["gemini", "--version"], "второе мнение", False),
+    ("kimi", ["kimi", "--version"], "второе мнение", False),
+]
+
+
+def probe_cli() -> list[dict]:
+    out = []
+    for name, cmd, why, govorit_ob_avторizacii in CLI_PROBES:
+        how = " ".join(cmd)
+        if not shutil.which(cmd[0]):
+            out.append({"name": name, "present": False, "authorized": False,
+                        "how": f"which {cmd[0]} → не найден", "why": why})
+            continue
+        rc, text = run(cmd, timeout=30)
+        low = text.lower()
+        if not govorit_ob_avторizacii:
+            # Команда только подтверждает, что инструмент установлен. Выдавать это
+            # за проверку входа нельзя: «authorized: true» по коду --version — ложь.
+            out.append({"name": name, "present": True, "authorized": None,
+                        "how": f"{how} (вход этой командой не проверяется)", "why": why})
+            continue
+        voshel = rc == 0 and not any(w in low for w in
+                                     ("not logged", "login required", "не выполнен вход",
+                                      '"loggedin": false', "logged out"))
+        out.append({"name": name, "present": True, "authorized": bool(voshel),
+                    "how": how, "why": why})
+    return out
+
+
+# Что на платформе не работает и ЧЕМ ЗАМЕНИТЬ. Пункт без замены — молчаливая
+# деградация: опознали платформу, промолчали о последствиях. Владелец запретил
+# это прямо: половина этапа хуже нуля.
+def unavailable_on(plat: str) -> list[dict]:
+    if plat == "darwin":
+        return []
+    obshchee = [
+        {"what": "OCR сканов и фотографий документов",
+         "why": "bin/vision-doc — системный фреймворк Apple Vision, вне macOS его нет",
+         "replacement": "текстовые PDF, DOCX и XLSX читаются через markitdown полностью; "
+                        "сканы — либо вести такие дела на macOS, либо подключить свой движок "
+                        "по интерфейсу bin/vision-doc (вход файл, выход page_NNN.txt и "
+                        "page_NNN.md с таблицами) и указать путь в THEMIS_VISION_DOC"},
+        {"what": "расписание фоновых заданий (launchd)",
+         "why": "launchd есть только в macOS",
+         "replacement": f"{scheduler_of(plat)}: перенести обновление корпуса права "
+                        "(scripts/legal-corpus-monthly.sh, раз в месяц) и слежение за "
+                        "правками доверителя (scripts/redline-watch.sh)"},
+        {"what": "диктовка задач (SMLTLK)",
+         "why": "SMLTLK — приложение строки меню macOS, на этой платформе не запускается",
+         "replacement": ("Планировщик и «Голосовой ввод» Windows либо любой локальный "
+                         "распознаватель речи; текст класть в voice-to-brief как обычно"
+                         if plat == "windows" else
+                         "локальный whisper (ставится обязательно: единственный движок "
+                         "распознавания речи на Linux, звук не уходит на сторону); "
+                         "текст класть в voice-to-brief как обычно")},
+        {"what": "подпись документа и сборка PDF",
+         "why": "sign_and_pdf.py идёт через Word и AppleScript; способ подписи на Linux "
+                "не разрабатывается (решение владельца 18.08.2026)",
+         "replacement": ("Word через COM-автоматизацию вместо AppleScript"
+                         if plat == "windows" else
+                         "результат работы — .docx; подпись и PDF делаются на Маке")},
+    ]
+    if plat == "windows":
+        obshchee.append(
+            {"what": "пути с кириллицей в консоли",
+             "why": "кодовая страница по умолчанию ломает имена дел в subprocess",
+             "replacement": "PowerShell с UTF-8 (chcp 65001) и git config core.autocrlf input"})
+    else:
+        obshchee.append(
+            {"what": "пути с кириллицей при не-UTF-8 локали",
+             "why": "os.listdir отдаёт битые имена дел",
+             "replacement": "выставить локаль UTF-8 (LANG=ru_RU.UTF-8 либо C.UTF-8)"})
+    return obshchee
+
+
+def smltlk_on(plat: str) -> dict:
+    """SMLTLK — штатный компонент Фемиды, а не отдельный продукт (владелец, 18.08.2026)."""
+    if plat == "darwin":
+        return {"available": True,
+                "how": "ставится тем же онбордингом из ~/Проекты/smltlk (и smltlk-*); "
+                       "связка: диктовка → скилл voice-to-brief → бриф задачи; "
+                       "голосовые из бота расшифровываются той же локальной моделью",
+                "why": "приложение строки меню macOS, Neural Engine распознаёт локально",
+                "replacement": ""}
+    zamena = ("«Голосовой ввод» Windows либо локальный распознаватель речи"
+              if plat == "windows" else
+              "локальный whisper — на Linux он ставится обязательно, им же "
+              "расшифровываются голосовые из бота")
+    return {"available": False,
+            "how": "",
+            "why": "SMLTLK — приложение строки меню macOS, здесь оно не запускается",
+            "replacement": f"{zamena}; дальше текст идёт в voice-to-brief как обычно"}
+
+
 def collect(offline: bool = False) -> dict:
     plat = platform_id()
     checks = [check_python(),
@@ -254,13 +367,22 @@ def collect(offline: bool = False) -> dict:
     warn = [c for c in checks if c["статус"] == WARN]
     return {"платформа": plat, "планировщик задач": scheduler_of(plat),
             "python": sys.version.split()[0], "корень": ROOT,
+            # Машинные ключи: их читает приёмка и онбординг, поэтому имена латиницей
+            # и значения фактами, а не пересказом.
+            "platform": plat,
+            "os_version": platform.mac_ver()[0] or platform.release() or platform.version(),
+            "arch": platform.machine(),
+            "simulated": bool(os.environ.get("THEMIS_PLATFORM")),
+            "cli": probe_cli(),
+            "unavailable": unavailable_on(plat),
+            "smltlk": smltlk_on(plat),
             "проверок": len(checks), "критично": len(crit), "предупреждений": len(warn),
             "проверки": checks}
 
 
 def platform_notes(plat: str) -> list[str]:
     """Что на этой платформе работает иначе. Молчать об этом нельзя."""
-    if plat == "macos":
+    if plat == "darwin":
         return ["OCR сканов: bin/vision-doc (Apple Vision), локально и бесплатно.",
                 "Фоновые задания: launchd, файлы scripts/*.plist "
                 "(legal.corpus.update, legal.redline.watch)."]
@@ -288,8 +410,12 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Проверка окружения Фемиды")
     ap.add_argument("--json", action="store_true", help="машинный вывод")
     ap.add_argument("--offline", action="store_true", help="без сетевых проверок")
+    ap.add_argument("--platform", choices=("darwin", "windows", "linux", "macos"),
+                    help="разбирать чужую платформу (для онбординга и приёмки)")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
+    if a.platform:
+        os.environ["THEMIS_PLATFORM"] = a.platform
     if a.selftest:
         return selftest()
 
@@ -324,9 +450,9 @@ def main() -> int:
 
 def selftest() -> int:
     checks = [
-        ("платформа опознаётся", platform_id() in ("macos", "windows", "linux")),
+        ("платформа опознаётся", platform_id() in ("darwin", "windows", "linux")),
         ("планировщик назван для каждой платформы",
-         all("неизвестен" not in scheduler_of(p) for p in ("macos", "windows", "linux"))),
+         all("неизвестен" not in scheduler_of(p) for p in ("darwin", "windows", "linux"))),
         # Молчаливая деградация запрещена: у каждой красной строки есть команда починки.
         ("критичная строка несёт команду починки",
          bool(check_binary("нетакого", ["нетакогобинаря", "--version"], "зачем",
@@ -354,7 +480,7 @@ def selftest() -> int:
         ("на не-macOS сказано, что именно перестаёт работать",
          "СКАНЫ" in check_ocr("windows")[0]["что видно"]),
         ("платформенные особенности непусты на каждой платформе",
-         all(platform_notes(p) for p in ("macos", "windows", "linux"))),
+         all(platform_notes(p) for p in ("darwin", "windows", "linux"))),
         ("на Windows назван Планировщик задач",
          any("Планировщик" in n for n in platform_notes("windows"))),
         ("на Linux названы systemd-таймеры",
