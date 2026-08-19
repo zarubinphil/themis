@@ -341,7 +341,13 @@ def check_sync():
         elif not (q / "delo" / "karta.md").is_file():
             fails.append(("sync_receiver.py", "принято, но файла в очереди нет"))
 
-        for src, rel, why in ((original, "delo/isk.pdf", "оригинал документа"),
+        pusto = td / "pusto.md"
+        pusto.write_bytes(b"")
+        for src, rel, why in ((pusto, "delo/karta.md", "пустой файл поверх принятого "
+                                                       "(обрезанная выжимка затирает целую)"),
+                              (good, "a\\..\\..\\b.md", "обратные слеши в пути"),
+                              (good, "/".join(["a"] * 300) + "/k.md", "путь в 300 сегментов"),
+                              (original, "delo/isk.pdf", "оригинал документа"),
                               (binary, "delo/b.txt", "бинарник под видом текста"),
                               (link, "delo/l.md", "симлинк"),
                               (good, "../beglec.md", "путь вне очереди (..)"),
