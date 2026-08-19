@@ -1,0 +1,256 @@
+#!/usr/bin/env python3
+"""foreign_cli.py — вызов чужого CLI за границей процесса. Герметично и fail-closed.
+
+Зачем и почему так строго. `claude_guard.py` — PreToolUse-хук нашего процесса; за
+границей процесса его нет вовсе. Значит, всё, что уходит чужому инструменту, уходит
+без гейтов, а материалы дела — адвокатская тайна (ст. 8 ФЗ № 63-ФЗ). Отсюда правило,
+которое этот прибор исполняет механически: **за границу уходит обезличенный текст,
+обратно приходит текст, на диск пишет Claude через наши ворота.**
+
+    --provider ИМЯ --prompt ФАЙЛ [--cmd КОМАНДА] [--timeout СЕК] [--out ФАЙЛ]
+              [--log ФАЙЛ]
+    --selftest
+
+Порядок (нарушать нельзя, каждый шаг fail-closed):
+  1. обезличивание `pii_gate --mask`; реквизитов не нашлось — текст проверяется
+     `pii_gate --residual`, и грязный текст НЕ уходит;
+  2. рабочий каталог — временный, и в нём только обезличенный файл;
+  3. окружение вычищено: THEMIS_*, токены и ключи не наследуются, PATH фиксирован,
+     stdin закрыт (человеческий гейт не утекает в чужой процесс);
+  4. успех по трём сигналам: код 0, ответ непуст, нет маркеров отказа;
+  5. журнал отправок без исходного текста: провайдер, время, длина, отпечаток.
+
+При любом отказе файл ответа НЕ создаётся: половина ответа хуже отсутствия.
+
+Механизм перенят у обёрток Олимпуза (`~/Проекты/olympuz`, MIT) — как механизм,
+не как код: реализация своя, под наши гейты и словарь.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+SCRIPTS = Path(__file__).resolve().parent
+PII = SCRIPTS / "pii_gate.py"
+# Наследуем ровно то, без чего чужой CLI не запустится. Всё прочее — наше, ему не нужно.
+KEEP_ENV = ("HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TERM", "LC_CTYPE", "TMPDIR", "LC_TIME")
+SAFE_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+# Признаки нашего секрета в имени переменной: такие не уходят никуда и никогда.
+SECRET_RE = re.compile(r"THEMIS|TOKEN|SECRET|API_?KEY|PASSWORD|CREDENTIAL|ANTHROPIC|OPENAI",
+                       re.I)
+OTKAZ_MARKERY = ("error:", "ошибка:", "rate limit", "quota", "not logged", "unauthorized")
+
+
+def _otkaz(why: str) -> int:
+    print(f"ОТКАЗ: {why}", file=sys.stderr)
+    return 1
+
+
+def _pii(*args) -> tuple[int, str]:
+    p = subprocess.run([sys.executable, str(PII), *args], capture_output=True, text=True,
+                       stdin=subprocess.DEVNULL)
+    return p.returncode, (p.stdout or "") + (p.stderr or "")
+
+
+def obezlichit(src: Path, work: Path) -> tuple[Path | None, str]:
+    """Обезличенный файл в рабочем каталоге либо причина отказа.
+
+    Порядок именно такой: сперва маска, и только если маскировать НЕЧЕГО —
+    проверка остатка. `pii_gate --mask` на чистом тексте отвечает кодом 1
+    (пустая карта чаще значит «регулярка не сработала», чем «текст чист»),
+    и принимать этот код за отказ было бы неверно: обезличенный правовой
+    вопрос не содержит реквизитов по построению.
+    """
+    masked = work / "vopros.txt"
+    karta = work / ".karta.json"      # карта остаётся у нас, чужому CLI не отдаётся
+    code, out = _pii("--mask", str(src), "--out", str(masked), "--map", str(karta))
+    if code != 0:
+        # Маскировать нечего — текст обязан быть чистым по второму, строгому рубежу.
+        code2, out2 = _pii("--residual", str(src))
+        if code2 != 0:
+            return None, f"текст не обезличен и не чист: {out2.strip()[:200]}"
+        shutil.copyfile(src, masked)
+        return masked, ""
+    code2, out2 = _pii("--residual", str(masked))
+    if code2 != 0:
+        try:
+            masked.unlink()
+        except OSError:
+            pass
+        return None, f"после маскировки остался след: {out2.strip()[:200]}"
+    try:
+        karta.chmod(0o600)
+    except OSError:
+        pass
+    return masked, ""
+
+
+def chistoe_okruzhenie() -> dict:
+    env = {k: v for k, v in os.environ.items() if k in KEEP_ENV and not SECRET_RE.search(k)}
+    env["PATH"] = SAFE_PATH + ":" + os.environ.get("PATH", "")
+    # PATH наследуем расширением, а не заменой: CLI ставят в ~/.local/bin и подобные.
+    env["PATH"] = ":".join(dict.fromkeys(env["PATH"].split(":")))
+    return env
+
+
+def zapisat_zhurnal(log: Path | None, provider: str, dlina: int, otpechatok: str,
+                    ishod: str) -> None:
+    """Журнал отправок БЕЗ исходного текста: провайдер, время, длина, отпечаток.
+    Журнал переживает дело и читается чаще него — тексту в нём места нет."""
+    if not log:
+        return
+    try:
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with open(log, "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%d.%m.%Y %H:%M:%S')}\t{provider}\t{dlina} симв."
+                    f"\tsha256:{otpechatok[:16]}\t{ishod}\n")
+    except OSError:
+        pass
+
+
+def call(provider: str, prompt: Path, cmd=None, timeout: int = 300,
+         out: Path | None = None, log: Path | None = None) -> int:
+    if not prompt.is_file():
+        return _otkaz(f"файла запроса нет: {prompt}")
+    argv = cmd if isinstance(cmd, list) else ([cmd] if cmd else None)
+    if not argv:
+        argv = {"codex": ["codex", "exec", "--skip-git-repo-check"],
+                "kimi": ["kimi", "-p"],
+                "claude": ["claude", "-p"]}.get(provider)
+    if not argv:
+        return _otkaz(f"неизвестный провайдер {provider} и не задан --cmd")
+
+    with tempfile.TemporaryDirectory(prefix="themis-foreign-") as td:
+        work = Path(td)
+        masked, why = obezlichit(prompt, work)
+        if masked is None:
+            zapisat_zhurnal(log, provider, 0, "", "отказ: обезличивание")
+            return _otkaz(why)
+        text = masked.read_text(encoding="utf-8")
+        otpechatok = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        # Карта соответствий чужому CLI не показывается: она восстанавливает ПД.
+        karta = work / ".karta.json"
+        karta_soderzhimoe = karta.read_bytes() if karta.exists() else None
+        if karta.exists():
+            karta.unlink()
+
+        try:
+            p = subprocess.run(argv + [text], cwd=str(work), env=chistoe_okruzhenie(),
+                               capture_output=True, text=True, timeout=timeout,
+                               stdin=subprocess.DEVNULL)
+            otvet, oshibka, code = (p.stdout or ""), (p.stderr or ""), p.returncode
+        except subprocess.TimeoutExpired:
+            zapisat_zhurnal(log, provider, len(text), otpechatok, "отказ: таймаут")
+            return _otkaz(f"{provider} не ответил за {timeout} с")
+        except OSError as e:
+            zapisat_zhurnal(log, provider, len(text), otpechatok, "отказ: запуск")
+            return _otkaz(f"{provider} не запустился: {e}")
+        finally:
+            if karta_soderzhimoe is not None:
+                karta.write_bytes(karta_soderzhimoe)   # карта нужна для обратной подстановки
+
+        # Три сигнала успеха: код, непустой ответ, отсутствие маркеров отказа.
+        if code != 0:
+            zapisat_zhurnal(log, provider, len(text), otpechatok, f"отказ: код {code}")
+            return _otkaz(f"{provider} вернул код {code}: {oshibka.strip()[:200]}")
+        if not otvet.strip():
+            zapisat_zhurnal(log, provider, len(text), otpechatok, "отказ: пустой ответ")
+            return _otkaz(f"{provider} ответил пустотой — код 0 сам по себе не сигнал")
+        nizhniy = (otvet + oshibka).lower()
+        if any(m in nizhniy for m in OTKAZ_MARKERY):
+            zapisat_zhurnal(log, provider, len(text), otpechatok, "отказ: маркер в ответе")
+            return _otkaz(f"{provider} вернул отказ в теле ответа: {otvet.strip()[:150]}")
+
+        zapisat_zhurnal(log, provider, len(text), otpechatok, "ok")
+        if out:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(otvet, encoding="utf-8")
+            print(f"ответ {provider}: {len(otvet)} симв. → {out}")
+        else:
+            sys.stdout.write(otvet)
+        return 0
+
+
+def selftest() -> int:
+    import stat as _stat
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+
+        def sh(name, body):
+            p = td / name
+            p.write_text("#!/bin/bash\n" + body, encoding="utf-8")
+            p.chmod(p.stat().st_mode | _stat.S_IXUSR)
+            return str(p)
+
+        vidok_out = td / "vidok.txt"
+        vidok = sh("vidok.sh", f'{{ echo "FILES=$(ls -A . | tr "\\n" ",")"; '
+                               f'echo "ENV=$(env | cut -d= -f1 | tr "\\n" ",")"; '
+                               f'echo "ARGS=$*"; }} > {vidok_out}\n'
+                               f'echo "Ответ: ст. 333 ГК РФ применима."\n')
+        pd = td / "pd.txt"
+        pd.write_text("Иванова Мария Петровна, ИНН 771234567890, дело № А65-1234/2026.\n",
+                      encoding="utf-8")
+        out = td / "otvet.txt"
+        log = td / "otpravki.log"
+        os.environ["THEMIS_PROBA_SEKRET"] = "ne-dolzhen-utech"
+        assert call("proba", pd, vidok, out=out, log=log) == 0, "герметичный вызов не прошёл"
+        vid = vidok_out.read_text(encoding="utf-8")
+        for utechka in ("Иванова", "771234567890", "А65-1234/2026"):
+            assert utechka not in vid, f"за границу ушло «{utechka}»"
+        assert "THEMIS_PROBA_SEKRET" not in vid, "наша переменная утекла в чужое окружение"
+        assert "PATH" in vid, "без PATH чужой CLI не запустится"
+        assert ".karta.json" not in vid, "карта обезличивания показана чужому CLI"
+        assert out.is_file() and "333" in out.read_text(encoding="utf-8"), "ответ не сохранён"
+        zhurnal = log.read_text(encoding="utf-8")
+        assert "Иванова" not in zhurnal and "sha256:" in zhurnal, "журнал хранит текст"
+
+        # Отказы: файл ответа не создаётся ни при одном исходе.
+        for name, body, why in (("pad.sh", 'echo "error: refused" >&2; exit 1\n', "падение"),
+                                ("pust.sh", "exit 0\n", "пустой ответ"),
+                                ("mark.sh", 'echo "error: rate limit"\n', "маркер отказа")):
+            o = td / f"o_{name}.txt"
+            assert call("proba", pd, sh(name, body), out=o, log=log) == 1, f"{why} принято за успех"
+            assert not o.exists(), f"{why}: файл ответа создан"
+
+        gryaznyy = td / "gryaznyy.txt"
+        gryaznyy.write_text("Паспорт 1234 567890 выдан Сидорову Петру.\n", encoding="utf-8")
+        o = td / "o_gryaznyy.txt"
+        # Даже если маскировка не справится, второй рубеж обязан остановить отправку.
+        code = call("proba", gryaznyy, vidok, out=o, log=log)
+        vid2 = vidok_out.read_text(encoding="utf-8")
+        assert "1234 567890" not in vid2, "паспорт ушёл за границу"
+        assert code == 0 or not o.exists(), "отказ оставил файл ответа"
+        os.environ.pop("THEMIS_PROBA_SEKRET", None)
+    print("selftest пройден: за границу уходит обезличенное, отказ не пишет ничего")
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Герметичный вызов чужого CLI.")
+    ap.add_argument("--provider")
+    ap.add_argument("--prompt")
+    ap.add_argument("--cmd", help="команда (для приёмки и своих провайдеров)")
+    ap.add_argument("--timeout", type=int, default=300)
+    ap.add_argument("--out")
+    ap.add_argument("--log")
+    ap.add_argument("--selftest", action="store_true")
+    a = ap.parse_args()
+    if a.selftest:
+        return selftest()
+    if not (a.provider and a.prompt):
+        ap.error("нужны --provider и --prompt, либо --selftest")
+    return call(a.provider, Path(a.prompt), a.cmd, a.timeout,
+                Path(a.out) if a.out else None, Path(a.log) if a.log else None)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
