@@ -814,7 +814,14 @@ TISHINA_CONTRACT = """  Одно сообщение на одно событие
       · текст уведомления проходит того же сторожа, что и шаблоны: уведомление с ПД
         наружу не уходит вовсе (код 1, ноль отправок), а не уходит «частично»;
       · текст длиннее предела Telegram (4096 знаков) не уходит ни куском, ни лентой:
-        код 1 и ноль отправок. Событие описывается короче, подробности живут в панели."""
+        код 1 и ноль отправок. Событие описывается короче, подробности живут в панели;
+      · у каждого события есть свой производитель, а не только шаблон в корпусе:
+        `--notify-hearings` (сводка, событий нет — молчит), `--notify-doc ПУТЬ`
+        (документ готов), `--notify-deadline ДД.ММ.ГГГГ` (срок), `--notify-hearing
+        ДД.ММ.ГГГГ --at ЧЧ:ММ --doc ПУТЬ` (заседание и собранная папка). Каждый —
+        РОВНО одно сообщение; кривой аргумент даёт отказ без отправки и без
+        трассировки. Шаблон, который ничем не отправляется, — мёртвая речь: приёмка
+        его проверяет, владелец не слышит, и он тихо расходится с тем, что уходит."""
 
 
 def check_tishina():
@@ -857,6 +864,44 @@ def check_tishina():
             if tg.sent:
                 fails.append(("themis_bot.py", f"длинное уведомление ушло "
                                                f"({len(tg.sent)} сообщений)"))
+
+        # У каждого события — свой производитель, и ровно одно сообщение.
+        doc = "cases/ivanov-ivan/razdel-imushchestva-2026/.agent/drafts/proba.docx"
+        links = td / "doc-links.json"
+        env_ss = {**env, "THEMIS_DOC_LINKS": str(links)}
+        for imya, argv in (("документ готов", ["--notify-doc", doc]),
+                           ("срок", ["--notify-deadline", "25.08.2026"]),
+                           ("заседание", ["--notify-hearing", "21.08.2026", "--at", "10:00",
+                                          "--doc", doc])):
+            with FakeTelegram([]) as tg:
+                code, out, err = run([tool("themis_bot.py"), *argv, "--api-base", tg.base],
+                                     env=env_ss, timeout=120)
+                if code != 0 or len(tg.sent) != 1:
+                    fails.append(("themis_bot.py", f"«{imya}»: код {code}, сообщений "
+                                                   f"{len(tg.sent)} — ожидалось одно"))
+                    continue
+                text = tg.sent[0]["text"]
+                for sled in ("ivanov", "razdel", "proba.docx"):
+                    if sled in text:
+                        fails.append(("themis_bot.py", f"«{imya}» называет дело: {sled}"))
+                f = td / f"out_{len(fails)}.txt"
+                f.write_text(text, encoding="utf-8")
+                code_c, _, err_c = run([tool("themis_bot.py"), "--check-out", str(f)])
+                if code_c != 0:
+                    fails.append(("themis_bot.py", f"«{imya}» не проходит своего сторожа: "
+                                                   f"{err_c.strip()[:120]}"))
+        # Кривой аргумент — отказ без отправки и без трассировки.
+        for imya, argv in (("дата не тем форматом", ["--notify-deadline", "2026-08-25"]),
+                           ("заседание без документа", ["--notify-hearing", "21.08.2026"]),
+                           ("документ вне дел", ["--notify-doc", "/etc/passwd"])):
+            with FakeTelegram([]) as tg:
+                code, out, err = run([tool("themis_bot.py"), *argv, "--api-base", tg.base],
+                                     env=env_ss, timeout=120)
+                if code == 0 or tg.sent:
+                    fails.append(("themis_bot.py", f"«{imya}»: принято (код {code}, "
+                                                   f"сообщений {len(tg.sent)})"))
+                if "Traceback" in err:
+                    fails.append(("themis_bot.py", f"«{imya}»: отказ трассировкой"))
 
         s_pd = td / "s_pd.txt"
         s_pd.write_text("Иванова Мария Петровна ждёт документ по делу № А65-12345/2026.\n",
