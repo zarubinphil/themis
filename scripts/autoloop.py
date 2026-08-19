@@ -236,8 +236,20 @@ def worktree_add(name, root=ROOT):
 
 def worktree_merge(name, root=ROOT):
     """Забрать коммиты роли из её ветки в основное дерево. Конфликт — не катастрофа:
-    мерж откатывается, роль теряет итерацию, причина остаётся в журнале."""
+    мерж откатывается, роль теряет итерацию, причина остаётся в журнале.
+
+    Роль, оставившую правки незакоммиченными, страхует автокоммит: чужой CLI
+    команде «коммить каждую правку» подчиняется не всегда (итерация 1, 19.08.2026 —
+    работа роли осталась в worktree и стёрлась бы обновлением копии). ПД-сторож
+    коммита при этом не обходится: хук отработает и остановит грязный автокоммит."""
     branch = f"autoloop/{name}"
+    wt = os.path.join(STATE_DIR, "worktrees", name)
+    code, out, _ = run(["git", "status", "--porcelain"], cwd=wt, timeout=60)
+    if code == 0 and out.strip():
+        run(["git", "add", "-A"], cwd=wt, timeout=120)
+        run(["git", "-c", "user.email=autoloop@themis", "-c", f"user.name={name}",
+             "commit", "-qm", f"итерация роли {name}: автокоммит координатора "
+             f"(роль оставила правки незакоммиченными)"], cwd=wt, timeout=300)
     code, out, _ = run(["git", "rev-list", "--count", f"HEAD..{branch}"], cwd=root, timeout=60)
     ahead = int(out.strip() or 0) if code == 0 else 0
     if ahead == 0:
@@ -570,6 +582,14 @@ def selftest():
             g("commit", "-qm", "правка роли", cwd=wt)
             ok, ahead = worktree_merge("proba", tmp)
             assert ok and ahead == 1, f"коммит роли не въехал в main: {ok}, {ahead}"
+            # Роль НЕ закоммитила — автокоммит координатора спасает работу
+            wt2 = worktree_add("proba", tmp)
+            with open(os.path.join(wt2, "c.txt"), "w", encoding="utf-8") as f:
+                f.write("незакоммиченная работа роли\n")
+            ok, ahead = worktree_merge("proba", tmp)
+            assert ok and ahead == 1, "незакоммиченная работа роли потеряна"
+            assert os.path.isfile(os.path.join(tmp, "c.txt")), \
+                "автокоммит прошёл, а файла в main нет"
             assert os.path.isfile(os.path.join(tmp, "b.txt")), \
                 "мерж прошёл, а файла роли в main нет"
             # Итерация N+1: worktree обновляется до нового HEAD main
