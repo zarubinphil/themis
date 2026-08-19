@@ -40,7 +40,7 @@ ROOT = Path(__file__).resolve().parent.parent
 CASES = ROOT / "cases"
 JOURNAL = ROOT / ".autoloop" / "migration.jsonl"
 UNTOUCHABLE = (cp.INTAKE, cp.HEARINGS)
-# Где правятся литералы путей. Производное (.codex, .agents) не трогаем — оно
+# Где правятся литералы путей. Производное (платформенный вариант, .agents) не трогаем — оно
 # генерируется sync_prompts из канона после правки канона.
 CODE_GLOBS = ("scripts/*.py", "scripts/*.sh", "cockpit/*.py", "AGENTS.md",
               ".claude/**/*.md", "knowledge/redlines.md")

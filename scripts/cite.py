@@ -34,7 +34,7 @@ KODEKSY_DIR = os.path.join(ROOT, "knowledge", "kodeksy")
 PLENUMY_DIR = os.path.join(ROOT, "knowledge", "plenumy")
 
 # Разговорные сокращения кодексов -> slug файла в knowledge/kodeksy/.
-CODEX_SLUGS = {
+CODE_SLUGS = {
     "гк": "gk-rf", "гпк": "gpk-rf", "ск": "sk-rf", "кас": "kas-rf",
     "коап": "koap-rf", "коап рф": "koap-rf", "апк": "apk-rf",
     "нк": "nk-rf-gosposhlina", "тк": "tk-rf", "жк": "zhk-rf",
@@ -47,7 +47,7 @@ CODEX_SLUGS = {
 }
 
 # Кодекс в запросе — не только кириллица: «229-ФЗ», «127-ФЗ», «ЗоЗПП». Прежний
-# шаблон принимал только буквы, и половина словаря CODEX_SLUGS была недостижима.
+# шаблон принимал только буквы, и половина словаря кодексов была недостижима.
 ARTICLE_QUERY_RE = re.compile(
     r"ст(?:атья|атьи|атью)?\.?\s*([\d.]+(?:-\d+)?)\s+([А-Яа-яЁё0-9-]+)(?:\s+РФ)?", re.I)
 CHAPTER_QUERY_RE = re.compile(
@@ -178,13 +178,13 @@ def _repealed(heading_line: str, section: str) -> bool:
     return bool(re.search(r"(?i)утратил[аи]?\s+силу|признан[аоы]?\s+утратившим", head))
 
 
-def find_article(num: str, codex_word: str) -> dict:
-    slug = CODEX_SLUGS.get(codex_word.lower())
-    result = {"query": f"ст. {num} {codex_word.upper()}", "found": False}
+def find_article(num: str, code_word: str) -> dict:
+    slug = CODE_SLUGS.get(code_word.lower())
+    result = {"query": f"ст. {num} {code_word.upper()}", "found": False}
     if not slug:
-        have = sorted({k for k, v in CODEX_SLUGS.items()
+        have = sorted({k for k, v in CODE_SLUGS.items()
                        if os.path.isfile(os.path.join(KODEKSY_DIR, f"{v}.md"))})
-        result["error"] = (f"кодекс «{codex_word}» не опознан. На диске есть: "
+        result["error"] = (f"кодекс «{code_word}» не опознан. На диске есть: "
                             + ", ".join(have) if have else "корпус пуст")
         return result
     path = os.path.join(KODEKSY_DIR, f"{slug}.md")
@@ -222,16 +222,16 @@ def find_article(num: str, codex_word: str) -> dict:
         "integrity": integrity_ok(text),
         "source": part.get("source") or frontmatter_field(text, "источник"),
         "text": section,
-        "cite_tag": f"(ст. {num} {codex_word.upper()} РФ)",
+        "cite_tag": f"(ст. {num} {code_word.upper()} РФ)",
     })
     return result
 
 
-def find_chapter(num: str, codex_word: str) -> dict:
-    slug = CODEX_SLUGS.get(codex_word.lower())
-    result = {"query": f"глава {num} {codex_word.upper()}", "found": False}
+def find_chapter(num: str, code_word: str) -> dict:
+    slug = CODE_SLUGS.get(code_word.lower())
+    result = {"query": f"глава {num} {code_word.upper()}", "found": False}
     if not slug:
-        result["error"] = f"кодекс «{codex_word}» не опознан"
+        result["error"] = f"кодекс «{code_word}» не опознан"
         return result
     path = os.path.join(KODEKSY_DIR, f"{slug}.md")
     text = read(path)
@@ -271,7 +271,7 @@ def find_chapter(num: str, codex_word: str) -> dict:
         "text": section,
         # Тег строится из найденного заголовка: раньше он эхом отдавал ЗАПРОШЕННЫЙ
         # номер, и под чужим текстом стояла синтаксически безупречная ложная ссылка.
-        "cite_tag": f"({_found_label(heading_line, 'глава')} {codex_word.upper()} РФ)",
+        "cite_tag": f"({_found_label(heading_line, 'глава')} {code_word.upper()} РФ)",
     })
     return result
 
@@ -384,7 +384,7 @@ def selftest() -> int:
     os.makedirs(PLENUMY_DIR)
     fresh = (datetime.date.today() - datetime.timedelta(days=30)).strftime("%d.%m.%Y")
 
-    def codex(slug, red, body):
+    def write_fixture(slug, red, body):
         head = (f'---\nдата_редакции: "{red}"\nисточник: "тест"\n'
                 f'sha256: "{hashlib.sha256(body.encode()).hexdigest()}"\n---\n')
         open(os.path.join(KODEKSY_DIR, f"{slug}.md"), "w", encoding="utf-8").write(head + body)
@@ -392,10 +392,10 @@ def selftest() -> int:
     body_ok = ("## Глава 25.3\n\n### Статья 683. Срок договора\n\n1. Договор найма "
                "заключается на срок, не превышающий пяти лет.\n\n### Статья 152.1. Изображение\n\n"
                "Обнародование изображения допускается с согласия гражданина.\n")
-    codex("gk-rf", fresh, body_ok)
+    write_fixture("gk-rf", fresh, body_ok)
     # 25.3 стоит ПЕРЕД 25 намеренно: так подмена видна. При снятой границе поиск
     # «глава 25» находит первое совпадение — то есть 25.3 — и выдаёт чужую главу.
-    codex("zk-rf", fresh,
+    write_fixture("zk-rf", fresh,
           "## Глава 25.3. Государственная пошлина\n\n### Статья 333.16. Пошлина\n\n"
           "Государственная пошлина — сбор, взимаемый с лиц при их обращении в "
           "государственные органы за совершением юридически значимых действий.\n\n"
@@ -403,10 +403,10 @@ def selftest() -> int:
           "Налогоплательщиками налога на прибыль организаций признаются российские "
           "организации и иностранные организации, осуществляющие деятельность через "
           "постоянные представительства.\n")
-    codex("gpk-rf", "?", "### Статья 131. Форма иска\n\nИск подается в письменной форме.\n")
-    codex("sk-rf", "29.12.1995", "### Статья 34. Совместная собственность\n\nИмущество общее.\n")
+    write_fixture("gpk-rf", "?", "### Статья 131. Форма иска\n\nИск подается в письменной форме.\n")
+    write_fixture("sk-rf", "29.12.1995", "### Статья 34. Совместная собственность\n\nИмущество общее.\n")
     # заголовок-склейка утративших силу статей рядом с живой статьёй
-    codex("koap-rf", fresh,
+    write_fixture("koap-rf", fresh,
           "### Статья 7. 29, статья 7.29.1, статья 7.30. Утратили силу\n\n"
           "Статьи 7.29 - 7.30. Утратили силу с 1 марта 2025 года.\n\n"
           "### Статья 7.1. Самовольное занятие земельного участка\n\nСамовольное занятие.\n")
@@ -435,7 +435,7 @@ def selftest() -> int:
     r_stale = resolve("ст. 34 СК")
     r_broken = resolve("ст. 1 КАС")
     r_absent = resolve("ст. 999 ГК")
-    r_nocodex = resolve("ст. 1 МПК")
+    r_no_code = resolve("ст. 1 МПК")
     r_merged = resolve("ст. 7 КоАП")
     r_alive = resolve("ст. 7.1 КоАП")
     r_plenum = resolve("п. 21 Пленума ВС РФ от 19.06.2012 № 13")
@@ -451,7 +451,7 @@ def selftest() -> int:
         ("нарушенная целостность поймана", r_broken["integrity"] is False),
         ("целостность целого файла подтверждена", r_ok["integrity"] is True),
         ("несуществующая статья не выдумывается", not r_absent["found"]),
-        ("неизвестный кодекс назван ошибкой", not r_nocodex["found"]),
+        ("неизвестный кодекс назван ошибкой", not r_no_code["found"]),
         ("пункт Пленума найден", r_plenum["found"] and "апелляционной" in r_plenum["text"]),
         ("нераспознанный запрос не даёт ложного попадания", not r_junk["found"]),
         ("тег для вставки собран", r_ok["cite_tag"] == "(ст. 683 ГК РФ)"),

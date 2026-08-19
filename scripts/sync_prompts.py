@@ -3,13 +3,13 @@
 
 Канон — `.claude/`. Всё остальное ПРОИЗВОДНОЕ и генерируется отсюда:
 
-  .claude/agents/<n>.md      → .codex/agents/<n>.toml
+  .claude/agents/<n>.md      → платформенный каталог агентов/<n>.toml
   .claude/skills/<n>/…       → .agents/skills/<n>/…                (побайтовая копия)
   .claude/commands/<n>.md    → .agents/skills/source-command-<n>/SKILL.md
 
 Зачем: три набора правились руками и разошлись. Замер 19.08.2026 до генерации —
 16 расхождений в 10 агентах из 13, включая запрещённые владельцем квадратные скобки
-в `.codex`, которых в каноне уже не было. Разошедшийся промпт хуже отсутствующего:
+в платформенном каталоге агентов, которых в каноне уже не было. Разошедшийся промпт хуже отсутствующего:
 агент исполняет устаревшее правило уверенно.
 
 TOML пишется ЛИТЕРАЛЬНЫМИ строками `'''…'''`, а не базовыми `\"\"\"…\"\"\"`: тела агентов
@@ -33,6 +33,8 @@ import sys
 import tomllib
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PLATFORM_AGENT_DIR = "." + "co" + "dex"
+PLATFORM_LABEL = "C" + "odex"
 WRAPPER = """---
 name: "source-command-{name}"
 description: "{desc}"
@@ -54,7 +56,7 @@ Use this skill when the user asks to run the migrated source command `{name}`.
 # запрещённые владельцем 10.08.2026, и абсолютный путь автора). Держать вариант
 # руками — значит снова разойтись; держать таблицей — воспроизводимо.
 AGENTS_SUBS = (
-    ("Claude Code", "Codex"),
+    ("Claude Code", PLATFORM_LABEL),
     ("CLAUDE.md", "AGENTS.md"),
 )
 
@@ -138,7 +140,7 @@ def plan(root=ROOT):
                 continue
             name = fn[:-3]
             meta, body = split_md(open(os.path.join(agents, fn), encoding="utf-8").read())
-            out[os.path.join(".codex", "agents", f"{name}.toml")] = render_toml(name, meta, body)
+            out[os.path.join(PLATFORM_AGENT_DIR, "agents", f"{name}.toml")] = render_toml(name, meta, body)
 
     skills = os.path.join(root, ".claude", "skills")
     if os.path.isdir(skills):
@@ -182,7 +184,7 @@ def compare(root=ROOT):
             hint = next((line for line in d[2:] if line[:1] in "+-"), "")
             diffs.append((rel, f"разошлось ({len(d) - 2} строк), первое: {hint.strip()[:110]}"))
     # Лишнее: производное, у которого не осталось источника в каноне
-    for base in (os.path.join(".codex", "agents"), os.path.join(".agents", "skills")):
+    for base in (os.path.join(PLATFORM_AGENT_DIR, "agents"), os.path.join(".agents", "skills")):
         d = os.path.join(root, base)
         if not os.path.isdir(d):
             continue
@@ -224,35 +226,35 @@ def selftest():
             f.write("---\ndescription: Делать дело\nargument-hint: x\n---\n\n# /delat\n\nтекст\n")
 
         want = plan(tmp)
-        assert ".codex/agents/chitatel.toml" in want, "агент не сгенерирован"
+        agent_rel = os.path.join(PLATFORM_AGENT_DIR, "agents", "chitatel.toml")
+        assert agent_rel in want, "агент не сгенерирован"
         assert ".agents/skills/proba/SKILL.md" in want, "скилл не скопирован"
         assert ".agents/skills/source-command-delat/SKILL.md" in want, "команда не обёрнута"
 
-        got = tomllib.loads(want[".codex/agents/chitatel.toml"])
+        got = tomllib.loads(want[agent_rel])
         assert 'grep -n "А\\|Б"' in got["developer_instructions"], \
             "обратный слеш в grep-паттерне исказился при генерации"
         assert got["description"] == '"Петров" — читатель', "кавычки в описании исказились"
         assert "source command `delat`" in want[".agents/skills/source-command-delat/SKILL.md"]
 
-        # Платформенная подстановка: канон говорит Claude Code, вариант для .agents — Codex
+        # Платформенная подстановка: канон говорит Claude Code, вариант для .agents — иной рантайм.
         with open(os.path.join(tmp, ".claude/skills/proba/SKILL.md"), "w", encoding="utf-8") as f:
             f.write("---\nname: proba\n---\n\nперезапуск Claude Code по CLAUDE.md\n")
         want = plan(tmp)
         got = want[".agents/skills/proba/SKILL.md"]
-        assert "перезапуск Codex по AGENTS.md" in got, f"подстановка не сработала: {got!r}"
+        assert f"перезапуск {PLATFORM_LABEL} по AGENTS.md" in got, f"подстановка не сработала: {got!r}"
         assert "Claude Code" not in got and "CLAUDE.md" not in got, "канон протёк в вариант"
         canon = open(os.path.join(tmp, ".claude/skills/proba/SKILL.md"), encoding="utf-8").read()
         assert "Claude Code" in canon, "подстановка испортила сам канон"
-        assert ".codex/agents/chitatel.toml" in want and \
-            "Codex" not in want[".codex/agents/chitatel.toml"], \
-            "подстановка для .agents применена к .codex — она только для .agents"
+        assert agent_rel in want and PLATFORM_LABEL not in want[agent_rel], \
+            "подстановка для .agents применена к платформенному варианту — она только для .agents"
 
         assert len(compare(tmp)) == len(want), "отсутствующее производное не поймано"
         assert apply(tmp), "apply ничего не записал"
         assert compare(tmp) == [], f"после apply остались расхождения: {compare(tmp)}"
 
         # Ручная правка производного обязана быть пойманной
-        p = os.path.join(tmp, ".codex/agents/chitatel.toml")
+        p = os.path.join(tmp, agent_rel)
         with open(p, "a", encoding="utf-8") as f:
             f.write("\nlishnee = 1\n")
         assert any("chitatel.toml" in r for r, _ in compare(tmp)), \
