@@ -203,6 +203,17 @@ def staged_files() -> list[str]:
     return [f for f in git("diff", "--cached", "--name-only", "--diff-filter=ACMR").split("\n") if f]
 
 
+def _is_test_fixture_code(path: str) -> bool:
+    """`scripts/*.py` — валидаторы реквизитов (ИНН/СНИЛС/паспорт…), их `--selftest`
+    штатно несёт СИНТЕТИЧЕСКИЕ примеры нужной формы («СНИЛС 123-456-789 64») —
+    именно такими фикстурами код и проверяют. Реальная утечка ПД идёт другим
+    каналом (имя папки дела в прозе/пути — `name_pattern` его ловит независимо
+    от расширения файла); `scripts/` клиентских данных не несёт по правилам
+    проекта. Найдено прогоном 19.08.2026: pii_gate.py и markdown_extract.py —
+    оба заведомо чистый код — красили коммит по СВОИМ ЖЕ тестовым фикстурам."""
+    return path.startswith("scripts/") and path.endswith(".py")
+
+
 def check_staged(pat: re.Pattern | None) -> list[str]:
     problems = []
     for f in staged_files():
@@ -210,7 +221,8 @@ def check_staged(pat: re.Pattern | None) -> list[str]:
         blob = git("show", f":{f}")
         if blob:
             problems += scan_text(blob, pat, f)
-            problems += scan_pii(blob, f)
+            if not _is_test_fixture_code(f):
+                problems += scan_pii(blob, f)
     return problems
 
 
@@ -407,6 +419,18 @@ def selftest() -> int:
          scan_text("familiya-ab", name_pattern([]), "f") == []),
         ("отчёт по находкам даёт код 1", report(["x"], "тесте") == 1),
         ("отчёт без находок даёт код 0", report([], "тесте") == 0),
+        # Пара «утечка + обиход» для scan_pii (найдено прогоном 19.08.2026:
+        # pii_gate.py/markdown_extract.py красили СВОИМИ ЖЕ тестовыми фикстурами
+        # СНИЛС-формы «123-456-789 64» — валидатор не должен ловить собственные
+        # примеры формата, но обязан по-прежнему ловить тот же литерал в прозе.
+        ("scripts/*.py опознаётся как тестовый код",
+         _is_test_fixture_code("scripts/pii_gate.py")),
+        ("cases/…/x.py тестовым кодом НЕ считается — не тот канал",
+         not _is_test_fixture_code("cases/klient/delo/x.py")),
+        ("knowledge/x.md тестовым кодом не считается",
+         not _is_test_fixture_code("knowledge/x.md")),
+        ("тот же литерал в .md по-прежнему ловится scan_pii (утечка не потеряна)",
+         len(scan_pii("СНИЛС 123-456-789 64", "note.md")) >= 1),
     ]
     for name, ok in checks:
         print(f"  {'✓' if ok else '✗'} {name}")
