@@ -95,26 +95,50 @@ def _translit_to_cyrillic(latin: str) -> str:
     return "".join(out)
 
 
-def name_pattern(names: list[str]) -> re.Pattern | None:
+def _owner_stems() -> set[str]:
+    """Кириллические стемы фамилии владельца из git config — его фамилия это
+    публичный бренд фирмы (README, титул, подпись документов), не тайна доверителя.
+    Латинское имя его папок из-под защиты НЕ выходит — исключение только для
+    кириллической прозы."""
+    r = subprocess.run(["git", "config", "user.name"], capture_output=True,
+                       text=True, cwd=ROOT)
+    stems = set()
+    for word in (r.stdout or "").split():
+        w = word.strip().lower()
+        if len(w) >= 5:
+            stems.add(w[:5])
+    return stems
+
+
+def name_pattern(names: list[str], cyrillic: bool = False) -> re.Pattern | None:
     """Один шаблон на все имена. Границы — чтобы `ivan` не ловился внутри `ivanov`.
 
     Регистронезависим, разделители `-`/`_`/пробел взаимозаменяемы (04.08.2026 —
-    `Testfam-Ab`/`TESTFAM-AB`/`testfam_ab` проходили мимо). Плюс кириллическая
-    транслитерация фамильной части с коротким падежным окончанием — сообщение
-    коммита чаще пишут по-русски, а не именем папки."""
+    `Testfam-Ab`/`TESTFAM-AB`/`testfam_ab` проходили мимо).
+
+    Кириллическая транслитерация (cyrillic=True) включается ТОЛЬКО для сообщения
+    коммита: там фамилию пишут по-русски («по делу Тестфама»). К содержимому
+    файлов кириллические стемы не применяются — транслит-стемы неизбежно
+    совпадают со словами языка («индикатор», «печатает» — 16 ложных тревог по
+    дереву за прогон 19.08.2026), а сторож с ложной тревогой на обиходе не живёт."""
     if not names:
         return None
+    owner = _owner_stems()
     lat_bodies, cyr_bodies = [], []
     for n in sorted(names, key=len, reverse=True):
         parts = [p for p in re.split(r"[-_ ]+", n) if p]
         if not parts:
             continue
         lat_bodies.append(r"[-_ ]".join(re.escape(p) for p in parts))
-        for p in parts:
-            if len(p) < 3:
-                continue          # инициалы транслитерировать бессмысленно и рискованно
-            cyr = _translit_to_cyrillic(p)
-            if len(cyr) >= 3:
+        # Транслитерируется только ФАМИЛЬНАЯ часть (первая): вторая — имя или
+        # инициалы, их кириллические стемы коротки и совпадают с обиходом.
+        # Стем короче 5 букв в шаблон не идёт: «sud»→«суд» с хвостом [а-яё]{0,3}
+        # ловил «суда», «судом», «судебн» — 97 ложных тревог по дереву за один
+        # прогон (19.08.2026), а сторож с ложной тревогой на обиходе не живёт.
+        fam = parts[0]
+        if cyrillic and len(fam) >= MIN_NAME:
+            cyr = _translit_to_cyrillic(fam)
+            if len(cyr) >= 5 and cyr[:5] not in owner:
                 cyr_bodies.append(re.escape(cyr) + r"[а-яё]{0,3}")
     body = "|".join(lat_bodies + cyr_bodies)
     if not body:
@@ -292,6 +316,7 @@ def main() -> int:
 
     pat = name_pattern(client_names())
     if a.msg:
+        pat = name_pattern(client_names(), cyrillic=True)
         try:
             text = open(a.msg, encoding="utf-8", errors="ignore").read()
         except OSError as e:
@@ -335,8 +360,20 @@ def selftest() -> int:
         os.makedirs(os.path.join(cases, d))
     names = client_names(cases)
     pat = name_pattern(names)
+    pat_msg = name_pattern(names, cyrillic=True)
 
     checks = [
+        # Кириллица: пара «утечка в сообщении коммита + обиход в содержимом».
+        ("кириллическая фамилия в сообщении коммита ловится",
+         len(scan_text("fix: возражения по делу Фамилияна", pat_msg, "msg")) >= 1),
+        ("кириллический стем НЕ применяется к содержимому файлов",
+         scan_text("возражения по делу Фамилияна", pat, "f.py") == []),
+        ("обиход в сообщении коммита молчит",
+         scan_text("docs: Постановление и Апелляционное определение разобраны",
+                   pat_msg, "msg") == []),
+        ("регистр и разделитель нормализованы",
+         all(len(scan_text(v, pat, "f")) == 1
+             for v in ("Familiya-Ab", "FAMILIYA-AB", "familiya_ab", "familiya ab"))),
         ("имена доверителей прочитаны с диска", set(names) == {"familiya-ab", "drugoy-vg"}),
         # Демо-дело заведено как публичный пример — оно не ПД.
         ("демо-дело исключено", "ivanov-ivan" not in names),
