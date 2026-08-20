@@ -55,14 +55,40 @@ MIN_NAME = 5
 
 def client_names(cases_dir: str = CASES) -> list[str]:
     """Имена папок доверителей С ДИСКА. Сторож их не хранит и не печатает."""
-    if not os.path.isdir(cases_dir):
+    dirs = [cases_dir]
+    if cases_dir == CASES:
+        dirs += _worktree_cases_dirs()
+    names: set[str] = set()
+    for cdir in dirs:
+        if not os.path.isdir(cdir):
+            continue
+        names.update(
+            d for d in os.listdir(cdir)
+            if os.path.isdir(os.path.join(cdir, d))
+            and not d.startswith(SERVICE_PREFIX)
+            and d not in DEMO
+            and len(d) >= MIN_NAME)
+    return sorted(names)
+
+
+def _worktree_cases_dirs(root: str = ROOT) -> list[str]:
+    """В роли `git worktree` папки дел обычно нет: cases/ игнорируется.
+
+    Берём имена из основного дерева, не из git-индекса. Это держит один и тот же
+    ПД-список в главном дереве и рабочих копиях ролей.
+    """
+    r = subprocess.run(["git", "worktree", "list", "--porcelain"],
+                       cwd=root, capture_output=True, text=True)
+    if r.returncode != 0:
         return []
-    return sorted(
-        d for d in os.listdir(cases_dir)
-        if os.path.isdir(os.path.join(cases_dir, d))
-        and not d.startswith(SERVICE_PREFIX)
-        and d not in DEMO
-        and len(d) >= MIN_NAME)
+    out = []
+    for line in r.stdout.splitlines():
+        if line.startswith("worktree "):
+            path = line.split(" ", 1)[1]
+            cdir = os.path.join(path, "cases")
+            if cdir != CASES:
+                out.append(cdir)
+    return out
 
 
 # Обратная транслитерация (латиница → кириллица), самые длинные сочетания первыми:
