@@ -77,16 +77,38 @@ def _case_rel(abspath: str):
     return a[len(c):]
 
 
-_LEADING_CD_RE = re.compile(r"^\s*cd\s+([^\s;&|]+)\s*(?:&&|;|\|)")
+def _is_protected_ancestor(path: str) -> bool:
+    """Цель — предок защищённого поддерева (00_intake / _baselines): снос или увоз
+    родителя губит первичку и базу «ДО» так же безвозвратно, как удаление их самих,
+    хотя по имени цели этого не видно (проба круга 5, 20.08.2026: `rm -rf {дело}`
+    проходил, а `rm -rf {дело}/00_intake` блокировался). Структурно: корень дела и
+    папка клиента стоят над 00_intake; .agent и .agent/drafts — над _baselines."""
+    rel = _case_rel(path)
+    if rel is None:
+        return False
+    tail = [x.casefold() for x in rel[2:]]
+    if not tail:                       # cases/{клиент} или cases/{клиент}/{дело}
+        return True
+    return tail == [".agent"] or tail == [".agent", "drafts"]
+
+
+# Смена каталога учитывается в ЛЮБОЙ форме, не только «cd X &&…». Перевод строки,
+# подоболочка «(cd X && …)», второй cd, cd не первой командой, pushd — всё это меняет
+# CWD и всё это снимало прежний гейт относительного пути (проба круга 5, 20.08.2026):
+# `cd дело/00_intake` + перевод строки уводил цель мимо сторожа. Судим по накопленному
+# эффекту: идём слева направо, применяем каждый cd/pushd в командной позиции (начало,
+# ;/&/|, перевод строки или «(»), последний выигрывает. Многострочная команда — обиход,
+# а не хитрость: защита снималась случайно, без умысла.
+_CD_RE = re.compile(r"(?:^|[;&|\n(]+)\s*(?:cd|pushd)\s+(?!-)([^\s;&|\n)]+)")
 
 
 def _base_dir(cmd: str, payload: dict) -> str:
-    """База относительных целей Bash: ведущий `cd DIR &&|;` → cwd из payload → cwd процесса."""
-    m = _LEADING_CD_RE.match(cmd)
-    base = m.group(1).strip("'\"") if m else ""
-    if not base:
-        cwd = payload.get("cwd")
-        base = cwd if isinstance(cwd, str) and cwd else os.getcwd()
+    """База относительных целей Bash: накопленный эффект всех cd/pushd → cwd payload → cwd."""
+    cwd = payload.get("cwd")
+    base = cwd if isinstance(cwd, str) and cwd else os.getcwd()
+    for m in _CD_RE.finditer(cmd):
+        d = os.path.expanduser(m.group(1).strip("'\""))
+        base = d if os.path.isabs(d) else os.path.join(base, d)
     base = os.path.expanduser(base)
     if not os.path.isabs(base):
         base = os.path.join(os.getcwd(), base)
@@ -178,18 +200,32 @@ def _workflow_gate(p: str) -> None:
             "Запустить охоту/совет либо поставить честный FAST-маркер. "
             "Статус: python3 scripts/themis_status.py " + case_root
         )
-    # Кухня и слой человека сторожатся ОДИНАКОВО. После переезда на два слоя
-    # (19.08.2026) документ мог лечь прямо в GOTOVO/ мимо конвейера — то есть
-    # мимо маркеров попасть сразу на стол юристу, минуя и карту, и практику.
-    guarded = tail_cf.startswith(".agent/drafts/") or tail_cf.startswith("gotovo/")
+    # Документ дела не ложится мимо сборщика и вердикта Кони. Кухня (.agent/drafts) и
+    # слой человека (GOTOVO) сторожились с переезда на два слоя (19.08.2026); круг 5
+    # (20.08.2026) добавил поданные документы (02_hearings) и КОРЕНЬ дела — туда клали
+    # .md/.docx прямо, минуя карту и практику. Каталог целиком (git clone / curl
+    # --output-dir в GOTOVO) — та же дыра: хвоста-файла нет, но пишут ВНУТРЬ папки.
     tail_parts_cf = [x.casefold() for x in rel[2:]]
-    exempt = "_working" in tail_parts_cf or "_baselines" in tail_parts_cf
-    if guarded and not exempt:
+    if "_working" in tail_parts_cf or "_baselines" in tail_parts_cf:
+        return
+    if tail_parts_cf[:2] == [".agent", "context"]:
+        return                       # карта/практика/позиция — свои ветки протокола выше
+    top = tail_parts_cf[0] if tail_parts_cf else ""
+    basename_cf = tail_parts_cf[-1] if tail_parts_cf else ""
+    ext = os.path.splitext(basename_cf)[1].lstrip(".")
+    drafts = tail_parts_cf[:2] == [".agent", "drafts"]
+    in_pipeline_dir = top in ("gotovo", "02_hearings") or drafts
+    root_doc = len(tail_parts_cf) == 1 and ext in ("md", "docx")
+    metadata = basename_cf.startswith("_")           # _case.md, _event.md — служебное
+    if (in_pipeline_dir or root_doc) and not metadata:
         if not _has_marker(km, r"## КАРТА ГОТОВА ✓") or not _has_marker(pr, PRACTICE_MARKER):
-            where = "GOTOVO/" if tail_cf.startswith("gotovo/") else ".agent/drafts/"
+            where = ("GOTOVO/" if top == "gotovo"
+                     else "02_hearings/" if top == "02_hearings"
+                     else ".agent/drafts/" if drafts else "корень дела")
             block(
                 f"БЛОК ПРОТОКОЛА: документ в {where} пишется только после Шагов 1-2 — "
-                "нет маркера карты и/или практики. Судебные документы вне конвейера запрещены. "
+                "нет маркера карты и/или практики. Судебные документы вне конвейера "
+                "запрещены (сборка только через DocBuilder, вердикт — Кони). "
                 "Статус: python3 scripts/themis_status.py " + case_root
             )
 
@@ -267,12 +303,16 @@ _FILE_VERB_RE = re.compile(
     r"(?:truncate|gzip|gunzip|bzip2|bunzip2|xz|unxz|split|cpio|zip|shred)\s+([^;&|<>]+)", re.M)
 # Загрузчики пишут в файл флагом, а не редиректом.
 _FETCH_RE = re.compile(r"(?:^|\s)(?:-o|--output|-O|--output-document)[=\s]+([^\s;&|<>]+)")
+# curl --output-dir DIR кладёт загруженное ВНУТРЬ каталога (не файл флагом -o): так
+# файл лёг бы прямо в GOTOVO мимо сборщика (проба круга 5). Цель — сам каталог.
+_CURL_OUTDIR_RE = re.compile(r"--output-dir[=\s]+([^\s;&|<>]+)")
 # Однострочник интерпретатора обходит и редирект, и cp. Целью считаем путь
 # ТОЛЬКО когда в теле есть признак записи: чтение картинки дела разрешено.
 _INTERP_RE = re.compile(r"\b(?:python3?|node|ruby|perl|php)\b[^\n|;]*?\s-(?:c|e)\b")
 _WRITE_HINT_RE = re.compile(
     r"open\s*\([^)]*['\"][wax]b?['\"]|write_bytes|write_text|savefig|to_csv"
-    r"|shutil\.(?:copy|move)|writeFileSync|File\.write|os\.rename")
+    r"|shutil\.(?:copy|move)|writeFileSync|File\.write|os\.rename"
+    r"|\.save\s*\(")            # python-docx/openpyxl d.save('дело/GOTOVO/x.docx') — мимо сборщика
 _PATH_RE = re.compile(r"[\w./\\~-]*cases/[\w./\\-]+\.\w+")
 # Путь записи ОТНОСИТЕЛЬНЫЙ: `cd дело && python3 -c "open('00_intake/x.pdf','w')"` —
 # `cases/` в строке нет, _PATH_RE слеп, а цель резолвится от ведущего cd (проба круга 4).
@@ -358,7 +398,10 @@ def _write_targets(cmd: str, base: str) -> list:
     body = _strip_heredocs(cmd)
     targets = [_resolve(t, base) for t in _REDIRECT_RE.findall(body)]
     targets += [_resolve(t, base) for t in _FETCH_RE.findall(body)]
+    targets += [_resolve(t, base) for t in _CURL_OUTDIR_RE.findall(body)]
     targets += [_resolve(t, base) for t in _git_checkout_targets(body)]
+    targets += _git_clone_targets(body, base)
+    targets += _sed_write_targets(body, base)
     targets += [_resolve(t, base) for t in _DD_OF_RE.findall(body)]
     for verb, args in _VERB_RE.findall(body):
         if verb in _VERB_ALL:                       # tee, touch — каждый аргумент
@@ -481,6 +524,38 @@ def _git_checkout_targets(body: str) -> list:
 # dd пишет через `of=ПУТЬ`, не позиционным аргументом — отдельный разбор.
 _DD_OF_RE = re.compile(
     r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?dd\b[^;&|<>]*?\bof=([^\s;&|<>]+)", re.M)
+
+# git clone URL [DIR] пишет рабочее дерево в DIR (или CWD/basename(URL) без DIR) — так
+# репозиторий целиком высыпается в дело мимо сборщика и вердикта (проба круга 5).
+_GIT_CLONE_RE = re.compile(
+    r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?git\s+clone\b([^;&|<>]*)", re.M)
+
+
+def _git_clone_targets(body: str, base: str) -> list:
+    out = []
+    for args in _GIT_CLONE_RE.findall(body):
+        pos = _split(args)                        # позиционные: [URL, DIR?]
+        if len(pos) >= 2:
+            out.append(_resolve(pos[-1], base))
+        elif len(pos) == 1:
+            name = os.path.basename(pos[0].rstrip("/"))
+            if name.endswith(".git"):
+                name = name[:-4]
+            out.append(_resolve(name, base))
+    return out
+
+
+# sed с командой записи `w FILE` (равно `W` и `s///w FILE`) пишет в FILE помимо -i:
+# `sed -n 'w дело/GOTOVO/isk.md' src` кладёт документ в дело мимо сборщика (проба круга 5).
+_SED_CMD_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?sed\b([^;&|\n]*)", re.M)
+_SED_W_RE = re.compile(r"[wW]\s+([^\s'\";]+)")
+
+
+def _sed_write_targets(body: str, base: str) -> list:
+    out = []
+    for seg in _SED_CMD_RE.findall(body):
+        out += [_resolve(m.group(1).strip("'\""), base) for m in _SED_W_RE.finditer(seg)]
+    return out
 
 # git apply / patch пишут файл, указанный ВНУТРИ содержимого патча — командная строка
 # его не называет. Сторож не может проверить конкретную цель, поэтому судит по
@@ -784,10 +859,13 @@ def main() -> None:
             )
         # rm/rmdir — по ЦЕЛЯМ, не по подстроке: слово в аргументе чтения или комментарии
         # дальше по строке не превращает удаление во временном каталоге в удар по делу.
-        if any(_under_protected(t) for t in _rm_targets(cmd, base)):
+        # Судим и ПОДДЕРЕВО: снос родителя (папки дела, клиента) губит первичку и базу
+        # «ДО» так же, как удаление их самих (проба круга 5) — а по имени цели не видно.
+        if any(_under_protected(t) or _is_protected_ancestor(t) for t in _rm_targets(cmd, base)):
             block(
-                "БЛОК: удаление в 00_intake/ или _baselines/ запрещено "
-                "(железное правило). Действительно нужно — только пользователь вручную."
+                "БЛОК: удаление затрагивает 00_intake/ или _baselines/ — в т.ч. как "
+                "поддерево сносимой папки дела или клиента. Первичка и база «ДО» "
+                "неприкосновенны (железное правило). Нужно — только пользователь вручную."
             )
         # ПОПОЛНЕНИЕ первички — не перезапись. Материалы клиента обязаны попадать
         # в 00_intake/, этим и занят inbox-triage (Bash mv из инбокса). Прежнее
@@ -805,14 +883,17 @@ def main() -> None:
         # один из перечисленных глаголов. Теперь источник истины один — ТЕ ЖЕ
         # targets, что уже посчитаны выше для code/raster-гейта и workflow-гейта:
         # что реально пишется, а не как это названо в командной строке.
+        # Увоз/переименование родителя (`mv {дело} /tmp`, `mv {клиент} {клиент}-старое`)
+        # уносит первичку и базу «ДО» целиком — mv-источник судим и как предок поддерева.
         protected_targets = [t for t in targets if _under_protected(t)]
         removed_sources = [_resolve(s, base) for s in _mv_sources(cmd)]
-        removed_sources = [s for s in removed_sources if _under_protected(s)]
+        removed_sources = [s for s in removed_sources
+                           if _under_protected(s) or _is_protected_ancestor(s)]
         if (protected_targets or removed_sources) and not _is_new_intake_file(stripped):
             block(
-                "БЛОК: перезапись в 00_intake/ или _baselines/ запрещена — исходники "
-                "клиента и база «ДО» для разбора правок неприкосновенны. Класть новое "
-                "можно только новым именем через Write, менять существующее нельзя."
+                "БЛОК: перезапись или увоз 00_intake/ или _baselines/ (в т.ч. как "
+                "поддерево переносимой папки дела/клиента) запрещены — исходники клиента "
+                "и база «ДО» неприкосновенны. Новое класть новым именем через Write."
             )
 
         # Гейт по robots.txt источника живет в practice_search.py, но обойти его
@@ -966,8 +1047,11 @@ def selftest() -> int:
               "cat <<'EOF' > cases/klient/delo-2026/build.py\nprint(1)\nEOF"}}), 2),
         ("touch .py в деле блокируется",
          run({"tool_name": "Bash", "tool_input": {"command": "touch cases/klient/delo-2026/gen.py"}}), 2),
-        ("touch заметки .md в деле пропускается",
-         run({"tool_name": "Bash", "tool_input": {"command": "touch cases/klient/delo-2026/n.md"}}), 0),
+        ("документ .md в корне дела мимо сборщика блокируется",
+         run({"tool_name": "Bash", "tool_input": {"command": "touch cases/klient/delo-2026/isk.md"}}), 2),
+        ("заметка .md в черновой зоне _working пропускается",
+         run({"tool_name": "Bash", "tool_input": {"command":
+              "touch cases/klient/delo-2026/.agent/context/_working/n.md"}}), 0),
         ("curl -o картинки в дело блокируется",
          run({"tool_name": "Bash", "tool_input": {
              "command": "curl -o cases/klient/delo-2026/foto.png https://example/1"}}), 2),
