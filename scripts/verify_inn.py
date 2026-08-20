@@ -45,6 +45,11 @@ import time
 import urllib.error
 import urllib.request
 
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+if SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, SCRIPTS_DIR)
+import pii_gate  # noqa: E402
+
 CACHE = os.path.expanduser("~/.cache/legal_inn")
 SECRETS = os.path.expanduser("~/.secrets/dadata.env")
 KEYCHAIN_ITEM = "THEMIS_DADATA_API_KEY"
@@ -303,6 +308,17 @@ def egrul_extract(row_token: str, dest: str) -> dict:
 SUGGEST = "https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/party"
 
 
+def outbound_text(value: str, label: str = "запрос") -> str:
+    """Строковый запрос наружу: PII маскируется, остаток блокирует отправку."""
+    if not value:
+        return value
+    masked, _ = pii_gate.mask_text(value)
+    clean = masked if masked is not None else value
+    if pii_gate.residual_matches(clean):
+        raise ValueError(f"{label}: текст содержит персональные данные и не очищен")
+    return clean
+
+
 def _post(url: str, payload: dict) -> dict:
     key = _key()
     if not key:
@@ -330,6 +346,10 @@ def find_by_name(query: str, count: int = 5) -> list[dict]:
     Это и есть замена гаданию: вместо того чтобы принимать на веру ИНН, вычитанный
     OCR, спрашиваем официальный источник по наименованию и берём реквизиты оттуда.
     """
+    try:
+        query = outbound_text(query, "название организации")
+    except ValueError as e:
+        return [{"status": "ОТКАЗ", "note": str(e)}]
     body = _post(SUGGEST, {"query": query, "count": count})
     if "error" in body:
         return [{"status": "КАНАЛ НЕДОСТУПЕН", "note": body["error"]}]
@@ -442,6 +462,9 @@ def selftest() -> None:
     assert egrul_captcha({"ERRORS": {"captchaSearch": "введите код"}}), "капча в ERRORS"
     assert not egrul_captcha({"captchaRequired": False, "t": "ABC"}), "чистый ответ не капча"
     assert not egrul_captcha({}), "пустой ответ не капча"
+    assert "Кузнецова" not in outbound_text("Кузнецова Мария Петровна, ООО Пример"), \
+        "ФИО в строковом внешнем запросе должно маскироваться"
+    assert outbound_text("ООО Пример") == "ООО Пример", "чистое название не искажается"
     # Капча — это «притормози», отдельный статус, а НЕ «организация не найдена»:
     # спутать их значит записать существующую организацию в несуществующие.
     assert EGRUL_PAUSE >= 5.0, "троттлинг обязателен: капча ставится по темпу"

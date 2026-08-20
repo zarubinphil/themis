@@ -65,6 +65,11 @@ import time
 from datetime import date, datetime
 from html.parser import HTMLParser
 
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+if SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, SCRIPTS_DIR)
+import pii_gate  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KODEKSY_DIR = os.path.join(ROOT, "knowledge", "kodeksy")
 PLENUMY_DIR = os.path.join(ROOT, "knowledge", "plenumy")
@@ -191,6 +196,9 @@ def http_get(url: str, cache_key: str) -> bytes | None:
     report_failures() возвращал 0, а legal-corpus-monthly.sh писал в лог
     «обновлено 0, ошибок 0» и завершался нулём.
     """
+    if pii_gate.residual_matches(url):
+        FAILURES.append(f"{url}: URL похож на персональные данные — наружу не отправлен")
+        return None
     cache_path = os.path.join(CACHE_DIR, cache_key)
     if (CACHE_MAX_AGE > 0 and os.path.exists(cache_path)
             and os.path.getsize(cache_path) > 200

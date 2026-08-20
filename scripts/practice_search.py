@@ -57,6 +57,11 @@ import tempfile
 import time
 import urllib.parse
 
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+if SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, SCRIPTS_DIR)
+import pii_gate  # noqa: E402
+
 BASE = "https://sudact.ru"
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126 Safari/537.36")
@@ -231,6 +236,21 @@ REGION_FIELD = {"arbitral": "region"}
 MAX_PAGES = 50
 
 
+class PiiOutboundError(ValueError):
+    pass
+
+
+def outbound_text(value: str, label: str = "запрос") -> str:
+    """Текст перед внешним сервисом: маска PII либо отказ, если остаток грязный."""
+    if not value:
+        return value
+    masked, _ = pii_gate.mask_text(value)
+    clean = masked if masked is not None else value
+    if pii_gate.residual_matches(clean):
+        raise PiiOutboundError(f"{label}: текст содержит персональные данные и не очищен")
+    return clean
+
+
 def section_fields(section: str) -> set:
     return SECTION_FIELDS.get(section, SECTION_FIELDS["regular"])
 
@@ -250,15 +270,15 @@ def build_query(section, text="", instance="", area="", court="", judge="",
     p = section
     known = section_fields(section)
     wanted = {
-        "txt": text,
-        "case_doc": case_doc,
+        "txt": outbound_text(text, "текст поиска"),
+        "case_doc": outbound_text(case_doc, "номер дела"),
         "lawchunkinfo": law,
         "date_from": date_from,
         "date_to": date_to,
         "workflow_stage": _resolve("workflow_stage", instance, section),
         region_field(section): _resolve("area", area, section),
-        "court": court,
-        "judge": judge,
+        "court": outbound_text(court, "суд"),
+        "judge": outbound_text(judge, "судья"),
     }
     q = {}
     for name, value in wanted.items():
@@ -1003,6 +1023,13 @@ def selftest():
             ("флаг риска не мешает уже включённому",
              apply_risk_flag("1", True) == "1"),
             ("без флага переменная не трогается", apply_risk_flag("0", False) is None),
+            ("ПД в запросе обезличиваются до внешнего URL",
+             "Кузнецова" not in build_query("regular",
+                                             text="Кузнецова Мария Петровна, раздел имущества")),
+            ("номер дела в case_doc обезличивается",
+             "А65-12345/2026" not in build_query("regular", case_doc="А65-12345/2026")),
+            ("чистый правовой вопрос не искажается",
+             "333" in build_query("regular", text="ст. 333 ГК РФ")),
         ]
     finally:
         _load_dicts, _search_page, search_allowed = real_dicts, real_page, real_allowed
@@ -1149,6 +1176,9 @@ def _main_guarded():
         return main()
     except PermissionError as e:
         print(str(e), file=sys.stderr)
+        return 4
+    except PiiOutboundError as e:
+        print(f"ОТКАЗ: {e}", file=sys.stderr)
         return 4
 
 
