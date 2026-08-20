@@ -2391,6 +2391,64 @@ def check_font_nasledovanie():
     return fails
 
 
+def check_path_ne_tozhdestvo():
+    """9.17: имя в PATH не считается тождеством харнесса.
+
+    Круг 6, доказано запуском: реестр задаёт исполнителя ИМЕНЕМ («claude»),
+    и коннектор разрешает его обычным PATH. Заглушка с тем же именем,
+    положенная в PATH, забрала роль класса pd целиком: и пробу («auth
+    status» пришло ей), и вызов. В журнал при этом записано
+    «claude … ok» — то есть журнал утверждает то, чего не было.
+
+    Обезличивание отработало (заглушка получила текст с масками вместо ФИО,
+    ИНН и паспорта), и это единственное, что стояло между делом доверителя и
+    чужой программой. Правило «роль класса pd исполняет только claude»
+    держится на СЛОВЕ, а слово в PATH подменяется одной строкой.
+
+    Контракт: подмена именем не даёт чужой программе роль класса pd, и журнал
+    отправок пишет факт (разрешённый путь), а не имя из реестра.
+    """
+    fc = tool("foreign_cli.py")
+    if not fc.is_file():
+        return [("path-tozhd:missing", "scripts/foreign_cli.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-pathtozhd-") as tmp:
+        td = Path(tmp)
+        podstava = td / "bin"
+        podstava.mkdir()
+        sled = td / "poluchil.txt"
+        sh_stub(podstava / "claude",
+                f'echo "$@" > {sled}\ncat >> {sled} 2>/dev/null\necho "ответ подставного"\n')
+        zapros = td / "zapros.txt"
+        zapros.write_text("Доверитель Кузнецова Мария Петровна, ИНН 771234567890, "
+                          "паспорт 9203 456789.\n", encoding="utf-8")
+        zhurnal = td / "zhurnal.jsonl"
+        env = dict(os.environ, PATH=f"{podstava}:{os.environ.get('PATH', '')}")
+        code, out = run([sys.executable, str(fc), "--role", "case-mapper",
+                         "--prompt", str(zapros), "--log", str(zhurnal)],
+                        cwd=td, env=env, timeout=300)
+        zapis = zhurnal.read_text(encoding="utf-8") if zhurnal.is_file() else ""
+        podmena_srabotala = sled.is_file() and sled.read_text(encoding="utf-8").strip()
+        if code == 0 and podmena_srabotala:
+            fails.append(("path-tozhd:pd", "роль класса pd исполнила подставная "
+                          "программа, подсунутая в PATH под именем харнесса: тождество "
+                          "исполнителя держится на слове, а слово подменяется одной "
+                          "строкой — и материалы дела уходят чужому процессу"))
+        if zapis and str(podstava) not in zapis:
+            fails.append(("path-tozhd:zhurnal", f"журнал отправок записал имя из реестра, "
+                          f"а не факт исполнения: разбирать утром нечего, запись "
+                          f"утверждает то, чего не было ({zapis.strip()[:120]})"))
+        # Ось обихода: правило не должно ломать штатный отказ и работу вообще.
+        pusto = td / "net-takogo.txt"
+        code2, out2 = run([sys.executable, str(fc), "--role", "case-mapper",
+                           "--prompt", str(pusto), "--log", str(zhurnal)],
+                          cwd=td, env=env, timeout=300)
+        if "ОТКАЗ" not in out2 and code2 == 0:
+            fails.append(("path-tozhd:otkaz", "запрос без файла не дал внятного отказа — "
+                          "коннектор обязан отказывать понятно, а не молча"))
+    return fails
+
+
 def check_pd_v_kopii_roli():
     """9.17: ПД-сторож не слепнет в рабочей копии роли и на мерже.
 
@@ -3312,6 +3370,7 @@ CHECKS = [
     ("9.16 регистрация сторожа покрывает двери", check_matcher_pokrytie),
     ("9.16 расход чужих CLI не выдан за полный", check_raskhod_chuzhih_cli),
     ("9.17 гейт требует все каналы сторожа", check_hooks_polnota),
+    ("9.17 имя в PATH не тождество харнесса", check_path_ne_tozhdestvo),
     ("9.17 ПД-сторож не слепнет в копии роли", check_pd_v_kopii_roli),
     ("9.17 ложь о сумме ловится во всех формах", check_dengi_formy_lzhi),
     ("9.17 гарнитура видна во всех атрибутах", check_font_atributy_i_stili),
