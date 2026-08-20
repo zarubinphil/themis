@@ -53,6 +53,24 @@ AUTONOMOUS_STAGES = {"1", "2", "5", "9"}
 REQUIRED_GUARDS = ("max_iterations", "max_money", "wall_clock_seconds", "no_progress_limit")
 GENERATOR_KINDS = {"generator", "builder"}
 REVIEWER_KINDS = {"reviewer", "critic"}
+# token_ledger читает session-JSONL Claude Code — расход ролей на харнессе он видит.
+# Роли на иных CLI ведут журналы своих форматов, и прибор их не читает. Слепоту
+# учёта нельзя молчать: цифра бюджета тогда покрывает одну сторону из нескольких и
+# подаётся как полная — на неё смотрят и проезжают потолок. Имена таких CLI в код
+# не зашиты: измеряемый харнесс — из реестра, всё прочее считается неизмеряемым.
+MEASURED_HARNESS = {"claude"}
+
+
+def _unmetered_clis(roles):
+    """CLI ролей, чей расход token_ledger не видит (всё, кроме claude)."""
+    seen = []
+    for r in roles:
+        argv = r.get("argv") if isinstance(r, dict) else None
+        if isinstance(argv, list) and argv:
+            exe = os.path.basename(str(argv[0]))
+            if exe and exe not in MEASURED_HARNESS and exe not in seen:
+                seen.append(exe)
+    return seen
 # Установка пакетов автономно запрещена всегда — ловим намерение до старта.
 INSTALL_MARKERS = ("pip install", "pip3 install", "npm install", "npm i ", "yarn add",
                    "brew install", "uv pip install", "apt install", "apt-get install",
@@ -112,15 +130,56 @@ def tree_fingerprint(path):
     return h.hexdigest()[:16]
 
 
+def _dir_signature(h, path):
+    """Подмешать имена прямых детей каталога: установленный пакет — новый ребёнок.
+    Каталога нет — тишина (ещё не создан менеджером), а не срыв отпечатка."""
+    try:
+        for name in sorted(os.listdir(path)):
+            h.update(name.encode("utf-8"))
+    except OSError:
+        return
+
+
+def _manager_root(env_var, bin_name):
+    """Корень менеджера пакетов: сперва его переменная, иначе — из положения в PATH.
+    Ни того, ни другого нет — менеджера на машине нет, мерить нечего."""
+    root = os.environ.get(env_var)
+    if root:
+        return root
+    exe = shutil.which(bin_name)
+    if exe:                       # …/bin/<tool> → … (типовой префикс установки)
+        return os.path.dirname(os.path.dirname(os.path.realpath(exe)))
+    return None
+
+
 def env_fingerprint():
-    """Отпечаток установленных пакетов. Меняется — значит кто-то поставил пакет."""
+    """Отпечаток установленных пакетов по ВСЕМ менеджерам, что есть в PATH.
+
+    Запрет владельца назван для pip, npm и brew разом — значит и мерить надо все
+    три экосистемы, а не только site-packages текущего интерпретатора (проба
+    20.08.2026: установка в node_modules/gems/Cellar отпечаток не двигала вовсе).
+    Корень берётся из переменной менеджера (NPM_CONFIG_PREFIX, GEM_HOME,
+    HOMEBREW_PREFIX), иначе — из его положения в PATH. Считаются только каталоги
+    установки: правка файла проекта и __pycache__ отпечаток не двигают.
+    """
     h = hashlib.sha256()
+    # 1. python текущего интерпретатора
     for d in sorted(set(p for p in sys.path if p.endswith(("site-packages", "dist-packages")))):
-        try:
-            for name in sorted(os.listdir(d)):
-                h.update(name.encode("utf-8"))
-        except OSError:
-            continue
+        _dir_signature(h, d)
+    # 2. npm — глобальные модули под префиксом
+    npm = _manager_root("NPM_CONFIG_PREFIX", "npm")
+    if npm:
+        _dir_signature(h, os.path.join(npm, "lib", "node_modules"))
+        _dir_signature(h, os.path.join(npm, "node_modules"))
+    # 3. gem — установленные гемы
+    gem = _manager_root("GEM_HOME", "gem")
+    if gem:
+        _dir_signature(h, os.path.join(gem, "gems"))
+        _dir_signature(h, gem)
+    # 4. brew — формулы в Cellar
+    brew = _manager_root("HOMEBREW_PREFIX", "brew")
+    if brew:
+        _dir_signature(h, os.path.join(brew, "Cellar"))
     return h.hexdigest()[:16]
 
 
@@ -259,21 +318,32 @@ def worktree_merge(name, root=ROOT):
     коммита при этом не обходится: хук отработает и остановит грязный автокоммит."""
     branch = f"autoloop/{name}"
     wt = os.path.join(STATE_DIR, "worktrees", name)
+    note = None
     code, out, _ = run(["git", "status", "--porcelain"], cwd=wt, timeout=60)
     if code == 0 and out.strip():
         run(["git", "add", "-A"], cwd=wt, timeout=120)
-        run(["git", "-c", "user.email=autoloop@themis", "-c", f"user.name={name}",
-             "commit", "-qm", f"итерация роли {name}: автокоммит координатора "
-             f"(роль оставила правки незакоммиченными)"], cwd=wt, timeout=300)
+        cc, _, _ = run(["git", "-c", "user.email=autoloop@themis", "-c", f"user.name={name}",
+                        "commit", "-qm", f"итерация роли {name}: автокоммит координатора "
+                        f"(роль оставила правки незакоммиченными)"], cwd=wt, timeout=300)
+        if cc != 0:
+            # Автокоммит заблокирован — почти всегда ПД-сторожем (pre-commit). Это НЕ
+            # бездействие роли: грязная правка с признаком ПД не вынесена и сгинет с
+            # копией роли (worktree remove --force). След обязан остаться в журнале,
+            # иначе сработавший сторож неотличим от роли, что ничего не делала.
+            note = (f"автокоммит роли {name} заблокирован (pd_guard): незакоммиченная "
+                    f"правка с признаком персональных данных не вынесена и потеряна "
+                    f"с копией роли")
     code, out, _ = run(["git", "rev-list", "--count", f"HEAD..{branch}"], cwd=root, timeout=60)
     ahead = int(out.strip() or 0) if code == 0 else 0
     if ahead == 0:
-        return True, 0          # роль ничего не закоммитила — мержить нечего
+        # Заблокированный автокоммит — не «мержить нечего», а остановленный вынос:
+        # merged=False, чтобы тихий успех (merged=true, commits=0) его не маскировал.
+        return (False, 0, note) if note else (True, 0, None)
     code, _, err = run(["git", "merge", "--no-edit", branch], cwd=root, timeout=300)
     if code != 0:
         run(["git", "merge", "--abort"], cwd=root, timeout=300)
-        return False, ahead
-    return True, ahead
+        return False, ahead, note
+    return True, ahead, note
 
 
 def worktree_remove(name, root=ROOT):
@@ -337,6 +407,13 @@ def write_report(cfg, runlog, stop_reason, root=ROOT):
         lines.append(f"| {r['iteration']} | {'зелёный' if r['green'] else 'красный'} | "
                      f"`{r['fingerprint']}` | {len(r['fails'])} | "
                      f"{', '.join(r['roles'])} | {r['seconds']} |")
+    unmetered = _unmetered_clis(cfg.get("roles", []))
+    if unmetered:
+        lines += ["", "## Учёт расхода неполный", "",
+                  f"Роли на CLI {', '.join(unmetered)} прибором `token_ledger` не "
+                  f"измеряются: расход по ним не виден, цифра бюджета покрывает только "
+                  f"харнесс. Часть картины нельзя принимать за целое — досчитать расход "
+                  f"этих ролей по их собственным журналам руками."]
     last = runlog[-1] if runlog else None
     if last and last["fails"]:
         lines += ["", "## Чем красен последний гейт", ""]
@@ -400,6 +477,14 @@ def loop(cfg, root=ROOT, dry=False):
              "guards": guards, "cases_fp": cases_fp, "env_fp": env_fp,
              "money_start": money_start}, root)
 
+    unmetered = _unmetered_clis(cfg["roles"])
+    if unmetered:
+        note = ("расход не измеряется прибором token_ledger для CLI: "
+                + ", ".join(unmetered) + " — учёт неполный, цифра бюджета покрывает "
+                "только харнесс; чужие журналы прибор не читает")
+        journal({"event": "accounting_blind", "unmetered": unmetered, "note": note}, root)
+        print(f"⚠ учёт расхода неполный: {note}")
+
     for it in range(1, int(guards["max_iterations"]) + 1):
         t0 = time.time()
         role_names = []
@@ -447,11 +532,14 @@ def loop(cfg, root=ROOT, dry=False):
                 if cwd == root:
                     continue
                 if itogi.get(role["name"]) == 0:
-                    merged, ahead = worktree_merge(role["name"], root)
+                    merged, ahead, note = worktree_merge(role["name"], root)
                 else:
-                    merged, ahead = False, -1
-                journal({"event": "role_merge", "iteration": it, "role": role["name"],
-                         "merged": merged, "commits": ahead}, root)
+                    merged, ahead, note = False, -1, None
+                zapis = {"event": "role_merge", "iteration": it, "role": role["name"],
+                         "merged": merged, "commits": ahead}
+                if note:
+                    zapis["note"] = note
+                journal(zapis, root)
         elif volna and dry:
             for role in volna:
                 argv, _ = podgotovit(role)
@@ -470,11 +558,14 @@ def loop(cfg, root=ROOT, dry=False):
                 code = ispolnit(role, argv, cwd)
                 if cwd != root:
                     if code == 0:
-                        merged, ahead = worktree_merge(role["name"], root)
+                        merged, ahead, note = worktree_merge(role["name"], root)
                     else:
-                        merged, ahead = False, -1
-                    journal({"event": "role_merge", "iteration": it, "role": role["name"],
-                             "merged": merged, "commits": ahead}, root)
+                        merged, ahead, note = False, -1, None
+                    zapis = {"event": "role_merge", "iteration": it, "role": role["name"],
+                             "merged": merged, "commits": ahead}
+                    if note:
+                        zapis["note"] = note
+                    journal(zapis, root)
             role_names.append(role["name"])
 
         code, out, _ = run(gate_argv, cwd=root, timeout=3600)
@@ -493,11 +584,12 @@ def loop(cfg, root=ROOT, dry=False):
         runlog.append(rec)
         journal({"event": "gate", **rec}, root)
 
-        if green:
-            stop = "цель достигнута — гейт зелёный"
-            break
-
-        # ── сторожа ──
+        # ── сторожа целостности: судят КАЖДУЮ итерацию, ВКЛЮЧАЯ победную ──
+        # Зелёный гейт при тронутых делах или установленном пакете — это провал,
+        # а не успех. Раньше сторожа стояли ПОСЛЕ раннего выхода по зелёному, и роль,
+        # тронувшая дела в той же итерации, где гейт позеленел, выходила «цель
+        # достигнута»: инвариант не действовал ровно на итерации, после которой уже
+        # никто не смотрит (проба 20.08.2026). Поэтому сверка — до объявления успеха.
         now_cases = tree_fingerprint(os.path.join(root, "cases"))
         if now_cases != cases_fp:
             stop = "ТРОНУТЫ ДАННЫЕ ДЕЛ: отпечаток cases/ изменился — автономно это запрещено"
@@ -505,9 +597,26 @@ def loop(cfg, root=ROOT, dry=False):
         if env_fingerprint() != env_fp:
             stop = "УСТАНОВЛЕН ПАКЕТ: отпечаток окружения изменился — установка автономно запрещена"
             break
+
+        if green:
+            stop = "цель достигнута — гейт зелёный"
+            break
+
+        # ── сторожа продолжения: только когда гейт красный ──
+        # Деньги — не та ось, где догадка допустима: прибор молчит или врёт — стоп.
+        # Раньше проверка была `if spent is not None …` и молча выключалась на мёртвом
+        # token_ledger; при потолке $0.01 цикл домолачивал до потолка итераций
+        # (владельцу это стоило $299 при потолке $60, 20.08.2026). Неразобранный
+        # расход обязан быть стопом, как неразобранный вердикт гейта.
         spent = spent_money(root)
-        if spent is not None and (spent - money_start) > float(guards["max_money"]):
-            stop = f"бюджет исчерпан: потрачено ${spent - money_start:.2f} при потолке ${guards['max_money']:.2f}"
+        if spent is None:
+            stop = ("РАСХОД НЕ ИЗМЕРЕН: прибор token_ledger недоступен или вернул мусор — "
+                    "бюджет не сторожится. Неразобранный расход есть стоп: разобрать "
+                    "расход руками и перезапустить")
+            break
+        if (spent - money_start) > float(guards["max_money"]):
+            stop = (f"бюджет исчерпан: потрачено ${spent - money_start:.2f} при потолке "
+                    f"${float(guards['max_money']):.2f}")
             break
         if time.time() - started > float(guards["wall_clock_seconds"]):
             stop = f"потолок времени: {guards['wall_clock_seconds']} с"
@@ -656,13 +765,13 @@ def selftest():
                 f.write("работа роли\n")
             g("add", "b.txt", cwd=wt)
             g("commit", "-qm", "правка роли", cwd=wt)
-            ok, ahead = worktree_merge("proba", tmp)
+            ok, ahead, _ = worktree_merge("proba", tmp)
             assert ok and ahead == 1, f"коммит роли не въехал в main: {ok}, {ahead}"
             # Роль НЕ закоммитила — автокоммит координатора спасает работу
             wt2 = worktree_add("proba", tmp)
             with open(os.path.join(wt2, "c.txt"), "w", encoding="utf-8") as f:
                 f.write("незакоммиченная работа роли\n")
-            ok, ahead = worktree_merge("proba", tmp)
+            ok, ahead, _ = worktree_merge("proba", tmp)
             assert ok and ahead == 1, "незакоммиченная работа роли потеряна"
             assert os.path.isfile(os.path.join(tmp, "c.txt")), \
                 "автокоммит прошёл, а файла в main нет"
@@ -681,7 +790,7 @@ def selftest():
                 f.write("версия main\n")
             g("add", "a.txt")
             g("commit", "-qm", "main правит a")
-            ok, _ = worktree_merge("proba", tmp)
+            ok, _, _ = worktree_merge("proba", tmp)
             assert not ok, "конфликтный мерж объявлен успешным"
             assert not os.path.isfile(os.path.join(tmp, ".git", "MERGE_HEAD")), \
                 "после отказа мержа main остался в состоянии конфликта"
@@ -760,10 +869,13 @@ def main():
           f"потолок {cfg['guards']['max_iterations']} итераций, "
           f"${cfg['guards']['max_money']}, {cfg['guards']['wall_clock_seconds']} с")
     runlog, stop, report = loop(cfg, ROOT, a.dry)
-    green = runlog and runlog[-1]["green"]
-    print(f"\n{'✓' if green else '⛔'} остановлен: {stop}")
+    # Успех — только «цель достигнута». Зелёный гейт, снятый сторожем целостности
+    # (тронуты дела, установлен пакет), успехом не считается: последняя итерация
+    # может быть зелёной, а прогон — проваленным.
+    success = stop.startswith("цель достигнута")
+    print(f"\n{'✓' if success else '⛔'} остановлен: {stop}")
     print(f"  итераций: {len(runlog)} · отчёт: {os.path.relpath(report, ROOT)}")
-    return 0 if green else 1
+    return 0 if success else 1
 
 
 if __name__ == "__main__":
