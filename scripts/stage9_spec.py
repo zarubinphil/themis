@@ -2391,6 +2391,98 @@ def check_font_nasledovanie():
     return fails
 
 
+def check_otkaz_pd_v_cikle():
+    """9.16: сработавший ПД-сторож в цикле отличим от бездействия роли.
+
+    Проба 20.08.2026: роль оставила незакоммиченным файл с именем папки дела.
+    ПД-сторож автокоммит остановил — это верно. Но `worktree_merge` кода
+    возврата `git commit` не смотрит: ветка осталась без коммитов, счёт
+    `HEAD..branch` дал ноль, и мерж вернул `merged: true, commits: 0` —
+    ровно то же, что при роли, которая ничего не делала.
+
+    Значит попытка вынести персональные данные наружу в автономном прогоне
+    (а) не отличима от бездействия, (б) следа не оставляет, (в) исчезает
+    вместе с копией роли, которую итерация сносит `worktree remove --force`.
+    Сторож сработал, и об этом никто не узнал — состояние, неотличимое от
+    того, что сторожа нет.
+    """
+    al, pg = tool("autoloop.py"), tool("pd_guard.py")
+    if not al.is_file() or not pg.is_file():
+        return [("otkaz-pd:missing", "autoloop.py или pd_guard.py отсутствует")]
+    fails = []
+
+    def progon(telo_roli: str, tag: str):
+        """Один прогон цикла. Скрипт роли КОММИТИТСЯ: в рабочую копию роли
+        попадают только отслеживаемые файлы, иначе роль не запустится вовсе."""
+        with tempfile.TemporaryDirectory(prefix=f"stage9-otkazpd-{tag}-") as tmp:
+            td = Path(tmp)
+            (td / "scripts").mkdir()
+            for name in ("autoloop.py", "pd_guard.py", "pii_gate.py"):
+                src = tool(name)
+                if src.is_file():
+                    shutil.copy(src, td / "scripts" / name)
+            (td / "cases" / FAM_LAT / "delo-2026").mkdir(parents=True)
+            (td / "cases" / FAM_LAT / "_client.md").write_text("профиль\n", encoding="utf-8")
+            sh_stub(td / "rol.sh", telo_roli)
+            cfg = {"task": "проба отказа ПД-сторожа", "stage": "9",
+                   "guards": {"max_iterations": 1, "max_money": 10.0,
+                              "wall_clock_seconds": 120, "no_progress_limit": 2,
+                              "stop_when": "gate_green"},
+                   "isolation_worktree": True,
+                   "roles": [{"name": "avtor", "kind": "generator", "parallel": True,
+                              "argv": ["./rol.sh"]},
+                             {"name": "rev", "kind": "reviewer", "argv": ["true"]}],
+                   "gate": ["/bin/echo",
+                            '{"green": false, "fingerprint": "aaa", "fails": []}']}
+            (td / "cfg.json").write_text(json.dumps(cfg, ensure_ascii=False),
+                                         encoding="utf-8")
+            for cmd in (["init", "-q"], ["add", "-A"],
+                        ["-c", "user.email=t@t", "-c", "user.name=t",
+                         "commit", "-qm", "baza"]):
+                run(["git", *cmd], cwd=td)
+            py(td / "scripts" / "pd_guard.py", "--install", cwd=td)
+            py(td / "scripts" / "autoloop.py", "cfg.json", cwd=td, timeout=600)
+            zhurnal = td / ".autoloop" / "journal.jsonl"
+            zapisi = []
+            if zhurnal.is_file():
+                for line in zhurnal.read_text(encoding="utf-8", errors="replace").splitlines():
+                    try:
+                        zapisi.append(json.loads(line))
+                    except ValueError:
+                        continue
+            rol = [z for z in zapisi if z.get("event") == "role"
+                   and z.get("role") == "avtor"]
+            merge = [z for z in zapisi if z.get("event") == "role_merge"]
+            return rol, merge, json.dumps(zapisi, ensure_ascii=False)
+
+    # Ось пропуска: роль вынесла имя папки дела незакоммиченной правкой.
+    rol, merge, syroj = progon(
+        f"printf 'Черновик по делу cases/{FAM_LAT}/delo-2026\\n' > zametka.md\n"
+        f"echo готово\n", "gryaz")
+    if not rol or rol[0].get("code") != 0:
+        fails.append(("otkaz-pd:rol", "роль не отработала — проба недействительна"))
+    elif not merge:
+        fails.append(("otkaz-pd:merge", "мерж роли не записан в журнал"))
+    else:
+        m = merge[0]
+        tihiy_uspeh = m.get("merged") is True and m.get("commits") == 0
+        nazvano = re.search(r"автокоммит|заблок|остановл|потеря|не закоммич|"
+                            r"pd_guard|персональн", syroj, re.I)
+        if tihiy_uspeh and not nazvano:
+            fails.append(("otkaz-pd:nemo", "ПД-сторож остановил автокоммит роли, а "
+                          "журнал записал обычный успешный мерж без коммитов "
+                          "(merged=true, commits=0) — ровно то же, что у роли, которая "
+                          "ничего не делала: попытка вынести персональные данные "
+                          "неотличима от бездействия, следа не остаётся, а копия роли "
+                          "сносится вместе с уликой"))
+    # Ось обихода: роль, честно ничего не менявшая, тревоги не поднимает.
+    rol_c, merge_c, syroj_c = progon("echo готово\n", "chist")
+    if re.search(r"автокоммит|заблок|потеря|персональн", syroj_c, re.I):
+        fails.append(("otkaz-pd:trevoga", "прогон без единой правки поднял тревогу — "
+                      "сторож кричит на пустом месте"))
+    return fails
+
+
 MARKER_NE_MARKER = [
     ("otsutstvuet", "Маркер ## КАРТА ГОТОВА ✓ отсутствует — карта не завершена.\n"),
     ("ne-stavim", "Карта сырая, маркер ## КАРТА ГОТОВА ✓ пока не ставим.\n"),
@@ -2664,6 +2756,7 @@ CHECKS = [
     ("9.16 заморозка судит и победную итерацию", check_zamorozka_pri_zelyonom),
     ("9.16 сторож денег fail-closed", check_budget_failclosed),
     ("9.16 маркер шага — структура, не подстрока", check_marker_struktura),
+    ("9.16 сработавший ПД-сторож в цикле отличим", check_otkaz_pd_v_cikle),
 ]
 
 
