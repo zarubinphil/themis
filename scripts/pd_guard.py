@@ -38,6 +38,7 @@ scripts/registry_check.py и в тело сообщения коммита. **И
 """
 import argparse
 import glob
+import html
 import io
 import os
 import re
@@ -262,7 +263,9 @@ def _office_xml_text(blob: bytes) -> str:
             raw = zf.read(name).decode("utf-8", "replace")
         except (OSError, KeyError, RuntimeError):
             continue
-        parts.append(re.sub(r"<[^>]+>", " ", raw))
+        raw = re.sub(r"</(?:\w+:)?p>", "\n", raw)
+        raw = re.sub(r"</(?:\w+:)?tc>", "\t", raw)
+        parts.append(html.unescape(re.sub(r"<[^>]+>", "", raw)))
     return "\n".join(parts)
 
 

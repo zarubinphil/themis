@@ -31,6 +31,13 @@ import argparse
 import re
 import sys
 
+_HOMOGLYPH_SOURCE = {
+    "A": "А", "B": "В", "C": "С", "E": "Е", "H": "Н", "K": "К", "M": "М",
+    "O": "О", "P": "Р", "T": "Т", "X": "Х", "Y": "У",
+    "a": "а", "c": "с", "e": "е", "o": "о", "p": "р", "x": "х", "y": "у",
+}
+_HOMOGLYPHS = str.maketrans(_HOMOGLYPH_SOURCE)
+
 # Прямое обращение к ассистенту/модели по имени/роли, сразу за которым —
 # запятая/восклицание (вокатив: «Ассистент, …», «Клод, …», «Claude!»).
 # Юридический документ так суд или сторону не называет никогда.
@@ -39,7 +46,7 @@ import sys
 # избранную ответчиком» — обиход авто/имущественных дел — краснели как инъекция
 # (проба скептика 19.08.2026): слово-модель после ЗАПЯТОЙ это перечень, не обращение.
 _ROLE_TERMS = (
-    r"ассистент\w*|бот|claude|клод|chatgpt|gpt-?\d*|ии|"
+    r"ассистент\w*|агент\w*|помощник\w*|оператор\w*|бот|claude|клод|chatgpt|gpt-?\d*|ии|"
     r"искусственн\w+\s+интеллект|нейросет\w*|"
     r"фемид[ауы]?|кони|сперанск\w*|мейер\w*"
 )
@@ -61,16 +68,29 @@ _INFINITIVE = (r"выполнить|исполнить|игнорировать|
                r"разместить|выгрузить")
 _FUTURE = (r"отправишь|удалишь|передашь|выгрузишь|скопируешь|вышлешь|пришл[её]шь|"
            r"заменишь|перепишешь|составишь|опубликуешь")
+_EN_COMMAND = (r"delete|remove|send|email|publish|upload|copy|rewrite|ignore|forget|"
+               r"reveal|show|write|create|run|execute")
 _AFTER_ROLE = (
     rf"(?:пожалуйста[,\s]+)?(?:будь(?:те)?\s+добры\s+)?"
-    rf"(?:ты\s+)?(?:{_PRIKAZ}|{_INFINITIVE}|{_FUTURE})"
+    rf"(?:ты\s+)?(?:{_PRIKAZ}|{_INFINITIVE}|{_FUTURE}|{_EN_COMMAND})"
     rf"|требуется\s+(?:{_INFINITIVE})"
 )
+_GENERIC_VOCATIVE = r"(?!суд\b|истец\b|ответчик\b|представител\w*\b|эксперт\b)[А-ЯЁ][а-яё]{2,30}"
 _VOCATIVE_RE = re.compile(
     rf"(?:^|[.!?:;]\s*|,\s*|[\"'«»(]\s*)"
-    rf"(?:уважаем(?:ый|ая)\s+)?({_ROLE_TERMS})\b\s*[,!:—-]+\s*"
+    rf"(?:уважаем(?:ый|ая)\s+)?(?:{_ROLE_TERMS})\b\s*[,!:—-]+\s*"
     rf"(?:{_AFTER_ROLE})",
     re.I | re.M)
+_GENERIC_VOCATIVE_RE = re.compile(
+    rf"(?:^|[.!?;]\s*|,\s*|[\"'«»(]\s*)"
+    rf"(?:уважаем(?:ый|ая)\s+)?{_GENERIC_VOCATIVE}\b\s*[,!]+\s*"
+    rf"(?:{_AFTER_ROLE})",
+    re.I | re.M)
+_COMMAND_THEN_ROLE_RE = re.compile(
+    rf"(?:^|[.!?:;]\s*|[\"'«»(]\s*)"
+    rf"(?:{_PRIKAZ}|{_INFINITIVE}|{_FUTURE}|{_EN_COMMAND})\b"
+    rf".{{0,120}}?[,!:—-]+\s*(?:{_ROLE_TERMS})\b",
+    re.I | re.M | re.S)
 _MODEL_VOCATIVE_RE = re.compile(
     r"(?:^|[.!?:;]\s*|[\"'«»(]\s*)"
     r"(?:уважаем(?:ая)\s+)?модел[ья]\b\s*[,!]\s*"
@@ -115,6 +135,12 @@ def normalize_text(text: str) -> str:
         except UnicodeError:
             pass
     text = text.replace("\u00ad", "")
+    lat = "".join(re.escape(ch) for ch in _HOMOGLYPH_SOURCE)
+    text = re.sub(
+        rf"(?<=[А-Яа-яЁё])[{lat}]+|[{lat}]+(?=[А-Яа-яЁё])",
+        lambda m: m.group(0).translate(_HOMOGLYPHS),
+        text,
+    )
     text = re.sub(r"([A-Za-zА-Яа-яЁё])[-‐‑‒–—]\s*\n\s*([A-Za-zА-Яа-яЁё])",
                   r"\1\2", text)
     text = re.sub(r"(?m)^\s*(?:[-*+>]+\s*|#{1,6}\s*)+", "", text)
@@ -131,6 +157,10 @@ def findings(text: str) -> list[str]:
     hits = []
     if _VOCATIVE_RE.search(text):
         hits.append("вокатив к ассистенту/модели")
+    if _GENERIC_VOCATIVE_RE.search(text):
+        hits.append("обращение с приказом")
+    if _COMMAND_THEN_ROLE_RE.search(text):
+        hits.append("приказ с обращением к ассистенту/модели")
     if _MODEL_VOCATIVE_RE.search(text):
         hits.append("вокатив к модели")
     for pat in _STOCK_PHRASES:
