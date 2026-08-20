@@ -2391,6 +2391,74 @@ def check_font_nasledovanie():
     return fails
 
 
+def check_zamorozka_pri_zelyonom():
+    """9.16: заморозка данных дел судит и ПОБЕДНУЮ итерацию, не только красную.
+
+    Проба 20.08.2026: сторожа цикла (`cases/`, окружение, бюджет, спин) стоят
+    ПОСЛЕ раннего выхода по зелёному гейту. Роль, тронувшая дела в той же
+    итерации, где гейт позеленел, останавливает прогон словами «цель
+    достигнута»: отпечаток не сверяется, в отчёте ни слова. Инвариант не
+    действует ровно на той итерации, после которой уже никто не смотрит.
+    Зелёный гейт при тронутых делах — это провал, а не успех.
+    """
+    al = tool("autoloop.py")
+    if not al.is_file():
+        return [("zamorozka:missing", "scripts/autoloop.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-zamorozka-") as tmp:
+        td = Path(tmp)
+        (td / "scripts").mkdir()
+        shutil.copy(al, td / "scripts" / "autoloop.py")
+        delo = td / "cases" / FAM_LAT / "delo-2026"
+        delo.mkdir(parents=True)
+        (td / "cases" / FAM_LAT / "_client.md").write_text("профиль\n", encoding="utf-8")
+        (delo / "opis.md").write_text("материал\n", encoding="utf-8")
+        for cmd in (["init", "-q"], ["add", "-A"],
+                    ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "baza"]):
+            run(["git", *cmd], cwd=td)
+        zelyonyy = ["/bin/echo", '{"green": true, "fingerprint": "zzz", "fails": []}']
+        cfg = {"task": "проба заморозки", "stage": "9",
+               "guards": {"max_iterations": 2, "max_money": 10.0,
+                          "wall_clock_seconds": 120, "no_progress_limit": 2,
+                          "stop_when": "gate_green"},
+               "isolation_worktree": False,
+               "roles": [{"name": "avtor", "kind": "generator", "argv": ["./rol.sh"]},
+                         {"name": "rev", "kind": "reviewer", "argv": ["true"]}],
+               "gate": zelyonyy}
+
+        def progon(telo_roli: str, name: str):
+            rol = td / "rol.sh"
+            sh_stub(rol, telo_roli)
+            (td / f"{name}.json").write_text(json.dumps(cfg, ensure_ascii=False),
+                                             encoding="utf-8")
+            return py(td / "scripts" / "autoloop.py", f"{name}.json", cwd=td, timeout=300)
+
+        # Ось пропуска: роль тронула дела и в той же итерации сдала гейт.
+        code, out = progon(f"printf 'правка роли\\n' >> cases/{FAM_LAT}/_client.md\n"
+                           f"printf 'ещё\\n' > cases/{FAM_LAT}/delo-2026/novyy.txt\n"
+                           "echo готово\n", "tronul")
+        tronuto = ("ТРОНУТЫ ДАННЫЕ" in out or "cases/" in out
+                   and "отпечаток" in out and "достигнута" not in out)
+        if "достигнута" in out and not tronuto:
+            fails.append(("zamorozka:pobednaya", "роль тронула данные дел в той же "
+                          "итерации, где гейт позеленел, и прогон вышел с «цель "
+                          "достигнута»: заморозка cases/ не судит победную итерацию, "
+                          "а после неё уже никто не смотрит"))
+        elif not tronuto:
+            fails.append(("zamorozka:molchanie", f"касание дел не названо причиной "
+                          f"остановки: {out.strip()[-200:]}"))
+        # Ось обихода: чистая роль закрывает прогон успехом.
+        run(["git", "checkout", "-q", "--", "cases"], cwd=td)
+        for lishnee in (delo / "novyy.txt",):
+            if lishnee.exists():
+                lishnee.unlink()
+        code, out = progon("echo готово\n", "chisto")
+        if "достигнута" not in out:
+            fails.append(("zamorozka:trevoga", f"чистый прогон не закрылся успехом: "
+                          f"{out.strip()[-200:]}"))
+    return fails
+
+
 # ── Реестр проверок ──────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -2450,6 +2518,7 @@ CHECKS = [
     ("9.15 суммы проверяются в реальном иске", check_money_v_iske),
     ("9.16 пропись сверяется во всех падежах", check_propis_padezhi),
     ("9.16 гарнитура и кегль видны с наследования", check_font_nasledovanie),
+    ("9.16 заморозка судит и победную итерацию", check_zamorozka_pri_zelyonom),
 ]
 
 
