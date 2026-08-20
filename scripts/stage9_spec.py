@@ -2391,6 +2391,60 @@ def check_font_nasledovanie():
     return fails
 
 
+def check_hooks_polnota():
+    """9.17: гейт требует ВСЕ каналы, которые ставит установщик сторожа.
+
+    Проба 20.08.2026 по состоянию диска: в БОЕВОМ репозитории `pre-push`
+    отсутствует — стоят только pre-commit и commit-msg. Гейт при этом зелёный,
+    и приёмка 9.14 «фамилия не уходит веткой и тегом» тоже: она проверяет, что
+    `--install` УМЕЕТ поставить pre-push в песочнице, а не что он поставлен
+    здесь. Канал, ради которого прошлый круг вводил хук, открыт.
+
+    Корень общий: список обязательных хуков в гейте и список ставимых в
+    установщике — две независимые истины, и они разъехались. Что установщик
+    ставит, то гейт обязан требовать; иначе сторож есть на диске и нет в деле.
+    """
+    lg, pg = tool("loop_gate.py"), tool("pd_guard.py")
+    if not lg.is_file() or not pg.is_file():
+        return [("hooks-polnota:missing", "loop_gate.py или pd_guard.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-hookpoln-") as tmp:
+        td = _pd_sandbox(Path(tmp))
+        shutil.copy(lg, td / "scripts" / "loop_gate.py")
+        cl = td / ".claude"
+        cl.mkdir(exist_ok=True)
+        (cl / "settings.json").write_text(json.dumps({"hooks": {"PreToolUse": [
+            {"matcher": "Read|Write|Edit|NotebookEdit|Bash", "hooks": [
+                {"type": "command",
+                 "command": 'python3 "$CLAUDE_PROJECT_DIR/scripts/claude_guard.py"'}]}]}},
+            ensure_ascii=False), encoding="utf-8")
+        py(td / "scripts" / "pd_guard.py", "--install", cwd=td)
+        hooks_dir = td / ".git" / "hooks"
+        stavimye = sorted(p.name for p in hooks_dir.iterdir()
+                          if not p.name.endswith(".sample") and p.is_file())
+        if not stavimye:
+            return [("hooks-polnota:install", "--install не поставил ни одного хука")]
+        gate = td / "scripts" / "loop_gate.py"
+        code, out = py(gate, "--hooks-only", "--json", cwd=td)
+        if code != 0:
+            fails.append(("hooks-polnota:chistyy", f"полный комплект хуков объявлен "
+                          f"неполным: {out.strip()[:200]}"))
+        # Каждый поставленный канал обязан быть обязательным: снимаем по одному.
+        for name in stavimye:
+            path = hooks_dir / name
+            telo = path.read_text(encoding="utf-8")
+            path.unlink()
+            code, _ = py(gate, "--hooks-only", "--json", cwd=td)
+            if code == 0:
+                fails.append((f"hooks-polnota:{name}", f"канал {name} снят, а гейт "
+                              f"регистрации зелёный: установщик его ставит, гейт его не "
+                              f"требует — сторож есть на диске и нет в деле (ровно так "
+                              f"pre-push отсутствует в боевом репозитории)"))
+            path.write_text(telo, encoding="utf-8")
+            path.chmod(0o755)
+    return fails
+
+
 def check_cel_a_ne_glagol():
     """9.17: сторож судит ПУТЬ, которого команда достигает, а не знакомый глагол.
 
@@ -3054,6 +3108,7 @@ CHECKS = [
     ("9.16 сторож окружения видит не только pip", check_env_vne_python),
     ("9.16 регистрация сторожа покрывает двери", check_matcher_pokrytie),
     ("9.16 расход чужих CLI не выдан за полный", check_raskhod_chuzhih_cli),
+    ("9.17 гейт требует все каналы сторожа", check_hooks_polnota),
     ("9.17 сторож судит цель пути, не глагол", check_cel_a_ne_glagol),
     ("9.17 обиход первички не сломан", check_obihod_pervichki),
 ]
