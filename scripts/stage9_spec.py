@@ -2391,6 +2391,56 @@ def check_font_nasledovanie():
     return fails
 
 
+def check_chuzhoy_cli_formy_vyzova():
+    """9.17: прямой вызов чужого CLI ловится во всех формах записи.
+
+    Круг 6, каждая форма проверена запуском координатора. Запрет держится на
+    первой строке команды и на голом имени, поэтому мимо проходят: вызов со
+    второй строки, из подоболочки, из группировки, внутри if/then и for/do,
+    по абсолютному пути, через ~, через ./ и внутри heredoc.
+
+    Цена пропуска — не дисциплина, а тайна: коннектор перед отправкой
+    обезличивает текст, прямой вызов не обезличивает ничего, и материалы дела
+    уходят чужому процессу дословно.
+    """
+    if not tool("claude_guard.py").is_file():
+        return [("chuzhoy-vyzov:missing", "scripts/claude_guard.py отсутствует")]
+    fails = []
+    if _bash("kimi -p 'вопрос'") != 2:
+        return [("chuzhoy-vyzov:opora", "прямой вызов не блокируется даже в простейшей "
+                 "форме — проба недействительна")]
+    formy = [
+        ("vtoraya-stroka", "echo начали\nkimi -p 'вопрос'"),
+        ("podobolochka", "(kimi -p 'вопрос')"),
+        ("gruppa", "{ kimi -p 'вопрос'; }"),
+        ("posle-then", "if true; then kimi -p 'вопрос'; fi"),
+        ("posle-do", "for r in a b; do kimi -p \"$r\"; done"),
+        ("po-absolyutnomu-puti", "/opt/homebrew/bin/kimi -p 'вопрос'"),
+        ("po-tilde", "~/.kimi-code/bin/kimi -p 'вопрос'"),
+        ("tochka-slesh", "./kimi -p 'вопрос'"),
+        ("heredoc", "bash <<EOF\nkimi -p 'вопрос'\nEOF"),
+        ("codex-vtoraya-stroka", "cd /tmp\ncodex exec 'задание'"),
+    ]
+    for name, cmd in formy:
+        if _bash(cmd) != 2:
+            fails.append((f"chuzhoy-vyzov:{name}", f"прямой вызов чужого CLI прошёл "
+                          f"({name}) мимо коннектора: обезличивания не будет, материалы "
+                          f"дела уйдут чужому процессу дословно"))
+    # Ось обихода: имя в тексте, поиск по коду и штатный коннектор не трогать.
+    obihod = [
+        ("imya-v-tekste", "echo 'роль codex описана в реестре'"),
+        ("poisk-po-kodu", "grep -rn kimi scripts/"),
+        ("cherez-konnektor", "python3 scripts/foreign_cli.py --role hunter-leaf "
+                             "--prompt /tmp/q.txt"),
+    ]
+    for name, cmd in obihod:
+        if _bash(cmd) == 2:
+            fails.append((f"chuzhoy-vyzov:trevoga-{name}", f"обиход заблокирован "
+                          f"({name}): упоминание имени и штатный коннектор запретом "
+                          f"не являются"))
+    return fails
+
+
 def check_inekcii_formy_prikaza():
     """9.17: детектор обращений держит формы русского приказа и адресации.
 
@@ -3526,6 +3576,7 @@ CHECKS = [
     ("9.17 гейт требует все каналы сторожа", check_hooks_polnota),
     ("9.17 обезличивание: разрыв и обиход", check_pii_normalizaciya_i_obihod),
     ("9.17 детектор держит формы приказа", check_inekcii_formy_prikaza),
+    ("9.17 вызов чужого CLI ловится в формах", check_chuzhoy_cli_formy_vyzova),
     ("9.17 имя в PATH не тождество харнесса", check_path_ne_tozhdestvo),
     ("9.17 ПД-сторож не слепнет в копии роли", check_pd_v_kopii_roli),
     ("9.17 ложь о сумме ловится во всех формах", check_dengi_formy_lzhi),
