@@ -2391,6 +2391,62 @@ def check_font_nasledovanie():
     return fails
 
 
+def check_budget_failclosed():
+    """9.16: сторож денег fail-closed — нечем измерить расход, значит стоп.
+
+    Проба 20.08.2026: `spent_money` возвращает None, когда прибор расхода
+    не отвечает, а проверка бюджета написана как `if spent is not None and …`.
+    При потолке $0.01 и сломанном ledger цикл прокрутил все итерации и вышел
+    «по потолку итераций» — сторож денег выключился молча. Конфигурация без
+    бюджета не стартует вовсе, а бюджет с неработающим прибором не действует:
+    заявленное не равно реальному. Владельцу это уже стоило $299 при потолке
+    $60. Деньги — не та ось, где догадка допустима: не измеряется — стой.
+    """
+    al = tool("autoloop.py")
+    if not al.is_file():
+        return [("budget:missing", "scripts/autoloop.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-budget-") as tmp:
+        td = Path(tmp)
+        (td / "scripts").mkdir()
+        shutil.copy(al, td / "scripts" / "autoloop.py")
+        (td / "cases").mkdir()
+        cfg = {"task": "проба бюджета", "stage": "9",
+               "guards": {"max_iterations": 3, "max_money": 0.01,
+                          "wall_clock_seconds": 120, "no_progress_limit": 5,
+                          "stop_when": "gate_green"},
+               "isolation_worktree": False,
+               "roles": [{"name": "avtor", "kind": "generator", "argv": ["true"]},
+                         {"name": "rev", "kind": "reviewer", "argv": ["true"]}],
+               "gate": ["/bin/echo",
+                        '{"green": false, "fingerprint": "aaa", "fails": []}']}
+        (td / "cfg.json").write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
+
+        def s_ledgerom(telo: str):
+            (td / "scripts" / "token_ledger.py").write_text(telo, encoding="utf-8")
+            return py(td / "scripts" / "autoloop.py", "cfg.json", cwd=td, timeout=300)
+
+        # Ось пропуска: прибор расхода мёртв, потолок назначен — молчать нельзя.
+        code, out = s_ledgerom("import sys\nsys.exit(1)\n")
+        if "расход" not in out and "измер" not in out and "ledger" not in out.lower():
+            fails.append(("budget:failopen", f"прибор расхода недоступен, а цикл "
+                          f"домолотил до потолка итераций и о деньгах не сказал: "
+                          f"сторож бюджета выключается молча — ровно так проезжают "
+                          f"потолок ({out.strip()[-160:]})"))
+        # Та же ось иначе: прибор отвечает мусором вместо числа.
+        code, out = s_ledgerom("print('не json')\n")
+        if "расход" not in out and "измер" not in out and "ledger" not in out.lower():
+            fails.append(("budget:musor", "вердикт прибора расхода не разобран, "
+                          "а цикл продолжил: неразобранный расход обязан быть стопом, "
+                          "как неразобранный вердикт гейта"))
+        # Ось обихода: прибор жив и расход мал — цикл работает, о деньгах молчит.
+        code, out = s_ledgerom('import json\nprint(json.dumps({"money": 0.0}))\n')
+        if "потолок итераций" not in out:
+            fails.append(("budget:trevoga", f"рабочий прибор и нулевой расход "
+                          f"остановили цикл: {out.strip()[-160:]}"))
+    return fails
+
+
 def check_zamorozka_pri_zelyonom():
     """9.16: заморозка данных дел судит и ПОБЕДНУЮ итерацию, не только красную.
 
@@ -2519,6 +2575,7 @@ CHECKS = [
     ("9.16 пропись сверяется во всех падежах", check_propis_padezhi),
     ("9.16 гарнитура и кегль видны с наследования", check_font_nasledovanie),
     ("9.16 заморозка судит и победную итерацию", check_zamorozka_pri_zelyonom),
+    ("9.16 сторож денег fail-closed", check_budget_failclosed),
 ]
 
 
