@@ -916,6 +916,30 @@ class DocBuilder:
         # свой префикс «> », если предыдущий абзац стоит вплотную.
         return "\n\n".join(x for x in parts if x.strip())
 
+    def _matches_approved(self, md_path):
+        """Собранный текст обязан быть равен одобренной редакции .md.
+
+        Сравнение после нормализации: разметка markdown, регистр и «ё» (её
+        сборщик стрипает сам) на равенство не влияют. Одобренный текст обязан
+        войти в документ целиком и подряд; документ может быть ШИРЕ (подпись,
+        дата, реквизиты сборки) — но не другим. Вернет True/False.
+        """
+        import re as _re
+        from pathlib import Path as _Path
+
+        def norm(s):
+            s = _re.sub(r"[*_`#>|\-]+", " ", s)
+            s = s.replace("ё", "е").replace("Ё", "е")
+            return _re.sub(r"\s+", " ", s).strip().lower()
+
+        try:
+            md_norm = norm(_Path(md_path).read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            return False
+        if not md_norm:
+            return True
+        return md_norm in norm(self._document_text())
+
     def _humanizer_gate(self):
         """Прогнать текст через scan_legal.sh. Вернуть список сработавших
         блокирующих категорий; пустой список — документ чист.
@@ -988,15 +1012,22 @@ class DocBuilder:
         bfile = (_cp.baselines(case_root) / p.name) if case_root \
             else (p.parent / "_baselines" / p.name)
 
-        # Вердикт Кони привязан к SHA-256 редакции .md. Собирать .docx в GOTOVO/
-        # из неодобренной или изменённой после одобрения редакции запрещено:
-        # прежде старое одобрение разрешало сборку любого последующего текста.
-        if _cp.READY in parts:
+        # Вердикт Кони привязан к SHA-256 редакции .md. Решение владельца:
+        # «.docx собирается один раз, после вердикта Кони» — поэтому гейт
+        # стоит на ЛЮБОМ документе дела, а не только на сегменте GOTOVO:
+        # прежде .docx в .agent/drafts/ собирался вообще без вердикта и без
+        # парного .md (проба круга 6, 20.08.2026).
+        if is_case_doc:
             import verdict as _v
             md = None
-            for cand in ([_cp.drafts(case_root) / (p.stem + ".md")] if case_root else []):
+            kandidaty = []
+            if case_root is not None and _cp.READY in parts:
+                kandidaty.append(_cp.drafts(case_root) / (p.stem + ".md"))
+            kandidaty.append(p.with_suffix(".md"))
+            for cand in kandidaty:
                 if cand.is_file():
                     md = cand
+                    break
             if md is None:
                 print(f"СТОП, НЕ СОХРАНЕНО: {p.name} — не найден парный черновик .md "
                       f"в {_cp.DRAFTS}/. Документ собирается ИЗ черновика, "
@@ -1010,6 +1041,17 @@ class DocBuilder:
                 print("  Провести раунд Кони и записать вердикт: "
                       "python3 scripts/verdict.py ЧЕРНОВИК.md --record --verdict "
                       "'ГОТОВ К ПОДАЧЕ' -r N")
+                return
+            # Отпечаток .md доказывает лишь неизменность .md — а не то, что в
+            # .docx собрали ИМЕННО одобренный текст. Проба круга 6: Кони
+            # одобрил «взыскать 100 000 (сто тысяч) рублей задолженности», а
+            # в суд собрали «5 000 000 и обратить взыскание на квартиру» —
+            # сборка прошла. Собранный документ обязан содержать одобренную
+            # редакцию дословно (после нормализации разметки и «ё»).
+            if not self._matches_approved(md):
+                print(f"СТОП, НЕ СОХРАНЕНО: собранный текст не совпадает с "
+                      f"одобренной редакцией {md.name}. Отпечаток вердикта "
+                      f"привязан к .md — собирать нужно его, а не другой текст.")
                 return
 
         if (is_case_doc and p.exists() and bfile.exists()
@@ -1065,7 +1107,10 @@ def _verdict_gate_checks(tmp):
     _cp.drafts(case).mkdir(parents=True)
     _cp.ready(case).mkdir(parents=True)
     md = _cp.drafts(case) / "isk_v1.md"
-    md.write_text("# Иск\n\nТекст.\n", encoding="utf-8")
+    # Сборка обязана воспроизводить одобренный текст (этап 9, круг 6): тело
+    # фикстуры равно тексту .md, иначе гейт равенства правомерно не пустит.
+    md.write_text("# ИСКОВОЕ ЗАЯВЛЕНИЕ\n\nТекст документа без плейсхолдеров.\n",
+                  encoding="utf-8")
     target = _cp.ready(case) / "isk_v1.docx"
 
     def build():
