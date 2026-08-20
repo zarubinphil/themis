@@ -248,22 +248,38 @@ def _workflow_gate(p: str) -> None:
     # .md/.docx прямо, минуя карту и практику. Каталог целиком (git clone / curl
     # --output-dir в GOTOVO) — та же дыра: хвоста-файла нет, но пишут ВНУТРЬ папки.
     tail_parts_cf = [x.casefold() for x in rel[2:]]
-    if "_working" in tail_parts_cf or "_baselines" in tail_parts_cf:
-        return
     if tail_parts_cf[:2] == [".agent", "context"]:
         return                       # карта/практика/позиция — свои ветки протокола выше
+    # 00_intake — исходники клиента (ВХОД, не выход конвейера): их неприкосновенность
+    # держит отдельное правило (перезапись/увоз выше), а пополнение новым PDF/сканом
+    # штатно (inbox-triage). Гейт документа сюда не лезет, иначе `mv -n` из инбокса и
+    # добавление скана свежим именем встают (проба круга 6, обиход первички).
+    if "00_intake" in tail_parts_cf:
+        return
+    # _working (черновая кухня) и _baselines (снимки «ДО») законны ТОЛЬКО под .agent/.
+    # Прежде компонент с этим именем где угодно снимал гейт: голый {дело}/_working/isk.docx
+    # у корня подсовывал документ мимо протокола под служебным именем (проба круга 6).
+    # Имя с подчёркивания больше не открывает лазейку — признаём лишь внутри .agent/.
+    if tail_parts_cf[:1] == [".agent"] and (
+            "_working" in tail_parts_cf or "_baselines" in tail_parts_cf):
+        return
     top = tail_parts_cf[0] if tail_parts_cf else ""
     basename_cf = tail_parts_cf[-1] if tail_parts_cf else ""
     ext = os.path.splitext(basename_cf)[1].lstrip(".")
     drafts = tail_parts_cf[:2] == [".agent", "drafts"]
     in_pipeline_dir = top in ("gotovo", "02_hearings") or drafts
-    root_doc = len(tail_parts_cf) == 1 and ext in ("md", "docx")
+    # Документ дела (.md/.docx/.pdf) ложится только через конвейер — ГДЕ УГОДНО под
+    # делом, не только в корне: PDF в корне ({дело}/isk.pdf) и .docx в служебной папке
+    # раньше проходили, потому что правило перечисляло места (проба круга 6).
+    is_doc = ext in ("md", "docx", "pdf")
     metadata = basename_cf.startswith("_")           # _case.md, _event.md — служебное
-    if (in_pipeline_dir or root_doc) and not metadata:
+    if (in_pipeline_dir or is_doc) and not metadata:
         if not _has_marker(km, r"## КАРТА ГОТОВА ✓") or not _has_marker(pr, PRACTICE_MARKER):
             where = ("GOTOVO/" if top == "gotovo"
                      else "02_hearings/" if top == "02_hearings"
-                     else ".agent/drafts/" if drafts else "корень дела")
+                     else ".agent/drafts/" if drafts
+                     else "корень дела" if len(tail_parts_cf) == 1
+                     else top + "/")
             block(
                 f"БЛОК ПРОТОКОЛА: документ в {where} пишется только после Шагов 1-2 — "
                 "нет маркера карты и/или практики. Судебные документы вне конвейера "
@@ -282,7 +298,17 @@ def _workflow_gate(p: str) -> None:
 #             с доказательствами. Место рендера — кеш вне cases/ (--render-dir /tmp/…).
 # Первичка (00_intake) из растрового правила исключена: там картинка и есть
 # доказательство, и трогать её запрещено отдельным правилом выше.
-CODE_EXT = ("py", "sh", "bash", "zsh")
+# Код — не «расширение из короткого списка», а язык программы/скрипта: `.js`, `.rb`,
+# `.command` — такой же генератор документа мимо DocBuilder, как `.py` (проба круга 6:
+# перечень из четырёх расширений пускал их в дело). Набор покрывает ходовые
+# скрипт/код-языки; расширения данных (.md/.docx/.pdf/.json/.csv) сюда не входят —
+# документ судит гейт протокола, а не это правило. ponytail: набор расширений, а не
+# сниффер содержимого — распознавать код в файле без расширения незачем, пока такого
+# файла под cases/ не появилось.
+CODE_EXT = ("py", "pyw", "sh", "bash", "zsh", "fish", "ksh", "command", "bat", "cmd",
+            "ps1", "js", "mjs", "cjs", "jsx", "ts", "tsx", "rb", "pl", "pm", "php",
+            "lua", "go", "rs", "java", "c", "cc", "cpp", "h", "hpp", "swift", "kt",
+            "scala", "groovy", "tcl", "awk", "vbs", "applescript", "scpt")
 RASTER_EXT = ("png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp")
 
 
@@ -668,6 +694,40 @@ def _mv_sources(body: str) -> list:
     return out
 
 
+# ln СВЯЗЫВАЕТ, а не копирует: жёсткая ссылка (`ln A B`, без -s) на первичку выносит
+# её наружу — правка по ссылке меняет ОРИГИНАЛ, а копия уходит мимо сторожа;
+# символьная (`ln -s`) даёт тот же путь к оригиналу. Цель-запись (последний аргумент)
+# лежит вне дела и по ней увода не видно (проба круга 6). Судим ИСТОЧНИКИ.
+_LN_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?ln\s+([^;&|<>]+)", re.M)
+
+
+def _link_sources(cmd: str, base: str) -> list:
+    """Абсолютные источники ln: все позиционные, кроме цели (ln SRC... DST / ln -t DIR
+    SRC...); один аргумент — он же источник (ln SRC линкует в CWD)."""
+    out = []
+    for args in _LN_RE.findall(cmd):
+        try:
+            import shlex
+            toks = shlex.split(args)
+        except ValueError:
+            toks = args.split()
+        cut = []
+        for t in toks:
+            if t.startswith("#"):
+                break
+            cut.append(t)
+        tdir = _target_dir_flag(cut)
+        pos = [t for t in cut if not t.startswith("-")]
+        if tdir is not None:
+            srcs = [p for p in pos if p != tdir]
+        elif len(pos) >= 2:
+            srcs = pos[:-1]
+        else:
+            srcs = pos
+        out += [_resolve(s, base) for s in srcs]
+    return out
+
+
 # rm/rmdir — удаление. Судим ЦЕЛИ команды, а не подстроку по всей строке: слово
 # «00_intake»/«_baselines» в аргументе чтения дальше по строке или в комментарии
 # не делает `rm /tmp/x` ударом по делу (проба 20.08.2026 отбивала обиход координатора).
@@ -735,9 +795,14 @@ _PY_UNPACK_RE = re.compile(
 # Распаковка БЕЗ флага каталога кладёт архив в CWD. После ведущего `cd дело/00_intake`
 # CWD — внутри дела: `cd дело/00_intake && tar xf a.tar` высыпает архив в первичку,
 # хотя каталог назначения в командной строке не назван (проба круга 4).
+# cpio -i высыпает архив со stdin прямо в CWD (флаг `-d` у cpio — «создавать
+# каталоги», не каталог назначения): `cd дело/00_intake && cpio -id < a.cpio`
+# заполняет первичку мимо сторожа (проба круга 6). Режим извлечения — кластер
+# флагов с `i` либо --extract; `-o` (создание архива) сюда не попадает.
 _EXTRACT_VERB_RE = re.compile(
     r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?"
-    r"(?:tar\s+-?[A-Za-z]*x|unzip\b|bsdtar\s+-?[A-Za-z]*x|7z\s+[ex]\b|unrar\s+[ex]\b)", re.M)
+    r"(?:tar\s+-?[A-Za-z]*x|unzip\b|bsdtar\s+-?[A-Za-z]*x|7z\s+[ex]\b|unrar\s+[ex]\b"
+    r"|cpio\s+(?:-[A-Za-z]*i[A-Za-z]*|--extract)\b)", re.M)
 _DIR_FLAG_RE = re.compile(r"(?:^|\s)(?:-C|--directory|-d)\b")
 
 
@@ -1033,6 +1098,15 @@ def main() -> None:
                 "БЛОК: перезапись или увоз 00_intake/ или _baselines/ (в т.ч. как "
                 "поддерево переносимой папки дела/клиента) запрещены — исходники клиента "
                 "и база «ДО» неприкосновенны. Новое класть новым именем через Write."
+            )
+        # Ссылка (жёсткая/символьная) на первичку выносит её наружу мимо сторожа и
+        # даёт править оригинал по ссылке — увод, которого по цели-записи не видать.
+        if any(_under_protected(s) for s in _link_sources(cmd, base)):
+            block(
+                "БЛОК: ссылка на 00_intake/ или _baselines/ выносит первичку наружу — "
+                "правка по жёсткой/символьной ссылке меняет оригинал, а копия уходит "
+                "мимо сторожа. Материалы дела не связывать ссылкой за пределы дела; "
+                "нужна рабочая копия — извлекать через markdown_extract.py в кеш."
             )
 
         # Гейт по robots.txt источника живет в practice_search.py, но обойти его
@@ -1401,6 +1475,35 @@ def selftest() -> int:
         ("python3 -c с относительным путём после cd — блок",
          run({"tool_name": "Bash", "tool_input": {
              "command": "cd cases/klient/delo-2026 && python3 -c \"open('00_intake/est.pdf','w')\""}}), 2),
+        # ── Код по языку, документ где угодно, cpio и ссылка (круг 6, вторая волна) ──
+        ("код .js под cases блокируется",
+         run({"tool_name": "Write", "tool_input": {
+             "file_path": "cases/klient/delo-2026/gen.js", "content": "x"}}), 2),
+        ("код .rb под cases блокируется",
+         run({"tool_name": "Write", "tool_input": {
+             "file_path": "cases/klient/delo-2026/gen.rb", "content": "x"}}), 2),
+        (".command под cases блокируется",
+         run({"tool_name": "Write", "tool_input": {
+             "file_path": "cases/klient/delo-2026/run.command", "content": "x"}}), 2),
+        ("PDF в корне дела мимо конвейера блокируется",
+         run({"tool_name": "Write", "tool_input": {
+             "file_path": "cases/klient/delo-2026/isk.pdf", "content": "%PDF-1.7"}}), 2),
+        (".docx в служебной папке _working у корня блокируется",
+         run({"tool_name": "Write", "tool_input": {
+             "file_path": "cases/klient/delo-2026/_working/isk.docx", "content": "x"}}), 2),
+        ("cpio -id после cd в первичку — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "cd cases/klient/delo-2026/00_intake && cpio -id < /tmp/a.cpio"}}), 2),
+        ("жёсткая ссылка на первичку наружу — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "ln cases/klient/delo-2026/00_intake/skan.pdf /tmp/kopiya.pdf"}}), 2),
+        ("ссылка /tmp → /tmp пропускается",
+         run({"tool_name": "Bash", "tool_input": {"command": "ln /tmp/a.txt /tmp/b.txt"}}), 0),
+        ("cpio во временном каталоге пропускается",
+         run({"tool_name": "Bash", "tool_input": {"command": "cd /tmp/raspakovka && cpio -id < /tmp/a.cpio"}}), 0),
+        ("данные .csv под cases кодом не считаются, пропуск",
+         run({"tool_name": "Write", "tool_input": {
+             "file_path": "cases/klient/delo-2026/.agent/context/_working/tabl.csv", "content": "x"}}), 0),
         # ── Имя чужого CLI в тексте команды — не вызов (круг 4) ─────────────────
         ("имя CLI в сообщении коммита — не вызов",
          all(run({"tool_name": "Bash", "tool_input": {
