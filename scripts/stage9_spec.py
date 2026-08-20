@@ -2391,6 +2391,68 @@ def check_font_nasledovanie():
     return fails
 
 
+def check_matcher_pokrytie():
+    """9.16: регистрация сторожа — это покрытие дверей, а не строка в блоке.
+
+    Проба 20.08.2026: гейт признаёт сторожа зарегистрированным при ЛЮБОМ
+    matcher — «Read», «WebFetch», пустая строка и даже имя несуществующего
+    инструмента дают зелёный. Сторож при этом не вызывается ни на записи, ни
+    на команде: файл на диске, команда в блоке, дверь настежь.
+
+    Этап 9.2 закрывал ровно этот класс («ничто не проверяет, что сторож
+    включён») и закрыл его наполовину: проверено наличие команды, не проверено
+    покрытие. Сторож охраняет записи и команды, значит matcher обязан
+    покрывать Write, Edit, NotebookEdit, Bash и Read — либо быть всеохватным.
+    """
+    lg = tool("loop_gate.py")
+    if not lg.is_file():
+        return [("matcher:missing", "scripts/loop_gate.py отсутствует")]
+    fails = []
+    obyazatelnye = ("Write", "Edit", "Bash", "Read", "NotebookEdit")
+    with tempfile.TemporaryDirectory(prefix="stage9-matcher-") as tmp:
+        td = _gate_sandbox(Path(tmp))
+        gate = td / "scripts" / "loop_gate.py"
+        hooks = td / ".git" / "hooks"
+        hooks.mkdir(parents=True, exist_ok=True)
+        for name, arg in (("pre-commit", "--staged"), ("commit-msg", '--msg "$1"'),
+                          ("pre-push", "--push")):
+            hp = hooks / name
+            hp.write_text('#!/bin/sh\nexec python3 "$(git rev-parse --show-toplevel)'
+                          f'/scripts/pd_guard.py" {arg}\n', encoding="utf-8")
+            hp.chmod(0o755)
+        cl = td / ".claude"
+        cl.mkdir(exist_ok=True)
+
+        def s_matcherom(m):
+            cfg = {"hooks": {"PreToolUse": [{"matcher": m, "hooks": [
+                {"type": "command",
+                 "command": 'python3 "$CLAUDE_PROJECT_DIR/scripts/claude_guard.py"'}]}]}}
+            (cl / "settings.json").write_text(json.dumps(cfg, ensure_ascii=False),
+                                              encoding="utf-8")
+            code, out = py(gate, "--hooks-only", "--json", cwd=td)
+            return code
+
+        # Ось пропуска: сторож повешен не на те двери либо ни на какие.
+        dyry = [("tolko-read", "Read"), ("chuzhaya-dver", "WebFetch"),
+                ("pustoy", ""), ("nesushchestvuyushchiy", "NetTakogoInstrumenta"),
+                ("bez-bash", "Write|Edit")]
+        for name, m in dyry:
+            if s_matcherom(m) == 0:
+                fails.append((f"matcher:{name}", f"сторож признан зарегистрированным "
+                              f"при matcher {m!r}: на защищаемые двери он не повешен и "
+                              f"не вызывается вовсе — выключается одной правкой при "
+                              f"зелёном гейте"))
+        # Ось обихода: рабочие формы записи принимаются.
+        for name, m in (("polnyy", "|".join(obyazatelnye)),
+                        ("vseohvatnyy", ".*"),
+                        ("poryadok-inoy", "Bash|Read|Edit|Write|NotebookEdit")):
+            if s_matcherom(m) != 0:
+                fails.append((f"matcher:trevoga-{name}", f"рабочая регистрация "
+                              f"отвергнута ({name}, matcher {m!r}) — гейт не даст "
+                              f"работать на честной конфигурации"))
+    return fails
+
+
 def check_env_vne_python():
     """9.16: сторож окружения видит установку не только питоновскую.
 
@@ -2819,6 +2881,7 @@ CHECKS = [
     ("9.16 маркер шага — структура, не подстрока", check_marker_struktura),
     ("9.16 сработавший ПД-сторож в цикле отличим", check_otkaz_pd_v_cikle),
     ("9.16 сторож окружения видит не только pip", check_env_vne_python),
+    ("9.16 регистрация сторожа покрывает двери", check_matcher_pokrytie),
 ]
 
 
