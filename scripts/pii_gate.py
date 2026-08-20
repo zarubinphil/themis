@@ -51,6 +51,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
@@ -106,7 +107,7 @@ ROLE_SURNAME_RE = re.compile(
 # сплошную форму ловили, разбитую пропускали (проба скептика 19.08.2026). Метка
 # «ИНН/ОГРН» уже стоит рядом, поэтому расширение цифрового блока ложную тревогу
 # на суммах/счетах не даёт. Группа одна — маскируется только значение.
-_DSEP = r"[ \t.\-  ]?"
+_DSEP = r"[ \t.\-  \u00ad\u200b]?"
 INN_RE = re.compile(rf"ИНН[:\s№]{{0,5}}(\d(?:{_DSEP}\d){{9,11}})\b")
 OGRN_RE = re.compile(rf"ОГРН(?:ИП)?[:\s№]{{0,5}}(\d(?:{_DSEP}\d){{12,14}})\b")
 # Без метки: длина — единственный сигнал (см. обоснование в docstring модуля).
@@ -124,7 +125,7 @@ OGRN_BARE_RE = re.compile(r"(?<!\d)(\d{13}|\d{15})(?!\d)")
 # уходил за границу процесса дословно (проба круга 5, 20.08.2026).
 _METKA_SEP = r"[:\s,*|—–\-]*"
 # «номер» словом равнозначно знаку номера и латинской N.
-_NOMER = r"[ \t]*(?:№|N|номер|номером)?[ \t:.]*"
+_NOMER = r"[ \t]*(?:№|N|No|номер|номером)?[ \t:.]*"
 PASSPORT_RE = re.compile(
     rf"паспорт(?:\s+[А-ЯЁA-Zа-яё]{{1,15}}){{0,5}}{_METKA_SEP}"
     rf"(?:сер\w*{_METKA_SEP})?(?:№{_METKA_SEP})?"
@@ -133,6 +134,9 @@ PASSPORT_RE = re.compile(
 # метка стоит в заголовке столбца, а не рядом со значением.
 PASSPORT_PARA_RE = re.compile(
     rf"(?<![\d.])(\d(?:{_DSEP}\d){{3}}[ \t]+\d(?:{_DSEP}\d){{5}})(?![\d.])")
+PASSPORT_TABLE_RE = re.compile(
+    r"(?is)\|\s*серия\s*\|\s*номер\s*\|[^\n]*\n"
+    r"\|\s*(\d{4}\s*\|\s*\d{6})\s*\|")
 # Паспорт БЕЗ слова «паспорт», но с меткой «серия»: «серия 9203 № 456789» —
 # частая форма в анкетах и приложениях к иску (проба 20.08.2026 пропускала её,
 # метка была только «паспорт»). Якорь «сери\w*» держит от ложной тревоги:
@@ -178,7 +182,8 @@ BIRTHDATE_RE = re.compile(
 # который прежний шаблон (дата→метка) не видел (проба скептика 19.08.2026).
 # Анкер по слову «рожд…» держит от голой даты Пленума.
 BIRTHDATE_LABEL_RE = re.compile(
-    rf"(?:дата\s+)?рожд\w*{_METKA_SEP}(\d{{2}}\.\d{{2}}\.\d{{2,4}})", re.I)
+    rf"(?:дата\s+)?рожд\w*{_METKA_SEP}"
+    rf"(\d{{2}}\.\d{{2}}\.\d{{2,4}}|\d{{4}}-\d{{2}}-\d{{2}})", re.I)
 # «14.03.85 г.р.» — год двузначный, якорь идёт ПОСЛЕ даты. Дата Пленума так не
 # пишется: у неё год всегда полный и рядом стоит «от».
 BIRTHDATE_GR_RE = re.compile(r"(\d{2}\.\d{2}\.\d{2,4})\s*(?:г\.?\s*р\.|года\s+рожд\w*)", re.I)
@@ -234,7 +239,14 @@ CASE_PATH_RE = re.compile(r"\bcases/[A-Za-zА-Яа-яЁё0-9_.\-]+(?:/[\w.\-]+)*
 #   СНИЛС называет человека сам по себе;
 #   кадастровый номер называет объект спора, а через ЕГРН — собственника;
 #   государственный номер автомобиля называет владельца.
-SNILS_BARE_RE = re.compile(r"(?<!\d)\d{3}-\d{3}-\d{3}[ -]\d{2}(?!\d)")
+SNILS_BARE_RE = re.compile(rf"(?<!\d)\d{{3}}{_DSEP}\d{{3}}{_DSEP}\d{{3}}{_DSEP}\d{{2}}(?!\d)")
+FOREIGN_PASSPORT_RE = re.compile(
+    rf"загранпаспорт\w*{_METKA_SEP}(\d{{2}}{_DSEP}\d{{7}})\b", re.I)
+ROLE_FULLNAME_RE = re.compile(
+    r"(?i:истц\w*|истец|ответчик\w*|ответчиц\w*|заявител\w*|гражданин\w*|"
+    r"гражданк\w*|свидетел\w*|представител\w*|доверител\w*)"
+    r"[\s,]+([а-яё]+\s+[а-яё]+\s+[а-яё]*(?:ович|евич|ьевич|овн|евн|ьевн|иничн)[а-яё]{0,2})\b",
+    re.I)
 # Транслитерированная фамилия: в делах с иностранным элементом и в переписке она
 # встречается наравне с кириллической, а кириллические правила её не видят вовсе.
 # Ловим по славянским суффиксам транслитерации — обычное английское слово на
@@ -257,15 +269,16 @@ AUTO_NUMBER_RE = re.compile(r"(?<![А-ЯЁA-Z0-9])[АВЕКМНОРСТУХABEKM
 
 # Порядок категорий — приоритет при перекрытии совпадений (см. _find_matches).
 CATEGORIES_STATIC = (
-    ("ФИО", (FIO_RE, FIO_CAPS_RE, FIO_INITIALS_RE, ROLE_SURNAME_RE, TRANSLIT_FIO_RE)),
+    ("ФИО", (FIO_RE, FIO_CAPS_RE, FIO_INITIALS_RE, ROLE_FULLNAME_RE,
+             ROLE_SURNAME_RE, TRANSLIT_FIO_RE)),
     ("УЧРЕЖДЕНИЕ", (CHILD_INST_RE,)),
     ("ИНН", (INN_RE, INN_BARE_RE)),
     ("ОГРН", (OGRN_RE, OGRN_BARE_RE)),
     ("ДЕЛО", (CASE_NO_RE,)),
     ("СЧЕТ", (BANK_ACCOUNT_RE,)),
     ("КАРТА", (CARD_RE,)),
-    ("ПАСПОРТ", (PASSPORT_RE, PASSPORT_SERIA_RE, PASSPORT_PARA_RE,
-                 DRIVER_LICENSE_RE)),
+    ("ПАСПОРТ", (PASSPORT_RE, PASSPORT_SERIA_RE, PASSPORT_TABLE_RE,
+                 FOREIGN_PASSPORT_RE, PASSPORT_PARA_RE, DRIVER_LICENSE_RE)),
     ("СНИЛС", (SNILS_RE, SNILS_BARE_RE)),
     ("КАДАСТР", (CADASTRE_RE,)),
     ("АВТОНОМЕР", (AUTO_NUMBER_RE,)),
@@ -335,6 +348,7 @@ _OBEZLICHENNAYA_STORONA = frozenset((
     "управление", "управления", "управлению", "управлением",
     "администрация", "администрации", "администрацию", "администрацией",
     "инспекция", "инспекции", "инспекцию", "инспекцией",
+    "российский", "российского", "российскому", "российским", "российском",
     "российской", "российская", "российскую", "федерации", "федерация",
 ))
 
@@ -362,6 +376,8 @@ def _find_matches(text: str) -> list[tuple[int, int, str]]:
                 # ради которой обезличивание и делается (проба круга 5).
                 if cat == "ФИО" and _obezlichennaya_storona(text[span[0]:span[1]]):
                     continue
+                if cat == "ПАСПОРТ" and _looks_like_money(text, span[0], span[1]):
+                    continue
                 raw.append((span[0], span[1], cat))
     raw.sort(key=lambda t: (t[0], -(t[1] - t[0])))
     claimed: list[tuple[int, int]] = []
@@ -373,6 +389,17 @@ def _find_matches(text: str) -> list[tuple[int, int, str]]:
         chosen.append((start, end, cat))
     chosen.sort(key=lambda t: t[0])
     return chosen
+
+
+_MONEY_TAIL_RE = re.compile(r"^\s*(?:руб(?:\.|лей|ля|ль)?|коп\.?|₽)\b", re.I)
+
+
+def _looks_like_money(text: str, start: int, end: int) -> bool:
+    """10 цифр с пробелами бывают паспортом, но с `руб.` это цена иска."""
+    chunk = text[start:end]
+    if " " not in chunk and " " not in chunk and " " not in chunk:
+        return False
+    return bool(_MONEY_TAIL_RE.search(text[end:end + 16]))
 
 
 def mask_text(text: str) -> tuple[str | None, dict[str, str]]:
@@ -554,6 +581,26 @@ _COMMON_NOUN_NOT_SURNAME = {
     "один", "гражданин", "магазин", "господин", "половина", "величина",
 }
 
+_HOMOGLYPH_SOURCE = {
+    "A": "А", "B": "В", "C": "С", "E": "Е", "H": "Н", "K": "К", "M": "М",
+    "O": "О", "P": "Р", "T": "Т", "X": "Х", "Y": "У",
+    "a": "а", "c": "с", "e": "е", "o": "о", "p": "р", "x": "х", "y": "у",
+}
+_HOMOGLYPHS = str.maketrans(_HOMOGLYPH_SOURCE)
+
+
+def normalize_for_detection(text: str) -> str:
+    """OCR-нормализация для детекта: исходный текст маскировщика не переписываем."""
+    text = unicodedata.normalize("NFKC", text)
+    lat = "".join(re.escape(ch) for ch in _HOMOGLYPH_SOURCE)
+    text = re.sub(
+        rf"(?<=[А-Яа-яЁё])[{lat}]+|[{lat}]+(?=[А-Яа-яЁё])",
+        lambda m: m.group(0).translate(_HOMOGLYPHS),
+        text,
+    )
+    text = text.replace("\u00ad", "").replace("\u200b", "")
+    return text
+
 
 
 def _obihod_ne_familiya(word: str) -> bool:
@@ -631,6 +678,7 @@ def _residual_extra_matches(text: str) -> list[tuple[int, int, str]]:
 def residual_matches(text: str) -> list[tuple[int, int, str]]:
     """Полный набор находок второго рубежа: категории маскировщика + свободная
     морфология. Общая точка входа для cmd_residual и selftest."""
+    text = normalize_for_detection(text)
     return _find_matches(text) + _residual_extra_matches(text)
 
 
