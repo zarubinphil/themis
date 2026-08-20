@@ -102,6 +102,20 @@ def run(argv, cwd=ROOT, timeout=1800, env=None):
 # при том что ни один файл дела не менялся шесть часов. Сторож, срабатывающий на
 # обиходе, останавливает работу вместо того, чтобы её защищать.
 MUSOR_OS = (".DS_Store", ".localized", ".Spotlight-V100", ".fseventsd", ".TemporaryItems")
+# Служебные журналы САМОЙ системы, лежащие внутри cases/. Их дописывает проект
+# (Stop-хук в .claude/settings.json) в конце каждой сессии, поэтому в отпечатке
+# они означают «система работала», а не «кто-то тронул дело». Прогон 21.08.2026
+# дважды вставал со словами «ТРОНУТЫ ДАННЫЕ ДЕЛ» при зелёном гейте: сравнение
+# снимков 11 669 файлов дало ровно один изменённый — _session_history.txt,
+# 20032 -> 20064 байта. Сторож, кричащий без причины, учит игнорировать себя,
+# а охраняет он 20 ГБ первички.
+# Исключение УЗКОЕ и поимённое: прочие файлы с подчёркивания (_client.md,
+# _case.md) — настоящие данные дела и отпечаток двигают по-прежнему.
+ZHURNALY_SISTEMY = ("_session_history.txt",)
+
+
+def _sluzhebnyy_zhurnal(rel_path: str, name: str) -> bool:
+    return name in ZHURNALY_SISTEMY or rel_path.split(os.sep)[0] == "_logs"
 
 
 def _musor(name):
@@ -125,7 +139,10 @@ def tree_fingerprint(path):
                 st = os.stat(full)
             except OSError:
                 continue
-            h.update(os.path.relpath(full, path).encode("utf-8"))
+            rel = os.path.relpath(full, path)
+            if _sluzhebnyy_zhurnal(rel, name):
+                continue
+            h.update(rel.encode("utf-8"))
             h.update(f"{st.st_size}:{st.st_mtime_ns}".encode())
     return h.hexdigest()[:16]
 
