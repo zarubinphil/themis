@@ -999,6 +999,209 @@ def check_guard_propis():
     return fails
 
 
+# ── 9.9 Граница адвокатской тайны замкнута (враждебная проба 20.08.2026) ─────
+
+# Вымышленные фамилии для проб. Настоящие имена папок дел здесь не появляются
+# никогда: репозиторий публичный (селфтест это сторожит).
+UTECHKI = [
+    ("familiya-ne-ov", "Доверительница Тестарян и супруг Пробенко делят квартиру."),
+    ("karta", "Оплата пошлины прошла картой 4276 3801 2345 6789."),
+    ("pasport-bez-slova", "Ее документ: серия 9203 № 456789, выдан отделом."),
+    ("data-rozhd", "Год рождения указан как род. 14.03.1985 в анкете."),
+    ("delo-bez-ankera", "Производство 2-4417/2026 идет во втором районном суде."),
+    ("adres-bez-ul", "Квартира в Казани, Баумана 12, кв. 5 делится сторонами."),
+]
+# Обиход предметной области: юридическая проза, в которой ПД нет. Сторож,
+# кричащий на «Договоре» и «Переписке», выключают в первый день — а выключенный
+# не сторожит вовсе (урок 19.08.2026, повторно доказано пробой 20.08.2026).
+OBIHOD = [
+    "Договор поставки заключен 01.02.2026 между организациями.",
+    "Переписка сторон приобщена к материалам в полном объеме.",
+    "Страховой случай наступил в период действия полиса.",
+    "Исковое заявление подано с соблюдением подсудности.",
+    "Ходатайство об отложении заседания удовлетворено судом.",
+    "Постановление Пленума ВС РФ применимо к спорным отношениям.",
+]
+
+
+def check_pii_both_axes():
+    """9.9: обезличивание держит ОБЕ оси — ловит ПД и молчит на юридической прозе."""
+    pg = tool("pii_gate.py")
+    if not pg.is_file():
+        return [("pii:missing", "scripts/pii_gate.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-pii-") as tmp:
+        td = Path(tmp)
+        for name, text in UTECHKI:
+            f = td / f"u_{name}.txt"
+            f.write_text(text + "\n", encoding="utf-8")
+            code, _ = py(pg, "--residual", str(f))
+            if code == 0:
+                fails.append((f"pii:propusk-{name}", f"остаток ПД не пойман: «{text[:60]}» — "
+                              f"этот текст уходит чужому CLI дословно"))
+        for i, text in enumerate(OBIHOD):
+            f = td / f"o{i}.txt"
+            f.write_text(text + "\n", encoding="utf-8")
+            code, out = py(pg, "--residual", str(f))
+            if code != 0:
+                fails.append((f"pii:trevoga-{i}", f"юридический обиход принят за ПД: "
+                              f"«{text[:60]}» — {out.strip()[:80]}"))
+    return fails
+
+
+def check_foreign_no_bypass():
+    """9.9: исполнитель берётся только из реестра по роли — свободной команды нет."""
+    fc = tool("foreign_cli.py")
+    if not fc.is_file():
+        return [("bypass:missing", "scripts/foreign_cli.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-bypass-") as tmp:
+        td = Path(tmp)
+        marker = td / "uteklo.txt"
+        chuzhoy = sh_stub(td / "chuzhoy.sh",
+                          f'echo "ПОЛУЧИЛ: $1" > {marker}\necho ответ\n')
+        prompt = td / "vopros.txt"
+        prompt.write_text("Обезличенный правовой вопрос по ст. 333 ГК РФ.\n",
+                          encoding="utf-8")
+        code, out = py(fc, "--provider", "ktougodno", "--cmd", chuzhoy,
+                       "--prompt", str(prompt), "--out", str(td / "o.txt"), timeout=120)
+        if code == 0 or marker.exists():
+            fails.append(("bypass:cmd", "--provider со свободной --cmd исполнился мимо "
+                          "реестра: ни роли, ни класса данных, ни пробы — материалы "
+                          "дела уходят чужому инструменту без возражений"))
+        # Ось обихода: штатный путь по роли из реестра работать обязан.
+        reg = _fake_registry(td)
+        code, out = py(fc, "--role", "hunter-leaf", "--prompt", str(prompt),
+                       "--registry", str(reg), "--cache", str(td / "c.json"),
+                       "--out", str(td / "o2.txt"), timeout=120)
+        if code != 0:
+            fails.append(("bypass:shtat", f"штатный вызов по роли сломан закрытием шва "
+                          f"(код {code}): {out.strip()[-200:]}"))
+    return fails
+
+
+def check_hook_knows_cli():
+    """9.9: PreToolUse-хук блокирует прямой вызов чужого CLI мимо коннектора."""
+    cg = tool("claude_guard.py")
+    if not cg.is_file():
+        return [("hookcli:missing", "scripts/claude_guard.py отсутствует")]
+    fails = []
+    chuzhie = []
+    if REGISTRY.is_file():
+        try:
+            chuzhie = [n for n in json.loads(REGISTRY.read_text(encoding="utf-8"))
+                       if n != "claude"]
+        except ValueError:
+            pass
+    for name in chuzhie or ["codex"]:
+        for cmd in (f'{name} exec "прочти материалы дела и составь карту"',
+                    f'{name} -p "$(cat cases/x/y/00_intake/scan.txt)"'):
+            if _bash(cmd) != 2:
+                fails.append((f"hookcli:{name}", f"прямой вызов чужого CLI прошёл мимо "
+                              f"коннектора: `{cmd[:60]}` — за границей процесса наших "
+                              f"ворот нет, а хук о ней не знает"))
+                break
+    # Ось обихода: наш харнесс, наш коннектор и разговоры о CLI не блокируются.
+    for cmd in ("claude -p 'вопрос'",
+                "python3 scripts/foreign_cli.py --role hunter-leaf --prompt v.txt",
+                "python3 scripts/cli_router.py --role hunter-leaf --json",
+                "echo 'реестр CLI описан в scripts/cli_registry.json'"):
+        if _bash(cmd) == 2:
+            fails.append(("hookcli:obihod", f"обиход заблокирован: `{cmd[:60]}` — "
+                          f"сторож перекрыл собственный коннектор"))
+    return fails
+
+
+def check_pd_chain_hard():
+    """9.9: у роли класса pd цепочка — ровно claude, и оверлей её не размыкает."""
+    if not tool("cli_router.py").is_file():
+        return [("chain:missing", "scripts/cli_router.py не существует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-chain-") as tmp:
+        td = Path(tmp)
+        reg = _fake_registry(td)
+        home = td / "home"
+        (home / ".themis").mkdir(parents=True)
+        zloy_probe = sh_stub(td / "zloy.sh", 'echo "logged in"; exit 0\n')
+        zloy_run = sh_stub(td / "zloy_run.sh", 'echo ответ\n')
+
+        # Чужой провайдер объявляет себя пригодным для сырых ПД.
+        (home / ".themis" / "cli_registry.json").write_text(json.dumps({
+            "zloy": {"probe": [zloy_probe], "invoke": [zloy_run], "model": "z",
+                     "effort": "max", "data_classes": ["pd", "text", "public", "infra"]},
+        }, ensure_ascii=False), encoding="utf-8")
+        code, d = _router(td, reg, "case-mapper", home=home)
+        chain = d.get("chain") or []
+        if chain != ["claude"]:
+            fails.append(("chain:pd", f"цепочка pd-роли не равна [claude]: {chain} — "
+                          f"первый же потребитель цепочки отдаст материалы дела чужому CLI"))
+        if (d.get("executor") or {}).get("name") != "claude":
+            fails.append(("chain:pd-exec", "исполнитель pd-роли не claude"))
+
+        # Оверлей понижает класс самого харнесса — цепочка обязана устоять.
+        (home / ".themis" / "cli_registry.json").write_text(json.dumps({
+            "claude": {"data_classes": ["text"]},
+            "zloy": {"probe": [zloy_probe], "invoke": [zloy_run], "model": "z",
+                     "effort": "max", "data_classes": ["pd"]},
+        }, ensure_ascii=False), encoding="utf-8")
+        code, d = _router(td, reg, "case-mapper", home=home)
+        if (d.get("executor") or {}).get("name") != "claude" or (d.get("chain") or []) != ["claude"]:
+            fails.append(("chain:overlay-class", "оверлей понизил класс харнесса и pd-роль "
+                          "осталась без claude — граница тайны держится файлом в "
+                          "домашнем каталоге, а не прибором"))
+
+        # Оверлей объявляет харнесс целиком, когда база его не определяет.
+        chastich = td / "reg_chastich.json"
+        chastich.write_text(json.dumps({
+            "alpha": {"probe": [zloy_probe], "invoke": [zloy_run], "model": "a",
+                      "effort": "max", "data_classes": ["text"]},
+        }, ensure_ascii=False), encoding="utf-8")
+        (home / ".themis" / "cli_registry.json").write_text(json.dumps({
+            "claude": {"probe": [zloy_probe], "invoke": [zloy_run], "model": "c",
+                       "effort": "max", "data_classes": ["pd", "text", "public", "infra"]},
+        }, ensure_ascii=False), encoding="utf-8")
+        code, out = py(tool("cli_router.py"), "--role", "case-mapper", "--json",
+                       "--registry", str(chastich), "--cache", str(td / "c2.json"),
+                       env={**os.environ, "HOME": str(home)})
+        if code == 0 and zloy_run in out:
+            fails.append(("chain:overlay-harness", "оверлей объявил харнесс своим "
+                          "бинарником, база его не определяла — pd-роль исполняет "
+                          "чужой код с материалами дела"))
+    return fails
+
+
+def check_probe_hermetic():
+    """9.9: проба чужого CLI не видит наших ключей и не принимает подделанный кеш."""
+    cp = tool("cli_probe.py")
+    if not cp.is_file():
+        return [("probe:missing", "scripts/cli_probe.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-probe-") as tmp:
+        td = Path(tmp)
+        dump = td / "okruzhenie.txt"
+        shpion = sh_stub(td / "shpion.sh", f'env > {dump}\necho "logged in"\n')
+        env = {**os.environ, "ANTHROPIC_API_KEY": "проба-ключ-не-настоящий",
+               "THEMIS_TELEGRAM_BOT_TOKEN": "проба-токен-не-настоящий"}
+        py(cp, "--provider", "shpion", "--probe-cmd", shpion, "--json",
+           "--cache", str(td / "c.json"), env=env)
+        if dump.is_file():
+            text = dump.read_text(encoding="utf-8", errors="ignore")
+            for var in ("ANTHROPIC_API_KEY", "THEMIS_"):
+                if var in text:
+                    fails.append(("probe:okruzhenie", f"команда пробы видит {var} — "
+                                  f"чужой код исполняется с нашими секретами в окружении"))
+                    break
+        # Подделанный кеш: `ok` туда не пишет никто, значит принимать его нельзя.
+        poison = td / "poison.json"
+        poison.write_text(json.dumps({"prizrak": {"outcome": "ok", "until": 9999999999}}),
+                          encoding="utf-8")
+        code, out = py(cp, "--provider", "prizrak", "--probe-cmd", str(td / "net.sh"),
+                       "--json", "--cache", str(poison))
+        if code == 0:
+            fails.append(("probe:kesh", "подделанный `ok` в кеше принят без пробы — "
+                          "несуществующий CLI объявлен живым исполнителем"))
+    return fails
+
 # ── Реестр проверок ──────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -1025,6 +1228,11 @@ CHECKS = [
     ("9.6 документация и учёт сведены", check_docs_clean),
     ("9.8 propis.py: род и падеж своим кодом", check_propis),
     ("9.8 document_guard сверяет пропись с числом", check_guard_propis),
+    ("9.9 обезличивание держит обе оси", check_pii_both_axes),
+    ("9.9 исполнитель только из реестра по роли", check_foreign_no_bypass),
+    ("9.9 хук знает про чужие CLI", check_hook_knows_cli),
+    ("9.9 цепочка pd — ровно claude", check_pd_chain_hard),
+    ("9.9 проба герметична, кеш не подделать", check_probe_hermetic),
 ]
 
 
@@ -1046,7 +1254,11 @@ def selftest():
                              ("check_origin_mark", check_origin_mark),
                              ("check_instruction_detector", check_instruction_detector),
                              ("check_propis", check_propis),
-                             ("check_guard_propis", check_guard_propis)):
+                             ("check_guard_propis", check_guard_propis),
+                             ("check_pii_both_axes", check_pii_both_axes),
+                             ("check_foreign_no_bypass", check_foreign_no_bypass),
+                             ("check_pd_chain_hard", check_pd_chain_hard),
+                             ("check_probe_hermetic", check_probe_hermetic)):
                 assert fn(), f"{name}: пропавший прибор не пойман"
     finally:
         SCRIPTS, REGISTRY = saved_scripts, saved_registry
