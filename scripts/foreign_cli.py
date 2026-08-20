@@ -48,6 +48,23 @@ SAFE_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 SECRET_RE = re.compile(r"THEMIS|TOKEN|SECRET|API_?KEY|PASSWORD|CREDENTIAL|ANTHROPIC|OPENAI",
                        re.I)
 OTKAZ_MARKERY = ("error:", "ошибка:", "rate limit", "quota", "not logged", "unauthorized")
+# Реестр объявляет старшую модель и усилие (model/effort), но флаг у каждого CLI
+# свой: codex правит усилие через `-c model_reasoning_effort=`, остальные берут
+# только модель. Коннектор знает КАК запустить каждый CLI — соответствие
+# «значение → флаг» живёт здесь, у границы процесса, а не в реестре (кто —
+# решает роутер). Провайдера нет в таблице — модель/усилие не навязываются:
+# дефолт CLI лучше неизвестного флага, который молча ломает вызов.
+def _model_effort_args(provider: str, model: str, effort: str) -> list[str]:
+    if not model:
+        return []
+    if provider == "codex":
+        args = ["--model", model]
+        if effort:
+            args += ["-c", f"model_reasoning_effort={effort}"]
+        return args
+    if provider in ("claude", "gemini", "kimi"):
+        return ["--model", model]
+    return []
 # Запрос уходит аргументом командной строки, а у аргумента есть предел ОС
 # (macOS ~1 МБ на всё). Упереться в него посреди прогона — молчаливый отказ
 # в бою; отказываем сразу и внятно. Правовой вопрос столько не весит: 200 КБ —
@@ -123,21 +140,34 @@ def zapisat_zhurnal(log: Path | None, provider: str, dlina: int, otpechatok: str
 
 
 def call(provider: str, prompt: Path, cmd=None, timeout: int = 300,
-         out: Path | None = None, log: Path | None = None) -> int:
+         out: Path | None = None, log: Path | None = None,
+         model: str = "", effort: str = "") -> int:
+    # Отказы ПЕРИМЕТРА — попытки вынести наружу материалы дела (симлинк за
+    # границей, файл-переросток) — пишутся в журнал ровно так же, как отказы
+    # провайдера: журнал ставят именно ради этих событий, слепым к ним он
+    # обессмысливает периметр. Текста в записи нет — только провайдер и причина.
     if prompt.is_symlink():
         # За ссылкой может стоять что угодно, включая материал дела: решение
         # о том, что уходит наружу, принимается по файлу, а не по указателю.
+        zapisat_zhurnal(log, provider, 0, "", "отказ периметра: симлинк запроса")
         return _otkaz(f"файл запроса — симлинк ({prompt}); дать обычный файл")
     if not prompt.is_file():
+        zapisat_zhurnal(log, provider, 0, "", "отказ периметра: файла запроса нет")
         return _otkaz(f"файла запроса нет: {prompt}")
     razmer = prompt.stat().st_size
     if razmer > MAX_PROMPT:
+        zapisat_zhurnal(log, provider, 0, "", f"отказ периметра: запрос {razmer // 1024} КБ "
+                        f"сверх предела {MAX_PROMPT // 1024} КБ")
         return _otkaz(f"запрос велик: {razmer // 1024} КБ при пределе "
                       f"{MAX_PROMPT // 1024} КБ — это уже материалы дела, "
                       "а не правовой вопрос")
     argv = cmd if isinstance(cmd, list) else ([cmd] if cmd else None)
     if not argv:
+        zapisat_zhurnal(log, provider, 0, "", "отказ периметра: нет команды из реестра")
         return _otkaz(f"для {provider} нет команды из реестра")
+    # Старшая модель и усилие из реестра доезжают до команды флагами CLI:
+    # требование владельца исполняется, а не только объявляется.
+    argv = list(argv) + _model_effort_args(provider, model, effort)
 
     with tempfile.TemporaryDirectory(prefix="themis-foreign-") as td:
         # Рабочий каталог — ВНУТРИ временного, чтобы и на уровень выше чужому CLI
@@ -228,6 +258,14 @@ def selftest() -> int:
         ssylka = td / "ssylka.txt"
         ssylka.symlink_to(chistyy)
         assert call("proba", ssylka, vidok) == 1, "симлинк принят как файл запроса"
+        # Отказы периметра (симлинк, переросток) пишутся в журнал, как и отказы CLI.
+        per_log = td / "perimetr.log"
+        assert call("proba", ssylka, vidok, log=per_log) == 1
+        assert call("proba", ogromnyy, vidok, log=per_log) == 1
+        per = per_log.read_text(encoding="utf-8") if per_log.is_file() else ""
+        assert "симлинк" in per and "сверх предела" in per, \
+            "отказы периметра не попали в журнал"
+        assert "Вопрос про неустойку" not in per, "журнал периметра хранит текст"
         vid = vidok_out.read_text(encoding="utf-8")
         for utechka in ("Иванова", "771234567890", "А65-1234/2026"):
             assert utechka not in vid, f"за границу ушло «{utechka}»"
@@ -245,6 +283,18 @@ def selftest() -> int:
             o = td / f"o_{name}.txt"
             assert call("proba", pd, sh(name, body), out=o, log=log) == 1, f"{why} принято за успех"
             assert not o.exists(), f"{why}: файл ответа создан"
+
+        # Модель и усилие из реестра доезжают до команды флагами CLI.
+        me_out = td / "me.txt"
+        me = sh("me.sh", f'echo "ARGS=$*" > {me_out}\necho "ответ: ст. 333 ГК РФ"\n')
+        assert call("codex", chistyy, me, model="gpt-5.6", effort="max") == 0
+        me_args = me_out.read_text(encoding="utf-8")
+        assert "--model gpt-5.6" in me_args, "старшая модель не доехала до codex"
+        assert "model_reasoning_effort=max" in me_args, "усилие не доехало до codex"
+        # Ось обихода: неизвестный провайдер не получает навязанных флагов.
+        assert call("neznakomyy", chistyy, me, model="x", effort="max") == 0
+        assert "--model" not in me_out.read_text(encoding="utf-8"), \
+            "неизвестному CLI навязан флаг модели"
 
         gryaznyy = td / "gryaznyy.txt"
         # Форма паспорта собирается конкатенацией НАМЕРЕННО: цельный литерал в
@@ -315,7 +365,8 @@ def main() -> int:
         if p.returncode or not chosen:
             return _otkaz("роутер не назначил исполнителя")
         return call(chosen["name"], Path(a.prompt), chosen["invoke"], a.timeout,
-                    Path(a.out) if a.out else None, Path(a.log) if a.log else None)
+                    Path(a.out) if a.out else None, Path(a.log) if a.log else None,
+                    model=chosen.get("model", ""), effort=chosen.get("effort", ""))
     # Шов «свободная команда мимо реестра» закрыт: он исполнял любой бинарник без
     # роли, класса данных и пробы — проверено, чужой процесс получал текст дела
     # целиком (проба 20.08.2026). Приёмка этапа 7 переведена на --role тем же
