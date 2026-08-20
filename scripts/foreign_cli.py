@@ -48,23 +48,19 @@ SAFE_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 SECRET_RE = re.compile(r"THEMIS|TOKEN|SECRET|API_?KEY|PASSWORD|CREDENTIAL|ANTHROPIC|OPENAI",
                        re.I)
 OTKAZ_MARKERY = ("error:", "ошибка:", "rate limit", "quota", "not logged", "unauthorized")
-# Реестр объявляет старшую модель и усилие (model/effort), но флаг у каждого CLI
-# свой: codex правит усилие через `-c model_reasoning_effort=`, остальные берут
-# только модель. Коннектор знает КАК запустить каждый CLI — соответствие
-# «значение → флаг» живёт здесь, у границы процесса, а не в реестре (кто —
-# решает роутер). Провайдера нет в таблице — модель/усилие не навязываются:
-# дефолт CLI лучше неизвестного флага, который молча ломает вызов.
-def _model_effort_args(provider: str, model: str, effort: str) -> list[str]:
-    if not model:
-        return []
-    if provider == "codex":
-        args = ["--model", model]
-        if effort:
-            args += ["-c", f"model_reasoning_effort={effort}"]
-        return args
-    if provider in ("claude", "gemini", "kimi"):
-        return ["--model", model]
-    return []
+# Реестр объявляет старшую модель и усилие (model/effort), коннектор доносит их
+# до команды универсальными флагами `--model`/`--effort` — БЕЗ имени конкретного
+# CLI: подключение нового CLI остаётся строкой реестра, а не правкой кода (инвариант
+# 9.1). Значения пусты — флаг не добавляется.
+# ponytail: единый флаг на все CLI; если чей-то CLI ждёт иной синтаксис усилия,
+# это поле реестра (model_flag/effort_flag), а не ветка по имени CLI здесь.
+def _model_effort_args(model: str, effort: str) -> list[str]:
+    args = []
+    if model:
+        args += ["--model", model]
+    if effort:
+        args += ["--effort", effort]
+    return args
 # Запрос уходит аргументом командной строки, а у аргумента есть предел ОС
 # (macOS ~1 МБ на всё). Упереться в него посреди прогона — молчаливый отказ
 # в бою; отказываем сразу и внятно. Правовой вопрос столько не весит: 200 КБ —
@@ -165,9 +161,9 @@ def call(provider: str, prompt: Path, cmd=None, timeout: int = 300,
     if not argv:
         zapisat_zhurnal(log, provider, 0, "", "отказ периметра: нет команды из реестра")
         return _otkaz(f"для {provider} нет команды из реестра")
-    # Старшая модель и усилие из реестра доезжают до команды флагами CLI:
+    # Старшая модель и усилие из реестра доезжают до команды флагами:
     # требование владельца исполняется, а не только объявляется.
-    argv = list(argv) + _model_effort_args(provider, model, effort)
+    argv = list(argv) + _model_effort_args(model, effort)
 
     with tempfile.TemporaryDirectory(prefix="themis-foreign-") as td:
         # Рабочий каталог — ВНУТРИ временного, чтобы и на уровень выше чужому CLI
@@ -284,17 +280,18 @@ def selftest() -> int:
             assert call("proba", pd, sh(name, body), out=o, log=log) == 1, f"{why} принято за успех"
             assert not o.exists(), f"{why}: файл ответа создан"
 
-        # Модель и усилие из реестра доезжают до команды флагами CLI.
+        # Модель и усилие из реестра доезжают до команды флагами.
         me_out = td / "me.txt"
         me = sh("me.sh", f'echo "ARGS=$*" > {me_out}\necho "ответ: ст. 333 ГК РФ"\n')
-        assert call("codex", chistyy, me, model="gpt-5.6", effort="max") == 0
+        assert call("proba", chistyy, me, model="senior-model", effort="max") == 0
         me_args = me_out.read_text(encoding="utf-8")
-        assert "--model gpt-5.6" in me_args, "старшая модель не доехала до codex"
-        assert "model_reasoning_effort=max" in me_args, "усилие не доехало до codex"
-        # Ось обихода: неизвестный провайдер не получает навязанных флагов.
-        assert call("neznakomyy", chistyy, me, model="x", effort="max") == 0
+        assert "--model senior-model" in me_args, "старшая модель не доехала до вызова"
+        assert "--effort max" in me_args, "усилие не доехало до вызова"
+        # Ось обихода: реестр не задал model/effort — флаги не навязываются.
+        me_out.write_text("", encoding="utf-8")
+        assert call("proba", chistyy, me) == 0
         assert "--model" not in me_out.read_text(encoding="utf-8"), \
-            "неизвестному CLI навязан флаг модели"
+            "флаг модели навязан без значения из реестра"
 
         gryaznyy = td / "gryaznyy.txt"
         # Форма паспорта собирается конкатенацией НАМЕРЕННО: цельный литерал в
