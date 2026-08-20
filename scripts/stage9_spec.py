@@ -2391,6 +2391,85 @@ def check_font_nasledovanie():
     return fails
 
 
+def check_docx_raven_odobrennomu():
+    """9.17: собранный .docx равен одобренному .md, а не просто сопровождает его.
+
+    Круг 6, доказано запуском координатора. Вердикт Кони привязан к SHA-256
+    файла .md — но содержимое .docx с ним не сверяется. Прогон: Кони одобрил
+    текст «взыскать 100 000 (сто тысяч) рублей задолженности по договору»,
+    после чего в GOTOVO собран .docx с требованием «взыскать 5 000 000 (пять
+    миллионов) рублей и обратить взыскание на квартиру ответчика». Сборка
+    прошла.
+
+    Проверяющий смотрел один документ, в суд уходит другой — и подпись под
+    ним ставит доверитель. Отпечаток .md доказывает лишь неизменность .md.
+
+    Вторая ось: .docx в .agent/drafts/ собирается вообще без вердикта, хотя
+    решение владельца — «.docx собирается один раз, после вердикта Кони».
+    """
+    cd = tool("create_docx.py")
+    vd = tool("verdict.py")
+    if not cd.is_file() or not vd.is_file():
+        return [("docx-raven:missing", "create_docx.py или verdict.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-docxraven-") as tmp:
+        td = Path(tmp)
+        delo = td / "cases" / FAM_LAT / "delo-2026"
+        drafts, gotovo = delo / ".agent" / "drafts", delo / "GOTOVO"
+        drafts.mkdir(parents=True)
+        gotovo.mkdir(parents=True)
+        odobrennyy = ("# ИСКОВОЕ ЗАЯВЛЕНИЕ\n\nПрошу взыскать с ответчика 100 000 "
+                      "(сто тысяч) рублей задолженности по договору поставки от "
+                      "01.02.2026 (ст. 309 ГК РФ).\n")
+        md = drafts / "isk.md"
+        md.write_text(odobrennyy, encoding="utf-8")
+        code, out = py(vd, str(md), "--record", "--verdict", "ГОТОВ К ПОДАЧЕ", cwd=td)
+        if code != 0:
+            return [("docx-raven:verdikt", f"вердикт не записался: {out.strip()[:160]}")]
+
+        def sobrat(telo: str, put: Path):
+            snippet = (
+                "import sys; sys.path.insert(0, sys.argv[1])\n"
+                "from create_docx import DocBuilder\n"
+                "b = DocBuilder()\n"
+                "b.add_title('ИСКОВОЕ ЗАЯВЛЕНИЕ')\n"
+                f"b.add_body({telo!r})\n"
+                "b.add_signature('Представитель', '20.08.2026')\n"
+                "b.save(sys.argv[2])\n"
+            )
+            return run([sys.executable, "-c", snippet, str(SCRIPTS), str(put)],
+                       cwd=td, timeout=300)
+
+        # Ось пропуска: документ шире одобренного текста.
+        code, out = sobrat("Прошу взыскать с ответчика 5 000 000 (пять миллионов) "
+                           "рублей, а также обратить взыскание на квартиру ответчика.",
+                           gotovo / "isk.docx")
+        if (gotovo / "isk.docx").is_file():
+            fails.append(("docx-raven:shire", "собран .docx с требованием, которого нет "
+                          "в одобренной редакции: Кони видел 100 000 рублей "
+                          "задолженности, в суд уходит 5 000 000 и обращение взыскания "
+                          "на квартиру — отпечаток .md доказывает неизменность .md, а "
+                          "не соответствие документа"))
+        # Ось пропуска: черновик собирается без вердикта вовсе.
+        (drafts / "hod.md").unlink(missing_ok=True)
+        code, out = sobrat("Прошу истребовать доказательства у третьего лица.",
+                           drafts / "hod.docx")
+        if (drafts / "hod.docx").is_file():
+            fails.append(("docx-raven:drafts", ".docx собран в папке черновиков без "
+                          "вердикта и без парного .md: решение владельца — «.docx "
+                          "собирается один раз, после вердикта Кони», а гейт стоит "
+                          "только на сегменте пути GOTOVO"))
+        # Ось обихода: документ, равный одобренному тексту, собирается.
+        (gotovo / "isk.docx").unlink(missing_ok=True)
+        code, out = sobrat("Прошу взыскать с ответчика 100 000 (сто тысяч) рублей "
+                           "задолженности по договору поставки от 01.02.2026 "
+                           "(ст. 309 ГК РФ).", gotovo / "isk.docx")
+        if not (gotovo / "isk.docx").is_file():
+            fails.append(("docx-raven:trevoga", f"документ, равный одобренному тексту, "
+                          f"не собрался: {out.strip()[-200:]}"))
+    return fails
+
+
 def check_chuzhoy_cli_formy_vyzova():
     """9.17: прямой вызов чужого CLI ловится во всех формах записи.
 
@@ -3577,6 +3656,7 @@ CHECKS = [
     ("9.17 обезличивание: разрыв и обиход", check_pii_normalizaciya_i_obihod),
     ("9.17 детектор держит формы приказа", check_inekcii_formy_prikaza),
     ("9.17 вызов чужого CLI ловится в формах", check_chuzhoy_cli_formy_vyzova),
+    ("9.17 .docx равен одобренному .md", check_docx_raven_odobrennomu),
     ("9.17 имя в PATH не тождество харнесса", check_path_ne_tozhdestvo),
     ("9.17 ПД-сторож не слепнет в копии роли", check_pd_v_kopii_roli),
     ("9.17 ложь о сумме ловится во всех формах", check_dengi_formy_lzhi),
