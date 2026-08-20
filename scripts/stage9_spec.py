@@ -2391,6 +2391,93 @@ def check_font_nasledovanie():
     return fails
 
 
+MARKER_NE_MARKER = [
+    ("otsutstvuet", "Маркер ## КАРТА ГОТОВА ✓ отсутствует — карта не завершена.\n"),
+    ("ne-stavim", "Карта сырая, маркер ## КАРТА ГОТОВА ✓ пока не ставим.\n"),
+    ("todo", "TODO: поставить ## КАРТА ГОТОВА ✓ после сверки реквизитов.\n"),
+    ("blok-koda", "Шаблон карты:\n\n```\n## КАРТА ГОТОВА ✓\n```\n"),
+    ("citata", "Из инструкции:\n\n> ## КАРТА ГОТОВА ✓\n"),
+    ("zacherknuto", "~~## КАРТА ГОТОВА ✓~~ снят: нашлись новые материалы.\n"),
+    ("html-komm", "<!-- ## КАРТА ГОТОВА ✓ -->\n"),
+]
+MARKER_NASTOYASHCHIY = [
+    ("chistyy", "# Карта дела\n\nФАКТЫ. Стороны, предмет, хронология.\n\n## КАРТА ГОТОВА ✓\n"),
+    ("slovo-marker-ryadom", "# Карта дела\n\nМаркеры разделов проставлены, сверка "
+                            "реквизитов выполнена.\n\n## КАРТА ГОТОВА ✓\n"),
+    ("s-hvostom", "# Карта дела\n\nХРОНОЛОГИЯ.\n\n## КАРТА ГОТОВА ✓\n\n_Составил Мейер_\n"),
+]
+
+
+def _marker_sandbox(td: Path, tools: tuple, karta: str) -> Path:
+    """Песочница дела: свои копии приборов, своя карта, вымышленный доверитель."""
+    (td / "scripts").mkdir(exist_ok=True)
+    for name in tools:
+        src = tool(name)
+        if src.is_file():
+            shutil.copy(src, td / "scripts" / name)
+    ctx = td / "cases" / FAM_LAT / "delo-2026" / ".agent" / "context"
+    ctx.mkdir(parents=True, exist_ok=True)
+    (ctx / "knowledge-map.md").write_text(karta, encoding="utf-8")
+    return td
+
+
+def check_marker_struktura():
+    """9.16: маркер шага — структура файла, а не подстрока в строке.
+
+    Проба 20.08.2026: закрыта ровно одна форма отрицания («без маркера»), а
+    класс остался открыт. Карта, которая ПРЯМЫМ ТЕКСТОМ говорит «Маркер
+    ## КАРТА ГОТОВА ✓ отсутствует — карта не завершена», обоими приборами
+    читается как готовая: themis_status печатает «Шаг 1 Карта: ✓» и шлёт на
+    охоту за практикой, claude_guard пускает запись practice.md. Туда же
+    маркер в блоке кода, в цитате, зачёркнутый, в HTML-комментарии и в TODO.
+
+    Маркер однострочный и структурный: заголовок в СВОЕЙ строке, вне цитаты,
+    вне блока кода, не зачёркнутый, не в комментарии. Логика живёт в двух
+    копиях (themis_status.has_marker и claude_guard._has_marker) — обе судят
+    об одном, значит обе обязаны судить одинаково: разошедшиеся копии одного
+    гейта проект уже проходил на humanizer-гейте.
+    """
+    ts_, cg_ = tool("themis_status.py"), tool("claude_guard.py")
+    if not ts_.is_file() or not cg_.is_file():
+        return [("marker:missing", "themis_status.py или claude_guard.py отсутствует")]
+    fails = []
+    delo_rel = f"cases/{FAM_LAT}/delo-2026"
+    practice = f"{delo_rel}/.agent/context/practice.md"
+    for name, karta in MARKER_NE_MARKER:
+        with tempfile.TemporaryDirectory(prefix="stage9-marker-") as tmp:
+            td = _marker_sandbox(Path(tmp), ("themis_status.py", "claude_guard.py"), karta)
+            code, out = py(td / "scripts" / "themis_status.py", delo_rel, "--brief", cwd=td)
+            if re.search(r"Шаг 1 Карта:\s*✓", out):
+                fails.append((f"marker:status-{name}", f"машина состояний объявила карту "
+                              f"готовой по строке, которая маркером не является ({name}): "
+                              f"прибор шлёт на следующий шаг по несуществующей карте, а "
+                              f"конституция велит верить прибору, а не памяти"))
+            code, _ = py(td / "scripts" / "claude_guard.py", cwd=td, stdin=json.dumps(
+                {"tool_name": "Write", "tool_input": {"file_path": practice,
+                                                      "content": "практика"}},
+                ensure_ascii=False))
+            if code != 2:
+                fails.append((f"marker:guard-{name}", f"сторож протокола пустил запись "
+                              f"practice.md по мнимому маркеру ({name}): конвейер идёт "
+                              f"дальше без карты"))
+    # Ось обихода: настоящий маркер работает, слово «маркер» в тексте не мешает.
+    for name, karta in MARKER_NASTOYASHCHIY:
+        with tempfile.TemporaryDirectory(prefix="stage9-marker-ob-") as tmp:
+            td = _marker_sandbox(Path(tmp), ("themis_status.py", "claude_guard.py"), karta)
+            code, out = py(td / "scripts" / "themis_status.py", delo_rel, "--brief", cwd=td)
+            if not re.search(r"Шаг 1 Карта:\s*✓", out):
+                fails.append((f"marker:trevoga-status-{name}", f"настоящий маркер не "
+                              f"засчитан ({name}): готовая карта не открывает шаг 2"))
+            code, _ = py(td / "scripts" / "claude_guard.py", cwd=td, stdin=json.dumps(
+                {"tool_name": "Write", "tool_input": {"file_path": practice,
+                                                      "content": "практика"}},
+                ensure_ascii=False))
+            if code == 2:
+                fails.append((f"marker:trevoga-guard-{name}", f"сторож не пустил запись "
+                              f"practice.md при готовой карте ({name}) — конвейер встал"))
+    return fails
+
+
 def check_budget_failclosed():
     """9.16: сторож денег fail-closed — нечем измерить расход, значит стоп.
 
@@ -2576,6 +2663,7 @@ CHECKS = [
     ("9.16 гарнитура и кегль видны с наследования", check_font_nasledovanie),
     ("9.16 заморозка судит и победную итерацию", check_zamorozka_pri_zelyonom),
     ("9.16 сторож денег fail-closed", check_budget_failclosed),
+    ("9.16 маркер шага — структура, не подстрока", check_marker_struktura),
 ]
 
 
