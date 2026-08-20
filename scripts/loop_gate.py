@@ -231,6 +231,29 @@ MATCHER_POL = "Write"
 MATCHER_VSEOHVAT = {"*", ".*", ".+", "(.*)", "(.+)"}
 
 
+def _matched_doors(matcher):
+    """Множество защищаемых дверей, на которые ЗОВЁТСЯ сторож этой записи.
+
+    matcher — строка-регулярка ИЛИ список имён (Claude Code принимает и такую
+    форму записи). Список склеиваем в альтернацию, как читал бы перечисление
+    дверей харнесс: он НЕ должен ронять гейт трассировкой — падающий гейт хуже
+    красного, по нему нельзя принять решение. Иной тип — пустое множество, а не
+    исключение.
+    """
+    if isinstance(matcher, (list, tuple)):
+        matcher = "|".join(str(x) for x in matcher)
+    if not isinstance(matcher, str):
+        return set()
+    m = matcher.strip()
+    if m in MATCHER_VSEOHVAT:
+        return set(GUARD_DOORS)
+    try:
+        pat = re.compile(f"^(?:{m})$")
+    except re.error:
+        return set()
+    return {d for d in GUARD_DOORS if pat.fullmatch(d)}
+
+
 def _matcher_covers(matcher):
     """matcher покрывает все защищаемые двери — списком имён либо всеохватным шаблоном.
 
@@ -240,14 +263,9 @@ def _matcher_covers(matcher):
     `Write` (первичная дверь мутаций) — принятый пол: канонная минимальная форма
     установщика; любое перечисление держится к полному покрытию.
     """
-    m = (matcher or "").strip()
-    if m in MATCHER_VSEOHVAT or m == MATCHER_POL:
+    if isinstance(matcher, str) and matcher.strip() == MATCHER_POL:
         return True
-    try:
-        pat = re.compile(f"^(?:{m})$")
-    except re.error:
-        return False
-    return all(pat.fullmatch(d) for d in GUARD_DOORS)
+    return _matched_doors(matcher) >= set(GUARD_DOORS)
 
 
 def _claude_guard_registered(path):
@@ -257,7 +275,9 @@ def _claude_guard_registered(path):
     выглядит как регистрация — читаем структуру PreToolUse, как её читает харнесс.
     Вторая: сторож повешен не на те двери (matcher «Read», «WebFetch», пустая
     строка) — на записи и команды он тогда не зовётся вовсе. Регистрацией считается
-    только запись, где claude_guard стоит командой И matcher покрывает двери.
+    только запись, где claude_guard стоит командой И matcher покрывает двери — по
+    отдельности либо НЕСКОЛЬКИМИ записями вместе (разносить правила по записям это
+    обиход конфигурации, а не дыра). Неполное покрытие остаётся красным.
     """
     try:
         with open(path, encoding="utf-8", errors="ignore") as f:
@@ -265,14 +285,21 @@ def _claude_guard_registered(path):
     except (OSError, ValueError):
         return False
     hooks = (data.get("hooks") or {}).get("PreToolUse") or []
+    covered = set()
+    guard_seen = False
     for entry in hooks if isinstance(hooks, list) else []:
         if not isinstance(entry, dict):
             continue
         has_guard = any("claude_guard" in str(h.get("command", ""))
                         for h in (entry.get("hooks") or []))
-        if has_guard and _matcher_covers(entry.get("matcher", "")):
-            return True
-    return False
+        if not has_guard:
+            continue
+        guard_seen = True
+        matcher = entry.get("matcher", "")
+        if _matcher_covers(matcher):
+            return True                     # одна запись покрывает всё
+        covered |= _matched_doors(matcher)  # ...или несколько записей вместе
+    return guard_seen and covered >= set(GUARD_DOORS)
 
 
 def _hook_calls(text, marker):

@@ -99,9 +99,27 @@ def _parse_bold_text(text):
     return result
 
 
+def _refuse_gotovo(out_path):
+    """Судебный документ в GOTOVO/ собирается только под вердиктом Кони.
+
+    Точка сборки филируемого документа одна — DocBuilder (create_docx.py) с
+    вердиктным гейтом. Этот конвертер — для внутренних пакетов (напр. prep.docx
+    в 02_hearings/). Прямая запись .docx в GOTOVO мимо вердикта запрещена: пока
+    рядом стоит второй вход, вердикт соблюдается добровольно.
+    ponytail: граница по имени каталога GOTOVO — зарезервированное место готового
+    документа; иные внутренние артефакты (02_hearings, drafts, /tmp) свободны.
+    """
+    if any(p.upper() == "GOTOVO" for p in Path(out_path).resolve().parts):
+        print("СТОП, НЕ СОХРАНЕНО: судебный документ в GOTOVO собирается только "
+              "DocBuilder под вердиктом Кони (scripts/create_docx.py). "
+              "Этот конвертер — для внутренних пакетов (prep.docx и т.п.).")
+        sys.exit(2)
+
+
 def md_to_docx(md_path, out_path):
     md_path = Path(md_path)
     out_path = Path(out_path)
+    _refuse_gotovo(out_path)
 
     text = md_path.read_text(encoding="utf-8")
     lines = text.splitlines()
