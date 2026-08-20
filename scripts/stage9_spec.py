@@ -4538,6 +4538,67 @@ def check_pd_v_nastoyashchem_docx():
     return fails
 
 
+def check_registraciya_zhivye_formy():
+    """9.19: регистрация признаётся во всех живых формах и не роняет гейт.
+
+    Круг 7, доказано запуском координатора. Ужесточение «регистрация = покрытие
+    дверей» приняло ровно одну форму записи:
+      · ДВЕ записи PreToolUse, вместе покрывающие Write, Edit, Bash, Read и
+        NotebookEdit, объявлены отсутствием регистрации — а разносить правила
+        по записям это обиход конфигурации;
+      · `matcher`, заданный списком (а не строкой), роняет гейт трассировкой:
+        вердикта нет вовсе, JSON не печатается. Гейт, падающий вместо ответа,
+        хуже красного гейта — по нему нельзя принять решение.
+    """
+    lg = tool("loop_gate.py")
+    if not lg.is_file():
+        return [("registr-formy:missing", "scripts/loop_gate.py отсутствует")]
+    fails = []
+    K = {"type": "command",
+         "command": 'python3 "$CLAUDE_PROJECT_DIR/scripts/claude_guard.py"'}
+    with tempfile.TemporaryDirectory(prefix="stage9-regformy-") as tmp:
+        td = _gate_sandbox(Path(tmp))
+        gate = td / "scripts" / "loop_gate.py"
+        hooks = td / ".git" / "hooks"
+        hooks.mkdir(parents=True, exist_ok=True)
+        for name, arg in (("pre-commit", "--staged"), ("commit-msg", '--msg "$1"'),
+                          ("pre-push", "--push"),
+                          ("reference-transaction", '--ref-txn "$1"')):
+            hp = hooks / name
+            hp.write_text('#!/bin/sh\nexec python3 "$(git rev-parse --show-toplevel)'
+                          f'/scripts/pd_guard.py" {arg}\n', encoding="utf-8")
+            hp.chmod(0o755)
+        cl = td / ".claude"
+        cl.mkdir(exist_ok=True)
+
+        def gejt(cfg):
+            (cl / "settings.json").write_text(json.dumps(cfg, ensure_ascii=False),
+                                              encoding="utf-8")
+            return py(gate, "--hooks-only", "--json", cwd=td)
+
+        code, out = gejt({"hooks": {"PreToolUse": [
+            {"matcher": "Write|Edit", "hooks": [K]},
+            {"matcher": "Bash|Read|NotebookEdit", "hooks": [K]}]}})
+        if code != 0:
+            fails.append(("registr-formy:dve-zapisi", "две записи PreToolUse, вместе "
+                          "покрывающие все защищаемые двери, признаны отсутствием "
+                          "регистрации: разносить правила по записям — обиход "
+                          "конфигурации, и честная настройка не должна краснить гейт"))
+        code, out = gejt({"hooks": {"PreToolUse": [
+            {"matcher": ["Write", "Edit", "Bash", "Read", "NotebookEdit"],
+             "hooks": [K]}]}})
+        if "Traceback" in out or not out.strip().startswith("{"):
+            fails.append(("registr-formy:spisok-ronyaet", f"matcher, заданный списком, "
+                          f"роняет гейт вместо вердикта: JSON не печатается, разбирать "
+                          f"нечего ({out.strip()[:120]}) — падающий гейт хуже красного"))
+        # Ось: неполные формы обязаны оставаться красными.
+        code, _ = gejt({"hooks": {"PreToolUse": [{"matcher": "Read", "hooks": [K]}]}})
+        if code == 0:
+            fails.append(("registr-formy:oslablenie", "неполное покрытие снова признано "
+                          "регистрацией — послабление зашло слишком далеко"))
+    return fails
+
+
 # ── Реестр проверок ──────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -4633,6 +4694,7 @@ CHECKS = [
     ("9.19 точка сборки документа одна", check_vtoraya_tochka_sborki),
     ("9.19 обращение опознаётся не по списку", check_vokativ_shire_spiska),
     ("9.19 фамилия в настоящем .docx из Word", check_pd_v_nastoyashchem_docx),
+    ("9.19 регистрация в живых формах", check_registraciya_zhivye_formy),
 ]
 
 
