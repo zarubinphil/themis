@@ -25,8 +25,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -37,6 +39,11 @@ from pathlib import Path
 DEFAULT_CACHE = Path(os.path.expanduser("~/.cache/themis/cli_probe.json"))
 QUOTA_TTL = 5 * 3600      # квота восстанавливается сама — запрет не может быть вечным
 OTKAZ_TTL = 15 * 60       # прочие отказы: чиниться им человеком, но не каждую секунду
+CACHE_MAX_TTL = 24 * 3600 # подложенный далёкий until не держит провайдера вечно
+KEEP_ENV = ("HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TERM", "LC_CTYPE", "TMPDIR", "LC_TIME")
+SAFE_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+SECRET_RE = re.compile(r"THEMIS|TOKEN|SECRET|API_?KEY|PASSWORD|CREDENTIAL|ANTHROPIC|OPENAI",
+                       re.I)
 NO_AUTH = ("not logged", "logged out", "login required", "unauthorized", "не выполнен вход",
            '"loggedin": false', "please log in", "authentication required")
 NO_QUOTA = ("quota", "usage limit", "rate limit", "too many requests", "limit reached",
@@ -56,6 +63,24 @@ def _cache_write(path: Path, data: dict) -> None:
         path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
     except OSError:
         pass          # кеш — ускорение, а не условие работы
+
+
+def _clean_env() -> dict:
+    env = {k: v for k, v in os.environ.items() if k in KEEP_ENV and not SECRET_RE.search(k)}
+    env["PATH"] = SAFE_PATH + ":" + os.environ.get("PATH", "")
+    env["PATH"] = ":".join(dict.fromkeys(env["PATH"].split(":")))
+    return env
+
+
+def _probe_hash(cmd) -> str:
+    if isinstance(cmd, list):
+        payload = cmd
+    elif cmd is None:
+        payload = []
+    else:
+        payload = [str(cmd)]
+    raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _writable(d: Path) -> bool:
@@ -78,19 +103,22 @@ def probe(provider: str, cmd=None, workdir=None, timeout=30) -> dict:
     if not (shutil.which(exe) or os.path.isfile(exe)):
         return {"outcome": "no_binary", "detail": f"{exe} не найден"}
 
-    wd = Path(workdir) if workdir else Path(tempfile.gettempdir())
-    if not wd.is_dir():
-        return {"outcome": "no_write", "detail": f"каталога {wd} нет"}
-    if not _writable(wd):
-        return {"outcome": "no_write", "detail": f"{wd} недоступен для записи — "
+    base = Path(workdir) if workdir else Path(tempfile.gettempdir())
+    if not base.is_dir():
+        return {"outcome": "no_write", "detail": f"каталога {base} нет"}
+    if not _writable(base):
+        return {"outcome": "no_write", "detail": f"{base} недоступен для записи — "
                                                  "чужому CLI негде работать"}
-    try:
-        p = subprocess.run(argv, cwd=str(wd), capture_output=True, text=True,
-                           timeout=timeout, stdin=subprocess.DEVNULL)
-    except subprocess.TimeoutExpired:
-        return {"outcome": "timeout", "detail": f"не ответил за {timeout} с"}
-    except OSError as e:
-        return {"outcome": "no_binary", "detail": str(e)}
+    with tempfile.TemporaryDirectory(prefix="themis-cli-probe-", dir=str(base)) as td:
+        work = Path(td) / "work"
+        work.mkdir()
+        try:
+            p = subprocess.run(argv, cwd=str(work), env=_clean_env(), capture_output=True,
+                               text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+        except subprocess.TimeoutExpired:
+            return {"outcome": "timeout", "detail": f"не ответил за {timeout} с"}
+        except OSError as e:
+            return {"outcome": "no_binary", "detail": str(e)}
 
     text = ((p.stdout or "") + (p.stderr or "")).lower()
     if any(w in text for w in NO_QUOTA):
@@ -105,18 +133,26 @@ def probe(provider: str, cmd=None, workdir=None, timeout=30) -> dict:
 def check(provider: str, cmd=None, workdir=None, timeout=30,
           cache: Path = DEFAULT_CACHE, now: float | None = None) -> dict:
     now = time.time() if now is None else float(now)
+    probe_hash = _probe_hash(cmd)
     zapisi = _cache_read(cache)
     zapis = zapisi.get(provider)
-    if zapis and zapis.get("until", 0) > now:
+    until = float(zapis.get("until", 0)) if isinstance(zapis, dict) else 0
+    if (isinstance(zapis, dict) and zapis.get("outcome") != "ok"
+            and until > now and until <= now + CACHE_MAX_TTL
+            and (zapis.get("probe_hash") in (None, probe_hash)
+                 or zapis.get("outcome") == "no_quota")):
         return {**zapis, "provider": provider, "cached": True}
+    if isinstance(zapis, dict) and (zapis.get("outcome") == "ok" or until > now + CACHE_MAX_TTL):
+        zapisi.pop(provider, None)
 
     r = probe(provider, cmd, workdir, timeout)
     r["provider"] = provider
     r["cached"] = False
     r["checked"] = int(now)
+    r["probe_hash"] = probe_hash
     if r["outcome"] != "ok":
         ttl = QUOTA_TTL if r["outcome"] == "no_quota" else OTKAZ_TTL
-        r["until"] = int(now + ttl)
+        r["until"] = int(min(now + ttl, now + CACHE_MAX_TTL))
         zapisi[provider] = {k: v for k, v in r.items() if k != "cached"}
         _cache_write(cache, zapisi)
     elif provider in zapisi:
@@ -160,6 +196,17 @@ def selftest() -> int:
         posle = check("t3", ok, str(work), cache=cache, now=q["until"] + 1)
         assert not posle["cached"] and posle["outcome"] == "ok", "после срока квота не проверена заново"
         assert "t3" not in _cache_read(cache), "ожившего провайдера не выпустили из кеша"
+        poison = cache
+        _cache_write(poison, {"ghost": {"outcome": "ok", "until": 9999999999}})
+        assert check("ghost", str(td / "netu.sh"), str(work), cache=poison)["outcome"] == "no_binary", \
+            "поддельный ok из кеша принят без пробы"
+        envdump = td / "env.txt"
+        spy = sh("spy.sh", f"env > {envdump}\n")
+        assert check("spy", spy, str(work), cache=cache,
+                     now=q["until"] + 2)["outcome"] == "ok"
+        leaked = envdump.read_text(encoding="utf-8", errors="ignore")
+        assert "ANTHROPIC_API_KEY" not in leaked and "THEMIS_" not in leaked, \
+            "проба наследует секреты окружения"
     print("selftest пройден: пять исходов различены, отказ по квоте протухает за 5 ч")
     return 0
 
