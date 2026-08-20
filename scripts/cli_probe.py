@@ -25,6 +25,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -60,9 +62,36 @@ def _cache_read(path: Path) -> dict:
 def _cache_write(path: Path, data: dict) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+        # Атомарная замена: параллельный читатель видит целый файл, не полузапись.
+        tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(tmp, path)
     except OSError:
         pass          # кеш — ускорение, а не условие работы
+
+
+@contextlib.contextmanager
+def _cache_lock(path: Path):
+    """Межпроцессный замок на чтение-правку-запись кеша.
+
+    Волна ролей идёт параллельно ПО ЗАМЫСЛУ: без замка двенадцать одновременных
+    проб делают read-modify-write наперегонки и затирают работу друг друга (хвост
+    круга 5 — три записи из двенадцати). flock на соседнем .lock-файле сериализует
+    только короткую правку кеша, сама проба чужого CLI идёт вне замка."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        f = open(path.with_name(f"{path.name}.lock"), "w")
+    except OSError:
+        yield                     # замок не построить — кеш не условие работы
+        return
+    try:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        finally:
+            f.close()
 
 
 def _clean_env() -> dict:
@@ -150,14 +179,18 @@ def check(provider: str, cmd=None, workdir=None, timeout=30,
     r["cached"] = False
     r["checked"] = int(now)
     r["probe_hash"] = probe_hash
-    if r["outcome"] != "ok":
-        ttl = QUOTA_TTL if r["outcome"] == "no_quota" else OTKAZ_TTL
-        r["until"] = int(min(now + ttl, now + CACHE_MAX_TTL))
-        zapisi[provider] = {k: v for k, v in r.items() if k != "cached"}
-        _cache_write(cache, zapisi)
-    elif provider in zapisi:
-        zapisi.pop(provider)          # ожил — запрет снимается сразу
-        _cache_write(cache, zapisi)
+    # Правка кеша — под замком и по СВЕЖЕМУ снимку: параллельные пробы иных
+    # провайдеров не затираются, каждая дописывает только свою запись.
+    with _cache_lock(cache):
+        zapisi = _cache_read(cache)
+        if r["outcome"] != "ok":
+            ttl = QUOTA_TTL if r["outcome"] == "no_quota" else OTKAZ_TTL
+            r["until"] = int(min(now + ttl, now + CACHE_MAX_TTL))
+            zapisi[provider] = {k: v for k, v in r.items() if k != "cached"}
+            _cache_write(cache, zapisi)
+        elif provider in zapisi:
+            zapisi.pop(provider)          # ожил — запрет снимается сразу
+            _cache_write(cache, zapisi)
     return r
 
 
