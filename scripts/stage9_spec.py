@@ -3698,6 +3698,461 @@ def check_zamorozka_pri_zelyonom():
     return fails
 
 
+def check_docx_nevidimki():
+    """9.18: денежная проверка видит весь документ, а не только простые абзацы.
+
+    Круг 6, доказано сборкой координатора: ложная сумма проходит незамеченной
+    внутри поля формы (`w:sdt`), внутри надписи (`w:txbxContent`) и в любом
+    абзаце ПОСЛЕ раздела «ПРИЛОЖЕНИЯ:». Последнее тяжелее всего: расчёт цены
+    иска — обязательная часть заявления и почти всегда стоит в конце.
+
+    Поля формы приходят из шаблонов Word, надписями набирают бланки и шапки —
+    это обиход, а не экзотика.
+    """
+    dg = tool("document_guard.py")
+    if not dg.is_file():
+        return [("nevidimki:missing", "scripts/document_guard.py отсутствует")]
+    fails = []
+    W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+    V = 'xmlns:v="urn:schemas-microsoft-com:vml"'
+    with tempfile.TemporaryDirectory(prefix="stage9-nevidimki-") as tmp:
+        td = Path(tmp)
+        baza = _sobrat_isk(td, "Взыскать 100 000 (сто тысяч) рублей задолженности.",
+                           "baza.docx")
+        if not baza.is_file():
+            return [("nevidimki:build", "иск не собрался")]
+        vstavka = (
+            "import sys, docx\n"
+            "from docx.oxml import parse_xml\n"
+            f"W = '{W}'\n"
+            f"V = '{V}'\n"
+            "d = docx.Document(sys.argv[1]); kuda = sys.argv[3]\n"
+            "lozh = 'Взыскать 9 000 000 (девять рублей) рублей неустойки.'\n"
+            "if kuda == 'sdt':\n"
+            "    el = parse_xml('<w:sdt ' + W + '><w:sdtContent><w:p><w:r><w:t>'\n"
+            "                   + lozh + '</w:t></w:r></w:p></w:sdtContent></w:sdt>')\n"
+            "elif kuda == 'nadpis':\n"
+            "    el = parse_xml('<w:p ' + W + '><w:r><w:pict ' + V + '>'\n"
+            "                   '<v:shape style=\"width:200pt;height:50pt\"><v:textbox>'\n"
+            "                   '<w:txbxContent><w:p><w:r><w:t>' + lozh +\n"
+            "                   '</w:t></w:r></w:p></w:txbxContent></v:textbox>'\n"
+            "                   '</v:shape></w:pict></w:r></w:p>')\n"
+            "body = d.element.body\n"
+            "body.insert(len(body) - 1, el)\n"
+            "d.save(sys.argv[2])\n"
+        )
+        for kuda, chto in (("sdt", "поле формы"), ("nadpis", "надпись")):
+            out_doc = td / f"n_{kuda}.docx"
+            code, _ = run([sys.executable, "-c", vstavka, str(baza), str(out_doc), kuda],
+                          cwd=td, timeout=300)
+            if code != 0 or not out_doc.is_file():
+                fails.append((f"nevidimki:sborka-{kuda}", f"проба не собралась ({chto})"))
+                continue
+            code, out = py(dg, str(out_doc))
+            if code == 0:
+                fails.append((f"nevidimki:{kuda}", f"ложная пропись внутри «{chto}» не "
+                              f"поймана: эту часть документа не видит ни одна проверка, "
+                              f"а бланки и шапки набирают именно так"))
+        # Хвост после раздела приложений.
+        snippet = (
+            "import sys; sys.path.insert(0, sys.argv[1])\n"
+            "from create_docx import DocBuilder\n"
+            "b = DocBuilder()\n"
+            "b.add_title('ИСКОВОЕ ЗАЯВЛЕНИЕ')\n"
+            "b.add_body('Взыскать 100 000 (сто тысяч) рублей задолженности.')\n"
+            "b.add_appendices()\n"
+            "b.add_appendix_item('Договор поставки от 01.02.2026')\n"
+            "b.add_body('Расчёт цены иска: 700 000 (три рубля) рублей.')\n"
+            "b.add_signature('Представитель', '20.08.2026')\n"
+            "b.save(sys.argv[2])\n"
+        )
+        hvost = td / "hvost.docx"
+        run([sys.executable, "-c", snippet, str(SCRIPTS), str(hvost)], cwd=td, timeout=300)
+        if hvost.is_file():
+            code, out = py(dg, str(hvost))
+            if code == 0:
+                fails.append(("nevidimki:posle-prilozheniy", "ложная пропись в расчёте "
+                              "цены иска, стоящем ПОСЛЕ раздела приложений, не поймана: "
+                              "весь хвост документа выпадает из денежной проверки, а "
+                              "расчёт цены иска почти всегда стоит именно там"))
+    return fails
+
+
+def check_git_kanaly_pd():
+    """9.18: фамилия не уходит тегом, cherry-pick-ом и внутри .docx.
+
+    Круг 6, доказано запуском координатора в песочнице с делом, которое лежит
+    на диске и не отслеживается git — как в бою:
+      · `git tag -a -m «релиз по делу …»` создаётся свободно, тело тега не
+        читает никто, а тег публикуется при отправке;
+      · `cherry-pick` переносит коммит с фамилией в основную ветку, не позвав
+        ни pre-commit, ни commit-msg;
+      · закоммиченный `.docx` с фамилией внутри `word/document.xml` сторож
+        объявляет чистым — для него это двоичный блоб, хотя это обычный zip.
+        Судебные документы — именно `.docx`, и ложная уверенность здесь хуже
+        молчания.
+    """
+    pg = tool("pd_guard.py")
+    if not pg.is_file():
+        return [("git-kanaly:missing", "scripts/pd_guard.py отсутствует")]
+    fails = []
+    fam = "testfam-cd"
+    with tempfile.TemporaryDirectory(prefix="stage9-gitkanaly-") as tmp:
+        td = Path(tmp)
+        (td / "scripts").mkdir()
+        for name in ("pd_guard.py", "pii_gate.py"):
+            src = tool(name)
+            if src.is_file():
+                shutil.copy(src, td / "scripts" / name)
+        (td / "cases" / fam).mkdir(parents=True)
+        (td / "cases" / fam / "_client.md").write_text("профиль\n", encoding="utf-8")
+        (td / ".gitignore").write_text(f"cases/{fam}/\n", encoding="utf-8")
+        for cmd in (["init", "-q"], ["add", "-A"],
+                    ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "baza"]):
+            run(["git", *cmd], cwd=td)
+        py(td / "scripts" / "pd_guard.py", "--install", cwd=td)
+
+        # 1. Аннотированный тег с фамилией в теле.
+        code, _ = run(["git", "tag", "-a", "v1.0", "-m", f"релиз по делу {fam}"], cwd=td)
+        if code == 0:
+            fails.append(("git-kanaly:teg", "аннотированный тег с фамилией доверителя в "
+                          "теле создан без возражений: тело тега не читает никто, а тег "
+                          "уезжает в публичный репозиторий при отправке"))
+        # 2. Фамилия внутри .docx (zip), закоммиченного как двоичный файл.
+        snippet = (
+            "import sys; sys.path.insert(0, sys.argv[1])\n"
+            "from create_docx import DocBuilder\n"
+            "b = DocBuilder()\n"
+            "b.add_title('ХОДАТАЙСТВО')\n"
+            f"b.add_body('По делу доверителя {fam} прошу истребовать доказательства.')\n"
+            "b.add_signature('Представитель', '20.08.2026')\n"
+            "b.save(sys.argv[2])\n"
+        )
+        doc = td / "hod.docx"
+        run([sys.executable, "-c", snippet, str(SCRIPTS), str(doc)], cwd=td, timeout=300)
+        if doc.is_file():
+            run(["git", "add", "hod.docx"], cwd=td)
+            code, _ = run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                           "commit", "-qm", "dokument"], cwd=td)
+            if code == 0:
+                fails.append(("git-kanaly:docx", "фамилия доверителя внутри .docx прошла "
+                              "в коммит, и сторож объявил его чистым: .docx это zip, а "
+                              "не двоичная непрозрачность — судебные документы именно "
+                              "такие, и ложная уверенность здесь хуже молчания"))
+        # 3. Обиход: чистый коммит и чистый тег проходят.
+        (td / "chisto.md").write_text("Обычная заметка о ходе работ.\n", encoding="utf-8")
+        run(["git", "add", "chisto.md"], cwd=td)
+        code, _ = run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                       "commit", "-qm", "obychnaya rabota"], cwd=td)
+        if code != 0:
+            fails.append(("git-kanaly:trevoga-kommit", "обычный коммит без имён "
+                          "заблокирован — работать станет нельзя"))
+        code, _ = run(["git", "tag", "-a", "v2.0", "-m", "релиз без имён"], cwd=td)
+        if code != 0:
+            fails.append(("git-kanaly:trevoga-teg", "обычный тег без имён отвергнут"))
+    return fails
+
+
+def check_obezlichivanie_na_vseh_putyah():
+    """9.18: обезличивание стоит на КАЖДОМ пути наружу, а не на двух.
+
+    Круг 6, доказано грепом по отслеживаемым файлам и запуском: `pii_gate`
+    зовут только `foreign_cli.py` и `themis_bot.py`. При этом в сеть с
+    текстом, составленным из материалов дела, ходят `practice_search.py`
+    (12 сетевых вызовов, поиск включён по умолчанию решением владельца) и
+    `verify_inn.py` (11 вызовов). Запрос «Кузнецова Мария Петровна, раздел
+    имущества» уходит на внешний сервис дословно.
+    """
+    fails = []
+    setevye = []
+    for name in ("practice_search.py", "verify_inn.py", "practice_harvest.py",
+                 "verify_act.py", "update_legal_corpus.py"):
+        f = tool(name)
+        if not f.is_file():
+            continue
+        text = f.read_text(encoding="utf-8", errors="replace")
+        hodit_v_set = bool(re.search(r"requests\.|urlopen|httpx|urllib\.request", text))
+        zovyot = "pii_gate" in text
+        if hodit_v_set and not zovyot:
+            setevye.append(name)
+    if setevye:
+        fails.append(("obezl-puti:ne-podklyucheno", f"приборы ходят в сеть с текстом "
+                      f"запроса и не зовут обезличивание: {', '.join(setevye)} — "
+                      f"фамилия доверителя и номер дела уходят на внешний сервис "
+                      f"дословно, тогда как для чужого CLI тот же текст маскируется"))
+    return fails
+
+
+def check_peresborka_posle_verdikta():
+    """9.18: после вердикта документ не пересобирается, снимок «ДО» не подменяется.
+
+    Круг 6, доказано запуском: вердикт записан на редакцию со 100 000 рублей,
+    первая сборка прошла и создала снимок `_baselines`; вторая сборка тем же
+    именем с текстом «взыскать 9 000 000 рублей неустойки» тоже прошла, и
+    снимок молча переписан.
+
+    Вред двойной: вердикт остался на первую редакцию, а база «ДО», на которой
+    держится обучение по правкам доверителя, подменена — сравнение покажет не
+    то, что правил доверитель.
+    """
+    cd_, vd = tool("create_docx.py"), tool("verdict.py")
+    if not cd_.is_file() or not vd.is_file():
+        return [("peresborka:missing", "create_docx.py или verdict.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-peresborka-") as tmp:
+        td = Path(tmp)
+        delo = td / "cases" / FAM_LAT / "delo-2026"
+        drafts, gotovo = delo / ".agent" / "drafts", delo / "GOTOVO"
+        drafts.mkdir(parents=True)
+        gotovo.mkdir(parents=True)
+        md = drafts / "isk.md"
+        md.write_text("# ИСКОВОЕ ЗАЯВЛЕНИЕ\n\nПрошу взыскать 100 000 (сто тысяч) "
+                      "рублей задолженности (ст. 309 ГК РФ).\n", encoding="utf-8")
+        code, out = py(vd, str(md), "--record", "--verdict", "ГОТОВ К ПОДАЧЕ", cwd=td)
+        if code != 0:
+            return [("peresborka:verdikt", f"вердикт не записался: {out.strip()[:160]}")]
+
+        def sobrat(telo: str):
+            snippet = (
+                "import sys; sys.path.insert(0, sys.argv[1])\n"
+                "from create_docx import DocBuilder\n"
+                "b = DocBuilder()\n"
+                "b.add_title('ИСКОВОЕ ЗАЯВЛЕНИЕ')\n"
+                f"b.add_body({telo!r})\n"
+                "b.add_signature('Представитель', '20.08.2026')\n"
+                "b.save(sys.argv[2])\n"
+            )
+            return run([sys.executable, "-c", snippet, str(SCRIPTS),
+                        str(gotovo / "isk.docx")], cwd=td, timeout=300)
+
+        sobrat("Прошу взыскать 100 000 (сто тысяч) рублей задолженности (ст. 309 ГК РФ).")
+        snimok = drafts / "_baselines" / "isk.docx"
+        if not snimok.is_file():
+            return [("peresborka:snimok", "первая сборка не создала снимок «ДО»")]
+        import hashlib as _h
+
+        def _sha(f: Path) -> str:
+            return _h.sha256(f.read_bytes()).hexdigest()
+
+        do = _sha(snimok)
+        sobrat("Прошу взыскать 9 000 000 (девять миллионов) рублей неустойки.")
+        posle = _sha(snimok) if snimok.is_file() else ""
+        if do != posle:
+            fails.append(("peresborka:snimok-podmenen", "повторная сборка тем же именем "
+                          "прошла и переписала снимок «ДО»: вердикт остался на первой "
+                          "редакции, а база сравнения правок доверителя подменена — "
+                          "разбор покажет не те правки"))
+    return fails
+
+
+def check_model_effort_doezzhayut():
+    """9.18: объявленные реестром модель и усилие доходят до команды вызова.
+
+    Круг 6, доказано запуском: `cli_router --role hunter-leaf --json` отдаёт
+    исполнителя с `model: gpt-5.6` и `effort: max`, а команда вызова —
+    `codex exec --skip-git-repo-check`, без единого упоминания того и другого.
+    Греп по `foreign_cli.py` на «model|effort» пуст: коннектор этих полей не
+    знает вовсе.
+
+    Требование владельца — старшие доступные модели каждого CLI и
+    максимальное усилие — записано в реестр как параметр и никуда не доезжает.
+    Ровно тема этапа: заявленное не равно реальному.
+    """
+    fc, cr = tool("foreign_cli.py"), tool("cli_router.py")
+    if not fc.is_file() or not cr.is_file():
+        return [("model-doezd:missing", "foreign_cli.py или cli_router.py отсутствует")]
+    fails = []
+    text = fc.read_text(encoding="utf-8", errors="replace")
+    if not re.search(r"\bmodel\b", text) or not re.search(r"\beffort\b", text):
+        fails.append(("model-doezd:konnektor", "коннектор не знает полей model и effort: "
+                      "реестр их объявляет, вызов их не несёт, чужой CLI работает на "
+                      "своей модели по умолчанию — требование владельца записано и не "
+                      "исполняется"))
+    return fails
+
+
+def check_zhurnal_perimetra():
+    """9.18: журнал отправок пишет и отказы ПЕРИМЕТРА, а не только исходы вызова.
+
+    Круг 6, доказано запуском: отказ по симлинку и по файлу-переростку
+    («859 КБ при пределе 200 КБ — это уже материалы дела, а не правовой
+    вопрос») срабатывает верно и код возврата даёт верный, но в журнал не
+    попадает — файла журнала после двух отказов нет вовсе. Отказ самого CLI
+    при этом пишется исправно.
+
+    То есть журнал видит всё, кроме попыток вынести наружу материалы дела —
+    ровно тех событий, ради которых периметр и поставлен.
+    """
+    fc = tool("foreign_cli.py")
+    if not fc.is_file():
+        return [("zhurnal-per:missing", "scripts/foreign_cli.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-zhurnalper-") as tmp:
+        td = Path(tmp)
+        bins = td / "bin"
+        bins.mkdir()
+        sh_stub(bins / "claude", 'echo "ответ"\n')
+        env = dict(os.environ, PATH=f"{bins}:{os.environ.get('PATH', '')}")
+        normal = td / "normal.txt"
+        normal.write_text("обезличенный правовой вопрос\n", encoding="utf-8")
+        simlink = td / "simlink.txt"
+        simlink.symlink_to(normal)
+        bolshoy = td / "bolshoy.txt"
+        bolshoy.write_text("текст " * 80000, encoding="utf-8")
+        zhurnal = td / "zhurnal.jsonl"
+        for name, f in (("simlink", simlink), ("pererostok", bolshoy)):
+            code, out = run([sys.executable, str(fc), "--role", "hunter-leaf",
+                             "--prompt", str(f), "--log", str(zhurnal)],
+                            cwd=td, env=env, timeout=300)
+            if code == 0:
+                fails.append((f"zhurnal-per:propusk-{name}", f"периметр пропустил "
+                              f"{name}: отказ обязан быть"))
+        zapis = zhurnal.read_text(encoding="utf-8") if zhurnal.is_file() else ""
+        if not zapis.strip():
+            fails.append(("zhurnal-per:nemo", "отказы внешнего периметра в журнал не "
+                          "попали вовсе: журнал видит успехи и отказы провайдера, но не "
+                          "видит попыток вынести наружу материалы дела — то есть именно "
+                          "того, ради чего периметр и поставлен"))
+    return fails
+
+
+def check_dengi_lozhnye_trevogi():
+    """9.18: классические денежные формы не бракуются, и два прибора судят одинаково.
+
+    Круг 6, доказано запуском: «Взыскать 5 000 (пять тысяч) рублей 00 копеек
+    задолженности» — повсеместная форма русского процессуального документа —
+    `document_guard` принимает (0 нарушений), а `verdict.py --record`
+    отвергает (код 1). Документ с обычной формулировкой не может получить
+    вердикт вовсе. Форма «(пять тысяч рублей ноль копеек)» объявляется
+    несовпадением прописи.
+
+    Ложная тревога с блокирующим эффектом хуже пропуска: она останавливает
+    работу и учит обходить прибор. А расхождение двух копий одного правила —
+    тот же класс, что уже был у humanizer-гейта.
+    """
+    dg, vd = tool("document_guard.py"), tool("verdict.py")
+    if not dg.is_file() or not vd.is_file():
+        return [("dengi-lt:missing", "document_guard.py или verdict.py отсутствует")]
+    fails = []
+    formy = [
+        ("rubley-00-kopeek", "Взыскать 5 000 (пять тысяч) рублей 00 копеек "
+                             "задолженности."),
+        ("nol-kopeek-propisyu", "Взыскать 5 000 (пять тысяч рублей ноль копеек) "
+                                "задолженности."),
+    ]
+    with tempfile.TemporaryDirectory(prefix="stage9-dengilt-") as tmp:
+        td = Path(tmp)
+        for name, telo in formy:
+            doc = _sobrat_isk(td, telo, f"lt_{name}.docx")
+            code_dg, out_dg = (py(dg, str(doc)) if doc.is_file() else (1, "не собрался"))
+            md = td / f"lt_{name}.md"
+            md.write_text(f"# ИСКОВОЕ ЗАЯВЛЕНИЕ\n\n{telo}\n", encoding="utf-8")
+            code_vd, _ = py(vd, str(md), "--record", "--verdict", "ГОТОВ К ПОДАЧЕ",
+                            cwd=td)
+            if "пропись" in out_dg:
+                fails.append((f"dengi-lt:guard-{name}", f"классическая форма забракована "
+                              f"сторожем формата ({name}): {out_dg.strip()[-160:]}"))
+            if code_vd != 0:
+                fails.append((f"dengi-lt:verdikt-{name}", f"классическая форма не может "
+                              f"получить вердикт ({name}): документ с повсеместной "
+                              f"формулировкой не проходит конвейер"))
+            if ("пропись" in out_dg) != (code_vd != 0):
+                fails.append((f"dengi-lt:raskhod-{name}", f"два прибора судят одну форму "
+                              f"противоположно ({name}): сторож формата и вердикт обязаны "
+                              f"держать одно правило, иначе документ невозможно провести"))
+    return fails
+
+
+def check_pii_eshchyo_formy():
+    """9.18: обезличивание видит имя с отчеством, номер КАС и сетевой след.
+
+    Круг 6, доказано запуском. Проходят мимо рубежа: «Марии Петровне переданы
+    документы под расписку» (имя с отчеством без фамилии — обиход переписки и
+    расписок), «Административное дело № 2а-1234/2026» (номер дела опознаётся
+    только в арбитражной форме), «@ivanov_lawyer», «vk.com/id12345678».
+
+    Ось обихода держится и обязана держаться дальше: адрес суда и ссылка на
+    норму молчат.
+    """
+    pg = tool("pii_gate.py")
+    if not pg.is_file():
+        return [("pii-esh:missing", "scripts/pii_gate.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-piiesh-") as tmp:
+        td = Path(tmp)
+        if _residual(td, "Свидетель Кузнецов пояснил обстоятельства дела.", "opora") != 1:
+            return [("pii-esh:opora", "прибор не ловит ФИО — проба недействительна")]
+        utechki = [
+            ("imya-otchestvo", "Марии Петровне переданы документы под расписку."),
+            ("nomer-dela-arb", "По делу № А65-12345/2026 назначено заседание."),
+            ("nomer-kas", "Административное дело № 2а-1234/2026 рассмотрено судом."),
+            ("setevoy-sled", "Связь через @ivanov_lawyer и vk.com/id12345678."),
+        ]
+        for name, text in utechki:
+            if _residual(td, text, name) != 1:
+                fails.append((f"pii-esh:{name}", f"персональные данные прошли рубеж "
+                              f"({name}) и уйдут наружу дословно"))
+        obihod = [
+            ("adres-suda", "Вахитовский районный суд города Казани, ул. Лесгафта, 33."),
+            ("norma", "Согласно ст. 333 ГК РФ суд вправе снизить неустойку."),
+            ("summa", "Взыскано 1 234 567 890 руб. по договору поставки."),
+        ]
+        for name, text in obihod:
+            if _residual(td, text, f"ob_{name}") == 1:
+                fails.append((f"pii-esh:trevoga-{name}", f"обиход объявлен персональными "
+                              f"данными ({name})"))
+    return fails
+
+
+def check_storozh_putey_eshchyo():
+    """9.18: код под делами, документ в корне, распаковка и жёсткая ссылка.
+
+    Круг 6, доказано запуском. Контроль: `.py` под `cases/` блокируется.
+    Проходят: `.js`, `.rb`, `.command` (запрет перечисляет расширения, а не
+    судит, что это код); PDF в корне дела (документом не считается); `.docx`
+    в папке `_working` (имя с подчёркивания отменяет гейт протокола где
+    угодно); `tar --extract --directory=` и `cpio -id` (высыпают архив прямо
+    в первичку); `ln` (жёсткая ссылка выносит первичку наружу, и правка по
+    ссылке меняет оригинал).
+    """
+    if not tool("claude_guard.py").is_file():
+        return [("puti-esh:missing", "scripts/claude_guard.py отсутствует")]
+    case = os.path.join("cases", FAM_LAT, "delo-2026")
+    fails = []
+    if _guard({"tool_name": "Write",
+               "tool_input": {"file_path": f"{case}/gen.py", "content": "print(1)"}}) != 2:
+        return [("puti-esh:opora", "даже .py под cases/ не блокируется — "
+                 "проба недействительна")]
+    zapisi = [
+        ("kod-js", f"{case}/gen.js", "console.log(1)"),
+        ("kod-rb", f"{case}/gen.rb", "puts 1"),
+        ("kod-command", f"{case}/run.command", "#!/bin/bash\necho"),
+        ("pdf-v-korne", f"{case}/isk.pdf", "%PDF-1.7"),
+        ("working-obhod", f"{case}/_working/isk.docx", "документ"),
+    ]
+    for name, put, soderzhimoe in zapisi:
+        if _guard({"tool_name": "Write",
+                   "tool_input": {"file_path": put, "content": soderzhimoe}}) != 2:
+            fails.append((f"puti-esh:{name}", f"запись в дело прошла ({name}): запрет "
+                          f"перечисляет расширения и места вместо того, чтобы судить, "
+                          f"что именно ложится в дело"))
+    komandy = [
+        ("tar-extract", f"tar --extract --directory={case}/00_intake -f /tmp/a.tar"),
+        ("cpio", f"cd {case}/00_intake && cpio -id < /tmp/a.cpio"),
+        ("zhestkaya-ssylka", f"ln {case}/00_intake/skan.pdf /tmp/kopiya.pdf"),
+    ]
+    for name, cmd in komandy:
+        if _bash(cmd) != 2:
+            fails.append((f"puti-esh:{name}", f"первичка тронута мимо сторожа ({name})"))
+    # Ось обихода: те же действия вне дела не трогать.
+    for name, cmd in (("tar-tmp", "tar --extract --directory=/tmp/raspakovka -f /tmp/a.tar"),
+                      ("ln-tmp", "ln /tmp/a.txt /tmp/b.txt")):
+        if _bash(cmd) == 2:
+            fails.append((f"puti-esh:trevoga-{name}", f"обиход вне дела заблокирован "
+                          f"({name})"))
+    return fails
+
+
 # ── Реестр проверок ──────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -3777,6 +4232,15 @@ CHECKS = [
     ("9.17 гарнитура видна во всех атрибутах", check_font_atributy_i_stili),
     ("9.17 сторож судит цель пути, не глагол", check_cel_a_ne_glagol),
     ("9.17 обиход первички не сломан", check_obihod_pervichki),
+    ("9.18 денежная проверка видит весь документ", check_docx_nevidimki),
+    ("9.18 фамилия не уходит тегом и внутри .docx", check_git_kanaly_pd),
+    ("9.18 обезличивание на каждом пути наружу", check_obezlichivanie_na_vseh_putyah),
+    ("9.18 после вердикта не пересобирают", check_peresborka_posle_verdikta),
+    ("9.18 модель и усилие доходят до вызова", check_model_effort_doezzhayut),
+    ("9.18 журнал пишет отказы периметра", check_zhurnal_perimetra),
+    ("9.18 классические денежные формы не брак", check_dengi_lozhnye_trevogi),
+    ("9.18 обезличивание: отчество, дело, сеть", check_pii_eshchyo_formy),
+    ("9.18 код, документ и распаковка в деле", check_storozh_putey_eshchyo),
 ]
 
 
