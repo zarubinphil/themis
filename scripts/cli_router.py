@@ -18,7 +18,46 @@ DEFAULT_REGISTRY = HERE / "cli_registry.json"
 # бинарник — доказано пробой скептика 19.08.2026.
 HARNESS = "claude"
 HARNESS_LOCKED = ("invoke", "probe", "data_classes")
+# То, что исполняет pd и что решает допуск pd, — только из эталонного реестра
+# рядом со скриптом: реестр из произвольного пути (--registry) иначе подменяет
+# команду харнесса, и роль класса pd исполняет чужой бинарник, а журнал пишет
+# «claude» (проба круга 4 этапа 9). Проба доступности — декларация реестра,
+# как у любого провайдера: ложная проба вредит доступностью, не тайной.
+HARNESS_CANONICAL = ("invoke", "data_classes")
 REQUIRED_KEYS = ("probe", "invoke", "model", "effort", "data_classes")
+
+# Двойник харнесса: «Claude» по регистру или «clаude» с кириллической «а» в
+# журнале неотличим от настоящего claude — в реестр такое имя не принимается
+# ни из какого слоя (проба скептика, круг 4 этапа 9).
+_CONFUSABLES = str.maketrans({
+    "а": "a", "с": "c", "е": "e", "о": "o", "р": "p", "х": "x",
+    "у": "y", "н": "h", "т": "t", "м": "m", "в": "b", "к": "k",
+    "з": "3", "ч": "4", "и": "u",
+})
+
+
+def _is_harness_double(name: str) -> bool:
+    """Имя складывается в «claude» после снятия регистра и гомоглифов."""
+    return name != HARNESS and name.lower().translate(_CONFUSABLES) == HARNESS
+
+
+def _canonical_harness() -> dict:
+    """Харнесс (invoke и классы допуска) — только из эталона рядом со скриптом.
+
+    Реестр, переданный --registry из произвольного пути, вправе описать свои
+    провайдеры, но не вправе пересадить харнесс: иначе роль класса pd исполняет
+    чужой бинарник, а журнал пишет «claude» (проба скептика, круг 4 этапа 9).
+    """
+    try:
+        canonical = json.loads(DEFAULT_REGISTRY.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise ValueError(f"эталонный реестр харнесса не прочитан: {e}") from e
+    if not isinstance(canonical, dict):
+        raise ValueError("эталонный реестр харнесса должен быть объектом")
+    entry = canonical.get(HARNESS)
+    if not isinstance(entry, dict):
+        raise ValueError("в эталонном реестре нет claude — харнессу негде жить")
+    return _entry_ok(HARNESS, entry)
 PD_ROLES = {
     "case-mapper", "case-reconciler", "pdf-reader", "image-reader", "docx-reader",
     "inbox-triage", "doc-drafter", "doc-reviewer", "hearing-prep", "archivist",
@@ -80,6 +119,16 @@ def load_registry(path: Path) -> dict:
                 if not merged["data_classes"]:
                     continue
         base[name] = merged
+    # Двойник харнесса по регистру или гомоглифу отбрасывается молча: имя
+    # нельзя даже повторять в журнале — человек примет его за настоящий claude.
+    for name in [n for n in base if isinstance(n, str) and _is_harness_double(n)]:
+        del base[name]
+    # Харнесс (invoke и классы) — из эталона рядом со скриптом: что бы ни
+    # лежало в реестре из произвольного пути и в оверлее, pd исполняет только
+    # эталонный invoke, и журнал не лжёт.
+    harness = _canonical_harness()
+    for key in HARNESS_CANONICAL:
+        base[HARNESS][key] = harness[key]
     for name, entry in base.items():
         _entry_ok(name, entry)
     return base
@@ -145,8 +194,9 @@ def selftest() -> int:
     assert role_class("hunter-leaf") == "text"
     assert role_class("not-described") == "pd", "неизвестная роль не выходит за границу"
 
-    # Оверлей ~/.themis/ не пересаживает харнесс: invoke/probe claude берутся из базы,
-    # что бы ни лежало в пользовательском слое (проба скептика 19.08.2026).
+    # Оверлей ~/.themis/ не пересаживает харнесс: invoke и классы claude берутся
+    # из эталонного реестра рядом со скриптом, проба — из реестра, что бы ни
+    # лежало в пользовательском слое (пробы скептика 19.08.2026, круг 4).
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
         base = td / "reg.json"
@@ -168,10 +218,26 @@ def selftest() -> int:
                 os.environ.pop("HOME", None)
             else:
                 os.environ["HOME"] = old
-        assert reg["claude"]["invoke"] == ["real-claude"], "оверлей пересадил invoke харнесса"
-        assert reg["claude"]["probe"] == ["real-probe"], "оверлей пересадил probe харнесса"
+        harness = _canonical_harness()
+        assert reg["claude"]["invoke"] == harness["invoke"], \
+            "invoke харнесса не из эталона рядом со скриптом"
+        assert reg["claude"]["data_classes"] == harness["data_classes"], \
+            "классы харнесса не из эталона рядом со скриптом"
+        assert reg["claude"]["probe"] == ["real-probe"], \
+            "проба харнесса — декларация реестра, оверлей её не пересаживает"
         assert reg["claude"]["effort"] == "low", "оверлей не смог подкрутить effort харнесса"
         assert "pd" in reg["claude"]["data_classes"], "оверлей понизил data_classes харнесса"
+
+        # Двойник харнесса по регистру и гомоглифу в реестр не принимается.
+        (home / ".themis" / "cli_registry.json").write_text(json.dumps({
+            "Claude": {"probe": ["z"], "invoke": ["z"], "model": "z", "effort": "max",
+                       "data_classes": ["text"]},
+            "clаude": {"probe": ["z"], "invoke": ["z"], "model": "z", "effort": "max",
+                       "data_classes": ["text"]}}), encoding="utf-8")
+        reg = load_registry(base)
+        assert "Claude" not in reg, "двойник харнесса по регистру принят в реестр"
+        assert "clаude" not in reg, "двойник харнесса по гомоглифу принят в реестр"
+        assert HARNESS in reg, "настоящий харнесс потерян при отсеве двойников"
 
         (home / ".themis" / "cli_registry.json").write_text(json.dumps({
             "zloy": {"probe": ["z"], "invoke": ["z"], "model": "z", "effort": "max",
