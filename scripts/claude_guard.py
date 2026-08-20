@@ -47,7 +47,11 @@ def _resolve(path: str, base: str) -> str:
     бьёт по оригиналу, судить надо назначение, а не имя ссылки."""
     if not path:
         return path
-    p = os.path.expanduser(path.strip("'\""))
+    p = path.strip("'\"")
+    # $PWD/${PWD} собирают путь подстановкой — строкой цель не видна (проба круга 6).
+    # Раскрываем в накопленную базу (ведущий cd → cwd payload → cwd процесса).
+    p = p.replace("${PWD}", base).replace("$PWD", base)
+    p = os.path.expanduser(p)
     if not os.path.isabs(p):
         p = os.path.join(base, p)
     return os.path.realpath(p)     # normpath + разбор симлинков; несуществующий путь — лексически
@@ -99,7 +103,9 @@ def _is_protected_ancestor(path: str) -> bool:
 # эффекту: идём слева направо, применяем каждый cd/pushd в командной позиции (начало,
 # ;/&/|, перевод строки или «(»), последний выигрывает. Многострочная команда — обиход,
 # а не хитрость: защита снималась случайно, без умысла.
-_CD_RE = re.compile(r"(?:^|[;&|\n(]+)\s*(?:cd|pushd)\s+(?!-)([^\s;&|\n)]+)")
+# Флаги cd (-P/-L) стоят перед каталогом: `cd -P дело` менял CWD мимо гейта
+# относительного пути (проба круга 6). Пропускаем флаги, берём первый не-флаг.
+_CD_RE = re.compile(r"(?:^|[;&|\n(]+)\s*(?:cd|pushd)\s+(?:-[LP]+\s+)*(?!-)([^\s;&|\n)]+)")
 
 
 def _base_dir(cmd: str, payload: dict) -> str:
@@ -115,29 +121,43 @@ def _base_dir(cmd: str, payload: dict) -> str:
     return base
 
 
-def _is_new_intake_file(cmd: str) -> bool:
-    """Команда кладёт НОВЫЙ файл в 00_intake — пополнение, а не затирание.
+# Свежее уникальное имя со штампом даты (…-2026-08-20.pdf) не может втихую заместить
+# канонический скан — это пополнение. Голое имя (skan.pdf) — подмена.
+_FRESH_NAME_RE = re.compile(r"\d{4}[-._]\d{2}[-._]\d{2}|\d{8}|_\d{6,}")
 
-    True только для `cp`/`mv` с ровно двумя аргументами, где источник лежит вне
-    охраняемых папок, а цели на диске ещё нет. Любое отклонение — False, то есть
-    блок: сторож ошибается в сторону запрета, а не разрешения.
+
+def _is_safe_intake_add(cmd: str, base: str) -> bool:
+    """cp/mv кладёт НОВЫЙ файл в 00_intake — пополнение, а не подмена.
+
+    Неприкосновенность первички — запрет ПЕРЕЗАПИСИ и УВОЗА, а не пополнения:
+    материалы в дело кладут каждую неделю (проба круга 6). Но голый `cp` поверх
+    молча ПОДМЕНЯЕТ скан доверителя, и подмена доказательства незаметна. Поэтому
+    пополнение безопасно лишь когда перезапись исключена:
+      · флаг -n/--no-clobber — штатный путь inbox-triage (шаг 5: «только mv -n»);
+      · свежее имя со штампом даты — не может заместить канонический скан.
+    Всё прочее (голый cp/mv поверх, чужой глагол, источник из первички) — подмена
+    либо увоз, значит блок: сторож ошибается в сторону запрета.
     """
-    import shlex
     try:
+        import shlex
         parts = shlex.split(cmd)
     except ValueError:
         return False
-    if len(parts) != 3 or parts[0] not in ("cp", "mv"):
+    if not parts or parts[0] not in ("cp", "mv"):
         return False
-    src, dst = parts[1], parts[2]
-    if re.search(r"00_intake|_baselines", src, re.I):
+    opts = [p for p in parts[1:] if p.startswith("-")]
+    pos = [p for p in parts[1:] if not p.startswith("-")]
+    if len(pos) != 2:
         return False
+    src, dst = pos
+    if _under_protected(_resolve(src, base)):
+        return False                  # источник из первички — увоз, не пополнение
     if not re.search(r"/00_intake/", dst.replace(os.sep, "/"), re.I):
-        return False
-    dst_abs = os.path.expanduser(dst)
-    if os.path.isdir(dst_abs):        # цель-папка: имя внутри неизвестно, не рискуем
-        return False
-    return not os.path.exists(dst_abs)
+        return False                  # цель не в первичке — этой ветке тут не место
+    if any(o in ("-n", "--no-clobber") for o in opts):
+        return True                   # no-clobber: перезапись физически исключена
+    base_name = os.path.basename(dst.rstrip("/"))
+    return bool(base_name) and bool(_FRESH_NAME_RE.search(base_name))
 
 
 # Маркер, названный в отрицании, — не маркер. Поиск вхождением по всему файлу
@@ -323,8 +343,12 @@ _VERB_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(" + "|".join(_VERB_LAS
 _FILE_VERB_RE = re.compile(
     r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?"
     r"(?:truncate|gzip|gunzip|bzip2|bunzip2|xz|unxz|split|cpio|zip|shred)\s+([^;&|<>]+)", re.M)
-# Загрузчики пишут в файл флагом, а не редиректом.
-_FETCH_RE = re.compile(r"(?:^|\s)(?:-o|--output|-O|--output-document)[=\s]+([^\s;&|<>]+)")
+# Загрузчики пишут в файл флагом, а не редиректом. `-o` многозначен: у unzip это
+# «перезаписать», а не «вывести в файл» (проба круга 6: `unzip -o {дело}/arch.zip`
+# читался как ЗАПИСЬ в arch.zip и блокировал законную распаковку ИЗ дела). Поэтому
+# вывод считаем ТОЛЬКО в контексте curl/wget.
+_FETCH_RE = re.compile(
+    r"\b(?:curl|wget)\b[^;&|\n]*?\s(?:-o|--output|-O|--output-document)[=\s]+([^\s;&|<>]+)")
 # curl --output-dir DIR кладёт загруженное ВНУТРЬ каталога (не файл флагом -o): так
 # файл лёг бы прямо в GOTOVO мимо сборщика (проба круга 5). Цель — сам каталог.
 _CURL_OUTDIR_RE = re.compile(r"--output-dir[=\s]+([^\s;&|<>]+)")
@@ -497,6 +521,24 @@ def _strip_cmd_prefixes(cmd: str) -> str:
     return out
 
 
+# Глагол тем же бинарём, но записанный ПУТЁМ, — самый дешёвый обход (проба круга 6):
+# /bin/rm == rm, /bin/cp == cp, /opt/homebrew/bin/cli == cli, ~/.foo/bin/cli == cli,
+# ./cli == cli. Срезаем каталог исполняемого файла в КОМАНДНОЙ позиции, оставляя
+# basename: сторож судит достигаемый глагол, а не способ его записать. Тем же приёмом
+# раскрывается чужой CLI, вызванный по абсолютному пути, через ~ и через ./.
+_CMDPATH_RE = re.compile(
+    r"((?:^|[;&|\n(]|\$\(|`)[ \t]*)(?:~?/[^\s;&|()`]*/|\./)(?=[A-Za-z])")
+# env -C DIR CMD и env --chdir=DIR CMD меняют каталог перед CMD — это cd другим именем.
+_ENV_C_RE = re.compile(r"\benv\s+(?:-\w+\s+)*(?:-C[ =]|--chdir[ =])\s*(\S+)\s+")
+# Заголовок конструкции оболочки уводит глагол из командной позиции: `if …; then rm`,
+# `for …; do rm`, `while …; do rm`. Голову до then/do заменяем разделителем, чтобы
+# глагол снова встал в командную позицию (проба круга 6).
+_CTRL_HEAD_RE = re.compile(r"\b(?:if|for|while|until)\b[^;\n]*(?:;|\n)\s*(?:then|do)\b")
+# osascript -e "do shell script \"CMD\"" исполняет CMD оболочкой — обёртка чужой
+# программой. Достаём CMD и возвращаем в командную позицию.
+_DO_SHELL_RE = re.compile(r"do\s+shell\s+script\s+\\?[\"']([^\"'\\]*)", re.I)
+
+
 def _normalize(cmd: str, depth: int = 0) -> str:
     """Разворачивает типовые обёртки shell до плоского текста. Не полноценный
     интерпретатор — эвристика под обходы, которые реально нашла проба.
@@ -507,11 +549,15 @@ def _normalize(cmd: str, depth: int = 0) -> str:
     if depth > 4:
         return cmd
     out = cmd
+    out = _ENV_C_RE.sub(lambda m: f"cd {m.group(1)} && ", out)   # env -C DIR → cd DIR
+    out = _CTRL_HEAD_RE.sub("; ", out)                           # if/for/while … then/do → ;
+    out = _DO_SHELL_RE.sub(lambda m: "; " + m.group(1) + " ;", out)   # osascript do shell script
     assigns = dict(_ASSIGN_RE.findall(out))
     out = _VAR_REF_RE.sub(lambda m: assigns.get(m.group(1), m.group(0)), out)
     out = _ECHO_SUBST_RE.sub(lambda m: m.group(1), out)
     out = _WHICH_SUBST_RE.sub(lambda m: m.group(1), out)
     out = _strip_cmd_prefixes(out)
+    out = _CMDPATH_RE.sub(lambda m: m.group(1), out)             # /bin/rm → rm, ./cli → cli
     out = _SHC_RE.sub(lambda m: _normalize(m.group(2), depth + 1), out)
     out = _EVAL_RE.sub(lambda m: "; " + _normalize(m.group(2), depth + 1) + " ;", out)
     out = _HERESTRING_RE.sub(lambda m: "; " + _normalize(m.group(2), depth + 1) + " ;", out)
@@ -598,15 +644,19 @@ def _patch_scope_hits_cases(cmd: str, base: str) -> bool:
 
 
 def _under_protected(path: str) -> bool:
-    """Цель лежит внутри 00_intake/ или _baselines/ — первичка и база «ДО»."""
+    """Цель лежит внутри 00_intake/ или _baselines/ дерева ДЕЛ (…/cases/…/00_intake).
+    Чужая папка 00_intake вне cases/ — чужой проект, /tmp/chuzhoy/00_intake — не наша
+    первичка, и блокировать её нельзя (проба круга 6: сторож с такой тревогой снимают
+    в первый день)."""
     norm = path.replace(os.sep, "/").strip("'\"")
-    return bool(re.search(r"(?:^|/)(?:00_intake|_baselines)(?:/|$)", norm, re.I))
+    return bool(re.search(r"/cases/.+/(?:00_intake|_baselines)(?:/|$)", norm, re.I))
 
 
-# mv УДАЛЯЕТ источник — перенос СУЩЕСТВУЮЩЕГО файла ИЗ 00_intake/_baselines
-# так же разрушителен, как перезапись, хотя цель записи (последний аргумент)
-# лежит вне охраняемых папок и по ней одной это не видно.
-_MV_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?mv\s+([^;&|<>]+)", re.M)
+# mv УДАЛЯЕТ источник, scp/rsync УВОЗЯТ его за границу — перенос СУЩЕСТВУЮЩЕГО файла
+# ИЗ 00_intake/_baselines так же разрушителен/утечен, как перезапись, хотя цель (последний
+# аргумент) лежит вне охраняемых папок и по ней одной это не видно. scp/rsync — «перенос
+# глаголами вне перечня» (проба круга 6): увоз первички запрещён любым глаголом.
+_MV_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(?:mv|scp|rsync)\s+([^;&|<>]+)", re.M)
 
 
 def _mv_sources(body: str) -> list:
@@ -631,6 +681,39 @@ def _rm_targets(cmd: str, base: str) -> list:
     return out
 
 
+# git clean удаляет неотслеживаемое, git rm — отслеживаемое: то же разрушение дела,
+# что и rm, только именем команды не похоже (проба круга 6). Цель — позиционный путь.
+_GIT_DESTRUCT_RE = re.compile(
+    r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?git\s+(?:-C\s+(\S+)\s+)?(?:clean|rm)\b([^;&|<>]*)", re.M)
+
+
+def _git_destruct_targets(cmd: str, base: str) -> list:
+    out = []
+    for cdir, args in _GIT_DESTRUCT_RE.findall(cmd):
+        if cdir:                       # git -C DIR clean/rm — операция идёт в DIR
+            out.append(_resolve(cdir.strip("'\""), base))
+        out += [_resolve(t, base) for t in _split(args)]
+    return out
+
+
+# find … -delete и find … -exec rm/mv/… удаляют без глагола удаления в начале строки
+# (проба круга 6). Блокируем, когда КОРЕНЬ обхода лежит в охраняемой папке дела И
+# действие разрушительно: чтение через find -exec cat/grep не трогаем.
+_FIND_ROOT_RE = re.compile(
+    r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?find\s+([^\s;&|<>]+)([^;&|]*)", re.M)
+_FIND_DESTRUCT_RE = re.compile(
+    r"-delete\b|-exec(?:dir)?\s+(?:\S*/)?(?:rm|rmdir|mv|shred|truncate|dd)\b")
+
+
+def _find_destruct_hits(cmd: str, base: str) -> bool:
+    for root, rest in _FIND_ROOT_RE.findall(cmd):
+        if _FIND_DESTRUCT_RE.search(rest):
+            r = _resolve(root, base)
+            if _under_protected(r) or _is_protected_ancestor(r):
+                return True
+    return False
+
+
 # Перенос ЦЕЛОГО каталога расширения не имеет: `mv /tmp/ocr дело/.../ocr` кладёт
 # в дело сотню рендеров, а по имени цели этого не видно. Смотрим на диск —
 # что в каталоге-источнике, то и приедет.
@@ -639,9 +722,12 @@ _BULK_LIMIT = 400
 # Распаковка архива — запись «вслепую»: что внутри, сторож не видит, а в дело
 # высыпается всё разом. По первичке `unzip -o` вдобавок затирает оригиналы.
 # Законный путь: распаковать во временный каталог и положить файлы по одному.
+# Каталог назначения задаётся -d/-C/--directory, в т.ч. через `=` (tar --directory=DIR,
+# проба круга 6). Прежний `-o(?=\s)` ошибочно принимал флаг перезаписи unzip (`unzip -o
+# arch.zip`) за каталог и блокировал законную распаковку ИЗ дела наружу — снят.
 _UNPACK_RE = re.compile(
     r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(?:unzip|tar|bsdtar|7z|unrar)\b[^;&|<>]*?"
-    r"\s(?:-d|-C|--directory|-o(?=\s))\s*([^\s;&|<>]+)", re.M)
+    r"\s(?:-d|-C|--directory)(?:=|\s*)([^\s;&|<>=]+)", re.M)
 # python3 -m zipfile -e ARCH DST  /  python3 -m tarfile -e ARCH DST — распаковка модулем
 # stdlib: каталог назначения — последний позиционный (проба круга 4).
 _PY_UNPACK_RE = re.compile(
@@ -742,9 +828,11 @@ def _foreign_cli_re():
     if not names:
         return None
     body = "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
-    # Командная позиция: начало, после ;/&/|, сабшелла $(…) или обратной кавычки.
-    # Префиксы (env/sudo/…) уже сняты _normalize. `\b` — имя целым словом, не куском.
-    return re.compile(rf"(?:^|[;&|]|\$\(|`)\s*(?:{body})\b")
+    # Командная позиция: начало, после ;/&/|, перевода строки, подоболочки «(…)»,
+    # группировки «{ … }», сабшелла $(…) или обратной кавычки (проба круга 6 — вызов
+    # со второй строки, из подоболочки и из группы шёл мимо). Префиксы (env/sudo/…),
+    # then/do и путь к бинарю уже сняты _normalize. `\b` — имя целым словом, не куском.
+    return re.compile(rf"(?:^|[;&|\n({{]|\$\(|`)\s*(?:{body})\b")
 
 
 _FOREIGN_CLI_RE = _foreign_cli_re()
@@ -759,6 +847,18 @@ _QUOTED_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
 
 def _strip_quoted(s: str) -> str:
     return _QUOTED_RE.sub(" ", s)
+
+
+# Тело heredoc, поданное на ИСПОЛНЕНИЕ (`bash <<EOF … EOF`), — команды, а не данные:
+# `_strip_heredocs` его срезает для поиска целей записи, но чужой CLI внутри него
+# всё равно исполнится (проба круга 6). Достаём тела ИСПОЛНЯЕМЫХ heredoc отдельно.
+_EXEC_HEREDOC_RE = re.compile(
+    r"\b(?:sh|bash|zsh|source|\.)\b[^\n]*<<-?\s*['\"]?(\w+)['\"]?[^\n]*\n(.*?)^\s*\1\s*$",
+    re.S | re.M)
+
+
+def _exec_heredoc_bodies(raw: str) -> list:
+    return [m.group(2) for m in _EXEC_HEREDOC_RE.finditer(raw)]
 
 
 def main() -> None:
@@ -831,19 +931,31 @@ def main() -> None:
                 "БЛОК: 00_intake/ неприкосновенен — исходники клиента "
                 "не редактировать и не перезаписывать (железное правило)."
             )
+        # Инструмент Write — та же дверь, что Bash: раньше Bash к _baselines блокировался,
+        # а Write затирал базу «ДО» свободно (сторож стоял на одной двери из двух, круг 6).
+        if _under_protected(p):
+            block(
+                "БЛОК: _baselines/ неприкосновенна — база «ДО» для разбора правок "
+                "доверителя. Снимок кладёт create_docx.save(), Write её не перезаписывает."
+            )
         _cases_write_gate([p])
         _workflow_gate(p)
 
     if tool == "Bash":
         raw_cmd = as_str(ti.get("command"))
-        stripped = _strip_heredocs(raw_cmd)     # для _is_new_intake_file — узкая легитимность
+        stripped = _strip_heredocs(raw_cmd)     # для _is_safe_intake_add — узкая легитимность
         cmd = _normalize(stripped)              # sh -c/bash -c/var=/$( echo )/функция — плоско
         base = _base_dir(cmd, d)                # ведущий cd → cwd payload → cwd процесса
 
         # Прямой вызов чужого CLI мимо коннектора: за границей процесса ворот нет.
         # Ищем ГЛАГОЛ в командной позиции по строке БЕЗ содержимого кавычек — имя в
-        # тексте сообщения/аргумента вызовом не считается.
-        if _FOREIGN_CLI_RE is not None and _FOREIGN_CLI_RE.search(_strip_quoted(cmd)):
+        # тексте сообщения/аргумента вызовом не считается. Тело исполняемого heredoc
+        # (`bash <<EOF … EOF`) `cmd` не содержит (оно срезано) — проверяем отдельно.
+        foreign_hit = _FOREIGN_CLI_RE is not None and (
+            _FOREIGN_CLI_RE.search(_strip_quoted(cmd))
+            or any(_FOREIGN_CLI_RE.search(_strip_quoted(_normalize(b)))
+                   for b in _exec_heredoc_bodies(raw_cmd)))
+        if foreign_hit:
             block(
                 "БЛОК: прямой вызов чужого CLI мимо коннектора запрещён — за границей "
                 "процесса claude_guard нет, и материалы дела уйдут без обезличивания и "
@@ -883,11 +995,16 @@ def main() -> None:
         # дальше по строке не превращает удаление во временном каталоге в удар по делу.
         # Судим и ПОДДЕРЕВО: снос родителя (папки дела, клиента) губит первичку и базу
         # «ДО» так же, как удаление их самих (проба круга 5) — а по имени цели не видно.
-        if any(_under_protected(t) or _is_protected_ancestor(t) for t in _rm_targets(cmd, base)):
+        # find судим по СЫРОЙ команде: _normalize срезает `-exec rm {} ;` в `; rm {} ;`,
+        # и по нормализованной строке разрушительность find уже не видна.
+        removal_targets = _rm_targets(cmd, base) + _git_destruct_targets(cmd, base)
+        if any(_under_protected(t) or _is_protected_ancestor(t) for t in removal_targets) \
+                or _find_destruct_hits(stripped, base):
             block(
                 "БЛОК: удаление затрагивает 00_intake/ или _baselines/ — в т.ч. как "
-                "поддерево сносимой папки дела или клиента. Первичка и база «ДО» "
-                "неприкосновенны (железное правило). Нужно — только пользователь вручную."
+                "поддерево сносимой папки дела или клиента, глаголом git (clean/rm) или "
+                "find (-delete/-exec rm). Первичка и база «ДО» неприкосновенны "
+                "(железное правило). Нужно — только пользователь вручную."
             )
         # ПОПОЛНЕНИЕ первички — не перезапись. Материалы клиента обязаны попадать
         # в 00_intake/, этим и занят inbox-triage (Bash mv из инбокса). Прежнее
@@ -911,7 +1028,7 @@ def main() -> None:
         removed_sources = [_resolve(s, base) for s in _mv_sources(cmd)]
         removed_sources = [s for s in removed_sources
                            if _under_protected(s) or _is_protected_ancestor(s)]
-        if (protected_targets or removed_sources) and not _is_new_intake_file(stripped):
+        if (protected_targets or removed_sources) and not _is_safe_intake_add(stripped, base):
             block(
                 "БЛОК: перезапись или увоз 00_intake/ или _baselines/ (в т.ч. как "
                 "поддерево переносимой папки дела/клиента) запрещены — исходники клиента "
@@ -992,23 +1109,37 @@ def selftest() -> int:
          run({"tool_name": "Read", "tool_input": {"file_path": small}}), 0),
         ("Write в 00_intake блокируется",
          run({"tool_name": "Write", "tool_input": {"file_path": "/c/cases/x/y/00_intake/z.md"}}), 2),
-        ("rm по _baselines блокируется",
-         run({"tool_name": "Bash", "tool_input": {"command": "rm -rf x/_baselines"}}), 2),
+        # _baselines охраняется в дереве дел (…/cases/…/_baselines); чужая папка вне
+        # cases/ (проба круга 6) — не наша база «ДО».
+        ("rm по _baselines в дереве дел блокируется",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "rm -rf cases/klient/delo-2026/.agent/drafts/_baselines"}}), 2),
+        ("rm чужой папки _baselines вне cases/ пропускается",
+         run({"tool_name": "Bash", "tool_input": {"command": "rm -rf /tmp/chuzhoy/_baselines"}}), 0),
         # Затирание СУЩЕСТВУЮЩЕЙ первички запрещено, пополнение новым файлом —
-        # разрешено: без второго inbox-triage не смог бы положить материал в дело.
+        # разрешено, но безопасно лишь при -n/--no-clobber или свежем имени со штампом
+        # даты: голый cp поверх молча ПОДМЕНЯЕТ скан доверителя (проба круга 6).
         ("cp поверх существующего файла в 00_intake блокируется",
          run({"tool_name": "Bash",
               "tool_input": {"command": f"cp a.pdf {shlex_quote(existing_intake)}"}}), 2),
-        ("cp нового файла в 00_intake пропускается",
+        ("cp -n нового файла в 00_intake пропускается",
          run({"tool_name": "Bash",
-              "tool_input": {"command": f"cp a.pdf {shlex_quote(new_intake)}"}}), 0),
+              "tool_input": {"command": f"cp -n a.pdf {shlex_quote(new_intake)}"}}), 0),
+        ("cp с датой в имени в 00_intake пропускается",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": f"cp a.pdf {shlex_quote(intake + '/skan-2026-08-20.pdf')}"}}), 0),
+        ("голый cp поверх канонического имени в 00_intake блокируется",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": f"cp a.pdf {shlex_quote(intake + '/skan.pdf')}"}}), 2),
         ("mv существующего файла ИЗ 00_intake блокируется",
          run({"tool_name": "Bash",
               "tool_input": {"command": f"mv {shlex_quote(existing_intake)} /tmp/x.pdf"}}), 2),
         ("редирект в _baselines блокируется",
-         run({"tool_name": "Bash", "tool_input": {"command": "echo hi > d/_baselines/f.docx"}}), 2),
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "echo hi > cases/k/d/.agent/drafts/_baselines/f.docx"}}), 2),
         ("sed -i по 00_intake блокируется",
-         run({"tool_name": "Bash", "tool_input": {"command": "sed -i '' s/a/b/ 00_intake/f.md"}}), 2),
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "sed -i '' s/a/b/ cases/k/d/00_intake/f.md"}}), 2),
         ("те же слова в прозе команду не блокируют",
          run({"tool_name": "Bash", "tool_input": {"command":
               "git commit -m 'гейт на cp/mv/tee/sed -i по 00_intake и _baselines'"}}), 0),
