@@ -265,9 +265,9 @@ def selftest() -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Герметичный вызов чужого CLI.")
     ap.add_argument("--role")
-    ap.add_argument("--provider", help=argparse.SUPPRESS)  # старый тестовый шов этапа 7
+    ap.add_argument("--provider", help=argparse.SUPPRESS)  # принимается и отвергается
     ap.add_argument("--prompt")
-    ap.add_argument("--cmd", help=argparse.SUPPRESS)       # только старый тестовый шов
+    ap.add_argument("--cmd", help=argparse.SUPPRESS)       # принимается и отвергается
     ap.add_argument("--registry", default=str(SCRIPTS / "cli_registry.json"))
     ap.add_argument("--cache")
     ap.add_argument("--timeout", type=int, default=300)
@@ -293,10 +293,13 @@ def main() -> int:
             return _otkaz("роутер не назначил исполнителя")
         return call(chosen["name"], Path(a.prompt), chosen["invoke"], a.timeout,
                     Path(a.out) if a.out else None, Path(a.log) if a.log else None)
-    if not (a.provider and a.cmd):
-        ap.error("нужна --role; --provider и --cmd оставлены только для selftest этапа 7")
-    return call(a.provider, Path(a.prompt), a.cmd, a.timeout,
-                Path(a.out) if a.out else None, Path(a.log) if a.log else None)
+    # Шов «свободная команда мимо реестра» закрыт: он исполнял любой бинарник без
+    # роли, класса данных и пробы — проверено, чужой процесс получал текст дела
+    # целиком (проба 20.08.2026). Приёмка этапа 7 переведена на --role тем же
+    # коммитом, поэтому шов больше никому не нужен.
+    return _otkaz("исполнитель берётся только из реестра по роли: нужен --role. "
+                  "Свободная команда мимо роутера запрещена — за границей процесса "
+                  "наших ворот нет (ст. 8 ФЗ № 63-ФЗ)")
 
 
 if __name__ == "__main__":

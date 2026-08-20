@@ -90,6 +90,33 @@ PROBE_CONTRACT = """  scripts/cli_probe.py — доступность чужог
     --selftest даёт 0 без сети."""
 
 
+def reestr(td: Path, cmd: str, imya: str = "proba") -> str:
+    """Подставной реестр CLI: исполнитель задаётся строкой реестра, а не свободной
+    командой. Прежде приёмка звала `--provider X --cmd путь` — тот же шов, которым
+    материалы дела уходили мимо роутера (контракт 9.9). Приёмка не вправе держать
+    открытым шов, который сама объявляет закрытым.
+    """
+    proba = stub(td / f"{imya}_proba.sh", 'echo "logged in"\nexit 0\n')
+    put = td / f"reestr_{imya}.json"
+    put.write_text(json.dumps({
+        imya: {"probe": [proba], "invoke": [cmd], "model": "proba-max",
+               "effort": "max", "data_classes": ["text", "public", "infra"]},
+        "claude": {"probe": [proba], "invoke": [cmd], "model": "opus",
+                   "effort": "max", "data_classes": ["pd", "text", "public", "infra"]},
+    }, ensure_ascii=False), encoding="utf-8")
+    return str(put)
+
+
+def po_roli(td: Path, cmd: str, prompt, **kw) -> list:
+    """argv вызова коннектора по РОЛИ через подставной реестр."""
+    argv = [tool("foreign_cli.py"), "--role", "hunter-leaf", "--prompt", str(prompt),
+            "--registry", reestr(td, cmd), "--cache", str(td / "probe_cache.json")]
+    for flag, val in kw.items():
+        if val is not None:
+            argv += [f"--{flag}", str(val)]
+    return argv
+
+
 def check_probe():
     if not exists("cli_probe.py"):
         return [("cli_probe.py", "прибора нет. Контракт:\n" + PROBE_CONTRACT)]
@@ -222,9 +249,8 @@ exit 0
         log = td / "otpravki.log"
         env = {**NO_NET, "THEMIS_PANEL_TOKEN": "sekret-paneli-ne-dolzhen-utech",
                "DADATA_API_KEY": "kluch-dadata-ne-dolzhen-utech"}
-        code, out, err = run([tool("foreign_cli.py"), "--provider", "proba", "--prompt",
-                              str(vopros), "--cmd", vidok, "--out", str(otvet),
-                              "--log", str(log)], timeout=180, env=env)
+        code, out, err = run(po_roli(td, vidok, vopros, out=otvet, log=log),
+                             timeout=180, env=env)
         if code != 0:
             fails.append(("foreign_cli.py", f"вызов с подставным CLI вернул {code}: "
                                             f"{(out + err).strip()[-200:]}"))
@@ -293,8 +319,7 @@ exit 0
         sosed = stub(td / "sosed.sh", f'ls -A .. | wc -l > {td / "sosedi.txt"}\necho "ответ"\n')
         chistyy = td / "chistyy.txt"
         chistyy.write_text("Применима ли ст. 333 ГК РФ к неустойке?\n", encoding="utf-8")
-        run([tool("foreign_cli.py"), "--provider", "proba", "--prompt", str(chistyy),
-             "--cmd", sosed], timeout=120)
+        run(po_roli(td, sosed, chistyy), timeout=120)
         sosedi = (td / "sosedi.txt")
         if sosedi.is_file():
             try:
@@ -309,8 +334,7 @@ exit 0
         # в него посреди прогона хуже, чем отказать сразу и внятно.
         ogromnyy = td / "ogromnyy.txt"
         ogromnyy.write_text("Вопрос про неустойку. " * 60000, encoding="utf-8")
-        code, out, err = run([tool("foreign_cli.py"), "--provider", "proba", "--prompt",
-                              str(ogromnyy), "--cmd", vidok], timeout=180)
+        code, out, err = run(po_roli(td, vidok, ogromnyy), timeout=180)
         if code == 0:
             fails.append(("foreign_cli.py", "запрос в 1,3 МБ принят — предел аргумента ОС "
                                             "рванёт в бою, а не на приёмке"))
@@ -321,8 +345,7 @@ exit 0
         ssylka = td / "ssylka.txt"
         if not ssylka.exists():
             ssylka.symlink_to(chistyy)
-        code, out, err = run([tool("foreign_cli.py"), "--provider", "proba", "--prompt",
-                              str(ssylka), "--cmd", vidok], timeout=120)
+        code, out, err = run(po_roli(td, vidok, ssylka), timeout=120)
         if code == 0:
             fails.append(("foreign_cli.py", "симлинк принят как файл запроса — за ним "
                                             "может стоять материал дела"))
@@ -331,8 +354,7 @@ exit 0
             f = td / f"proba_{abs(hash(why))}.txt"
             f.write_text(text, encoding="utf-8")
             o = td / f"o_{abs(hash(why))}.txt"
-            run([tool("foreign_cli.py"), "--provider", "proba", "--prompt", str(f),
-                 "--cmd", vidok, "--out", str(o)], timeout=180)
+            run(po_roli(td, vidok, f, out=o), timeout=180)
             vid2 = otchet.read_text(encoding="utf-8", errors="replace")
             if sled.lower() in vid2.lower():
                 fails.append(("foreign_cli.py", f"ЗА ГРАНИЦУ УШЁЛ {why}: «{sled}». "
@@ -382,8 +404,7 @@ def check_otkaz():
         for cmd, src, why in ((padayushchiy, vopros, "чужой CLI упал"),
                               (pustoy, vopros, "чужой CLI ответил пустотой")):
             out_file = td / f"otvet_{Path(cmd).stem}.txt"
-            code, out, err = run([tool("foreign_cli.py"), "--provider", "proba", "--prompt",
-                                  str(src), "--cmd", cmd, "--out", str(out_file)], timeout=180)
+            code, out, err = run(po_roli(td, cmd, src, out=out_file), timeout=180)
             if code == 0:
                 fails.append(("foreign_cli.py", f"{why}: вернулся код 0"))
             if out_file.exists():
