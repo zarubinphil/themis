@@ -17,7 +17,8 @@ DEFAULT_REGISTRY = HERE / "cli_registry.json"
 # `{"claude": {"invoke": [...]}}` в ~/.themis/ уводит адвокатскую тайну на чужой
 # бинарник — доказано пробой скептика 19.08.2026.
 HARNESS = "claude"
-HARNESS_LOCKED = ("invoke", "probe")
+HARNESS_LOCKED = ("invoke", "probe", "data_classes")
+REQUIRED_KEYS = ("probe", "invoke", "model", "effort", "data_classes")
 PD_ROLES = {
     "case-mapper", "case-reconciler", "pdf-reader", "image-reader", "docx-reader",
     "inbox-triage", "doc-drafter", "doc-reviewer", "hearing-prep", "archivist",
@@ -60,14 +61,24 @@ def load_registry(path: Path) -> dict:
         raise ValueError(f"оверлей не прочитан: {e}") from e
     if not isinstance(base, dict) or not isinstance(extra, dict):
         raise ValueError("реестр и оверлей должны быть объектами")
+    if HARNESS not in base:
+        raise ValueError("в базовом реестре нет полного claude")
+    _entry_ok(HARNESS, base[HARNESS])
     for name, entry in extra.items():
         if not isinstance(entry, dict):
             raise ValueError(f"{name}: оверлей должен быть объектом")
+        if name == HARNESS and name not in base:
+            raise ValueError("оверлей не может объявить харнесс без базового claude")
         merged = {**base.get(name, {}), **entry}
         if name == HARNESS:
             for key in HARNESS_LOCKED:
-                if key in base.get(name, {}):
-                    merged[key] = base[name][key]   # харнесс не пересаживается оверлеем
+                merged[key] = base[name][key]   # харнесс не пересаживается оверлеем
+        else:
+            classes = merged.get("data_classes")
+            if isinstance(classes, list) and "pd" in classes:
+                merged["data_classes"] = [c for c in classes if c != "pd"]
+                if not merged["data_classes"]:
+                    continue
         base[name] = merged
     for name, entry in base.items():
         _entry_ok(name, entry)
@@ -97,10 +108,12 @@ def decide(role: str, registry: dict, cache: str | None) -> dict:
         raise ValueError("в реестре нет claude")
     skipped, available = [], []
     for name, entry in registry.items():
-        missing = [key for key in ("probe", "invoke", "model", "effort", "data_classes")
-                   if key not in entry]
+        missing = [key for key in REQUIRED_KEYS if key not in entry]
         if missing:
             skipped.append({"name": name, "reason": "нет " + ", ".join(missing)})
+            continue
+        if data_class == "pd" and name != HARNESS:
+            skipped.append({"name": name, "reason": "pd допускает только claude"})
             continue
         if data_class not in entry["data_classes"]:
             skipped.append({"name": name, "reason": f"не допускает класс {data_class}"})
@@ -111,14 +124,17 @@ def decide(role: str, registry: dict, cache: str | None) -> dict:
         else:
             skipped.append({"name": name, "reason": reason})
     if data_class == "pd":
-        selected = "claude" if "claude" in available else None
+        selected = HARNESS if HARNESS in available else None
     else:
-        selected = next((name for name in available if name != "claude"),
-                        "claude" if "claude" in available else None)
+        selected = next((name for name in available if name != HARNESS),
+                        HARNESS if HARNESS in available else None)
     executor = {"name": selected, **registry[selected]} if selected else None
-    chain = [name for name in available if name != "claude"]
-    if "claude" in available:
-        chain.append("claude")
+    if data_class == "pd":
+        chain = [HARNESS]
+    else:
+        chain = [name for name in available if name != HARNESS]
+        if HARNESS in available:
+            chain.append(HARNESS)
     return {"role": role, "data_class": data_class, "executor": executor,
             "chain": chain, "skipped": skipped}
 
@@ -155,6 +171,13 @@ def selftest() -> int:
         assert reg["claude"]["invoke"] == ["real-claude"], "оверлей пересадил invoke харнесса"
         assert reg["claude"]["probe"] == ["real-probe"], "оверлей пересадил probe харнесса"
         assert reg["claude"]["effort"] == "low", "оверлей не смог подкрутить effort харнесса"
+        assert "pd" in reg["claude"]["data_classes"], "оверлей понизил data_classes харнесса"
+
+        (home / ".themis" / "cli_registry.json").write_text(json.dumps({
+            "zloy": {"probe": ["z"], "invoke": ["z"], "model": "z", "effort": "max",
+                     "data_classes": ["pd"]}}), encoding="utf-8")
+        reg = load_registry(base)
+        assert "zloy" not in reg, "чужой провайдер с одним pd принят в цепочку"
 
         base.write_text(json.dumps({"claude": "повреждено"}), encoding="utf-8")
         try:
@@ -163,6 +186,18 @@ def selftest() -> int:
             assert "объект" in str(e), e
         else:
             raise AssertionError("поврежденный реестр принят")
+        base.write_text(json.dumps({"alpha": {
+            "probe": ["a"], "invoke": ["a"], "model": "a", "effort": "max",
+            "data_classes": ["text"]}}), encoding="utf-8")
+        (home / ".themis" / "cli_registry.json").write_text(json.dumps({"claude": {
+            "probe": ["evil"], "invoke": ["evil"], "model": "c", "effort": "max",
+            "data_classes": ["pd"]}}), encoding="utf-8")
+        try:
+            load_registry(base)
+        except ValueError as e:
+            assert "claude" in str(e), e
+        else:
+            raise AssertionError("оверлей объявил харнесс без базы")
     print("selftest пройден: классы ролей fail-closed, харнесс не пересаживается оверлеем")
     return 0
 
