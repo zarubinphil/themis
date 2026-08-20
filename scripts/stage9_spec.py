@@ -2391,6 +2391,62 @@ def check_font_nasledovanie():
     return fails
 
 
+def check_kesh_prob_bez_gonki():
+    """9.17: кеш проб переживает параллельные вызовы — волна ролей параллельна.
+
+    Хвост круга 5, доказан запуском координатора: двенадцать одновременных
+    проб оставили в кеше ТРИ записи из двенадцати. Чтение-правка-запись идёт
+    без блокировки, и параллельные пробы затирают работу друг друга.
+
+    Это не редкость, а штатный режим: волна ролей в цикле идёт одновременно
+    по замыслу. Потерянная запись означает либо повторный вызов мёртвого CLI,
+    либо потерю отметки «нет квоты» — роль пойдёт к исполнителю, который её
+    не обслужит.
+    """
+    cp = tool("cli_probe.py")
+    if not cp.is_file():
+        return [("kesh-gonka:missing", "scripts/cli_probe.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-keshgonka-") as tmp:
+        td = Path(tmp)
+        otkaz = sh_stub(td / "otkaz.sh", 'echo "not logged in" >&2\nexit 1\n')
+        cmd = json.dumps([otkaz])
+        kesh = td / "kesh.json"
+
+        def probnut(name):
+            py(cp, "--provider", name, "--probe-cmd", cmd, "--cache", str(kesh), cwd=td)
+
+        # Опора: одиночная проба записывает отказ.
+        probnut("odna")
+        if not kesh.is_file() or len(json.loads(kesh.read_text(encoding="utf-8"))) != 1:
+            return [("kesh-gonka:opora", "одиночная проба не записала отказ — "
+                     "проба недействительна")]
+        kesh.unlink()
+        # Ось пропуска: двенадцать одновременных проб.
+        import threading
+        potoki = [threading.Thread(target=probnut, args=(f"cli{i:02d}",))
+                  for i in range(12)]
+        for t in potoki:
+            t.start()
+        for t in potoki:
+            t.join()
+        zapisi = json.loads(kesh.read_text(encoding="utf-8")) if kesh.is_file() else {}
+        if len(zapisi) < 12:
+            fails.append(("kesh-gonka:poteri", f"из двенадцати одновременных проб в кеше "
+                          f"осталось {len(zapisi)}: чтение-правка-запись без блокировки, "
+                          f"а волна ролей идёт параллельно по замыслу — отметки об "
+                          f"отказах теряются штатно"))
+        # Ось обихода: последовательные пробы не теряются.
+        kesh.unlink(missing_ok=True)
+        for i in range(4):
+            probnut(f"posl{i}")
+        posl = json.loads(kesh.read_text(encoding="utf-8")) if kesh.is_file() else {}
+        if len(posl) != 4:
+            fails.append(("kesh-gonka:posledovatelno", f"последовательные пробы тоже "
+                          f"теряются ({len(posl)} из 4) — кеш непригоден вовсе"))
+    return fails
+
+
 def check_humanizer_na_marshrute():
     """9.17: анти-AI-гейт стоит НА МАРШРУТЕ вердикта, а не рядом с ним.
 
@@ -3712,6 +3768,7 @@ CHECKS = [
     ("9.17 обезличивание: разрыв и обиход", check_pii_normalizaciya_i_obihod),
     ("9.17 детектор держит формы приказа", check_inekcii_formy_prikaza),
     ("9.17 вызов чужого CLI ловится в формах", check_chuzhoy_cli_formy_vyzova),
+    ("9.17 кеш проб переживает параллель", check_kesh_prob_bez_gonki),
     ("9.17 анти-AI-гейт на маршруте вердикта", check_humanizer_na_marshrute),
     ("9.17 .docx равен одобренному .md", check_docx_raven_odobrennomu),
     ("9.17 имя в PATH не тождество харнесса", check_path_ne_tozhdestvo),
