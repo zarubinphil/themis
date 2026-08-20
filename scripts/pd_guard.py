@@ -143,7 +143,14 @@ def name_pattern(names: list[str], cyrillic: bool = False) -> re.Pattern | None:
     body = "|".join(lat_bodies + cyr_bodies)
     if not body:
         return None
-    return re.compile(rf"(?<![A-Za-zА-Яа-я0-9-])({body})(?![A-Za-zА-Яа-я0-9-])",
+    # Граница — БУКВА, не «дефис/цифра». Имя папки дела в живой форме почти всегда
+    # несёт хвост: «testfam-ab-2026.zip», «session-testfam-ab-19-08.md», «testfam-ab2».
+    # Прежний класс держал дефис и цифру в границе, поэтому читал такой хвост
+    # продолжением слова и пропускал имя целиком (проба 20.08.2026: три формы разом).
+    # Буква слева/справа по-прежнему рвёт совпадение — «xfamiliya-abx» и
+    # «familiya-abcd» продолжают молчать, иначе сторож краснел бы там, где имя лишь
+    # кусок другого слова, и его выключили бы в первый день.
+    return re.compile(rf"(?<![A-Za-zА-Яа-яЁё])({body})(?![A-Za-zА-Яа-яЁё])",
                       re.IGNORECASE)
 
 
