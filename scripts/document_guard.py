@@ -196,20 +196,48 @@ def _fonts_and_sizes(doc) -> tuple[set, set]:
     return fonts, sizes
 
 
+def _appendix_header(text: str) -> bool:
+    return bool(re.fullmatch(r"\s*(?:Приложени[ея]|ПРИЛОЖЕНИ[ЕЯ])\s*:?\s*",
+                             text or ""))
+
+
+def _is_appendix_item(p) -> bool:
+    """Пункт перечня приложений: номер ведет Word (w:numPr), в тексте абзаца
+    его нет — по строке пункт не отличить, судим по структуре."""
+    from docx.oxml.ns import qn
+    ppr = p._p.find(qn("w:pPr"))
+    return ppr is not None and ppr.find(qn("w:numPr")) is not None
+
+
 def money_text(doc) -> str:
-    """Текст для денежной проверки: тело ДО перечня приложений плюс таблицы и
-    колонтитулы целиком.
+    """Текст для денежной проверки: тело без пунктов перечня приложений плюс
+    таблицы, колонтитулы, поля форм (w:sdt) и надписи (w:txbxContent) целиком.
 
     Раньше срез приложений применялся к общей склейке, а `iter_paragraphs` отдаёт
     таблицы ПОСЛЕ абзацев верхнего уровня — поэтому строка «ПРИЛОЖЕНИЯ:» отрезала
     заодно все таблицы документа. Приложения есть в каждом иске, а расчёт сумм
     и цена иска в шапке живут именно в таблицах: денежная проверка не работала
     ни в одном реальном иске (проба круга 5, 20.08.2026).
+
+    Хвост за перечнем срезался целиком, а расчёт цены иска — обязательная часть
+    заявления и почти всегда стоит в самом конце, ПОСЛЕ перечня: ложная пропись
+    там проходила незамеченной. Теперь пропускаются только сами пункты перечня
+    (автонумерация w:numPr или ручная «1. »), текст после них проверяется
+    (проба круга 6, 20.08.2026). Поля форм и надписи — обиход шаблонов Word и
+    бланков: `doc.paragraphs` их не отдаёт, текст собирается из XML (та же
+    проба).
     """
-    telo = "\n".join(p.text for p in getattr(doc, "paragraphs", []))
-    m = re.search(r"(?im)^\s*(?:Приложени[ея]|ПРИЛОЖЕНИ[ЕЯ])\s*:?\s*$", telo)
-    if m:
-        telo = telo[:m.start()]
+    telo_lines = []
+    posle_zagolovka = False
+    for p in getattr(doc, "paragraphs", []):
+        if not posle_zagolovka and _appendix_header(p.text):
+            posle_zagolovka = True
+            continue
+        if posle_zagolovka and (_is_appendix_item(p)
+                                or re.match(r"^\s*\d{1,2}[.)]\s", p.text or "")):
+            continue
+        telo_lines.append(p.text)
+    telo = "\n".join(telo_lines)
     prochee = []
 
     def _iz_yacheek(container):
@@ -226,6 +254,15 @@ def money_text(doc) -> str:
         for row in table.rows:
             for cell in row.cells:
                 prochee.extend(par.text for par in _iz_yacheek(cell))
+    # Поля форм (w:sdt) и надписи (w:txbxContent): doc.paragraphs их не видит,
+    # а шаблоны Word и бланки набирают именно ими — ложная сумма внутри поля
+    # или надписи проходила мимо всех проверок (проба круга 6, 20.08.2026).
+    from docx.oxml.ns import qn
+    for tag in ("w:sdtContent", "w:txbxContent"):
+        for el in doc.element.body.iter(qn(tag)):
+            txt = "".join(t.text or "" for t in el.iter(qn("w:t")))
+            if txt.strip():
+                prochee.append(txt)
     for sec in doc.sections:
         for part in (sec.header, sec.footer, getattr(sec, "first_page_header", None),
                      getattr(sec, "first_page_footer", None)):
@@ -502,15 +539,24 @@ def check_money_propis(text: str, where: str) -> list[str]:
                 f"с числом НЕ проверено (fail-closed)"]
     # Перечень приложений — реквизиты прилагаемых документов, а не денежные
     # суммы документа: прописи он не несет никогда (ложная тревога круга 4).
-    # Срез перечня приложений делает money_text по СТРУКТУРЕ документа: резать
-    # склейку строкой нельзя — таблицы в ней идут после приложений и терялись.
-    # Для вызовов по .md (плоский текст) срез остаётся здесь.
+    # Но текст ПОСЛЕ перечня — часть документа: расчет цены иска почти всегда
+    # стоит в конце, и хвост, срезанный целиком, выпадал из проверки (проба
+    # круга 6, 20.08.2026). Срезаются только пункты перечня (строки с номером
+    # или маркером списка); первая не-пунктовая строка — продолжение документа
+    # и проверяется. В .docx срез делает money_text по СТРУКТУРЕ (w:numPr),
+    # здесь — плоский текст .md.
     m_app = re.search(r"(?im)^\s*(?:Приложени[ея]|ПРИЛОЖЕНИ[ЕЯ])\s*:?\s*$", text)
-    if m_app and "\n" in text[m_app.end():]:
-        hvost = text[m_app.end():]
-        # В .md после приложений идёт только перечень; в .docx money_text уже
-        # отдал тело без него, поэтому повторный срез безвреден.
-        text = text[:m_app.start()] if not hvost.strip().startswith("|") else text
+    if m_app:
+        golova = text[:m_app.start()]
+        hvost_lines = []
+        spisok = True
+        for line in text[m_app.end():].split("\n"):
+            s = line.strip()
+            if spisok and (not s or re.match(r"^(?:\d{1,2}[.)]|[—–\-•*])\s", s)):
+                continue
+            spisok = False
+            hvost_lines.append(line)
+        text = golova + "\n" + "\n".join(hvost_lines)
     # Дословная цитата нормы в кавычках-елочках воспроизводится как в законе —
     # ТРЕБОВАТЬ там пропись значит запретить цитирование (правило проекта —
     # цитировать дословно). Но пропись, которая в цитате ЕСТЬ, обязана совпадать
