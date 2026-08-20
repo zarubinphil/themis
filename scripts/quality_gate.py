@@ -220,7 +220,12 @@ def check_numbers(draft: str, sources: list[str], min_digits: int = 4) -> list[s
     for s in practice:
         n = numbers_of(open(s, encoding="utf-8", errors="ignore").read(), min_digits)
         in_practice = n if in_practice is None else (in_practice | n)
-    orphan = in_draft - (in_src or type(in_draft)())
+    # Разность именно по НАБОРУ чисел, не по счётчикам: у Counter «-» вычитает
+    # частоты, и реквизит, названный в договоре трижды, а в источнике однажды,
+    # оставался в остатке как «неподтверждённый». Найдено 20.08.2026 на договоре,
+    # где ИНН и счета законно повторяются в преамбуле, приложениях и реквизитах.
+    known = set(in_src or ())
+    orphan = type(in_draft)({t: c for t, c in in_draft.items() if t not in known})
     # Даты и годы выкидываем: «01.02» и «2026» из даты документа законно отсутствуют
     # в карте дела, а в отчёте они забивают собой реальные суммы. Даты — зона Кони.
     for tok in [t for t in orphan
@@ -410,6 +415,15 @@ def selftest() -> int:
     open(draft, "w", encoding="utf-8").write("Взыскать 9999999 руб. по договору 4412.")
     dirty = check_numbers(draft, [src])
 
+    # Реквизит, повторённый в договоре несколько раз, а в источнике названный
+    # однажды: разность по счётчикам оставляла его в остатке (баг 20.08.2026).
+    draft_rep = os.path.join(tmp, "draft_rep.md")
+    src_rep = os.path.join(tmp, "rekvizity.md")
+    open(draft_rep, "w", encoding="utf-8").write(
+        "ИНН 503612266711 в преамбуле. ИНН 503612266711 в приложении. ИНН 503612266711 в реквизитах.")
+    open(src_rep, "w", encoding="utf-8").write("ИНН 503612266711")
+    repeated = check_numbers(draft_rep, [src_rep])
+
     req_ok = os.path.join(tmp, "a.requisites.json")
     json.dump({"inn": ["7707083893"]}, open(req_ok, "w", encoding="utf-8"))
     req_bad = os.path.join(tmp, "b.requisites.json")
@@ -421,6 +435,7 @@ def selftest() -> int:
     checks = [
         ("совпавшие числа замечаний не дают", clean == []),
         ("число из воздуха ловится", len(dirty) == 1 and "9999999" in dirty[0]),
+        ("реквизит, повторённый в документе, подтверждённым и остаётся", repeated == []),
         # Практика — не источник фактов дела. Число из ЧУЖОГО судебного акта
         # раньше входило в общий котёл и легализовало выдуманную сумму доверителя.
         ("число, найденное только в практике, замечание не снимает",

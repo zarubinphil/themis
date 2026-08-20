@@ -82,6 +82,10 @@ knowledge/refactor-plan-*.md
 knowledge/multi-cli-plan-*.md
 knowledge/integrations-plan-*.md
 knowledge/PROMPT-*.md
+# Журнал правок доверителя: по своей конвенции несёт «дата · дело», то есть
+# фамилию человека в каждой строке (пойман pd_guard 20.08.2026). Каноничен для
+# doc-drafter, живёт локально; формат описан в knowledge/redlines.template.md.
+knowledge/redlines.md
 
 # Автономный цикл: журнал, отчёт и рабочие копии ролей — рантайм
 .autoloop/

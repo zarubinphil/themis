@@ -37,6 +37,15 @@ SPEC_MARGINS_MM_L3 = {**SPEC_MARGINS_MM, "left": 35}
 # штампа экспедиции суда там ни при чем, а поля симметричнее и читать удобнее.
 # Шрифты, кегли, интервалы и нумерация страниц остаются общими для всего.
 SPEC_MARGINS_MM_DOGOVOR = {"top": 20, "bottom": 20, "left": 25, "right": 20}
+# Бланк договора адвокатского центра (DOCX_FORMATTING.md §8). Полоса набора 185 мм:
+# уже — и таблицы фирменной шапки сжимаются, заголовки начинают рваться по слогам.
+# Профиль установлен правкой владельца 20.08.2026 на договоре оказания услуг.
+SPEC_MARGINS_MM_ADVOKAT = {"top": 20, "bottom": 20, "left": 15, "right": 10}
+SPEC_SIZES_ADVOKAT = {7.0, 8.0, 9.0, 9.5, 10.0, 11.0, 12.0}
+SPEC_LINE_SPACING_ADVOKAT = 1.0
+# Бланк несет два отступа: 1,0 см у преамбул и 1,25 см у трех абзацев-продолжений
+# внутри пунктов. Оба пришли из фирменного образца, править их — ломать бланк.
+SPEC_INDENT_CM_ADVOKAT = {1.0, 1.25}
 # ОДНА гарнитура на документ — PT Serif. Решение владельца 04.08.2026, отменяет
 # набор из четырех гарнитур от 03.08.2026. PT Serif свободен (SIL OFL), кириллица
 # родная; закрывает ГОСТ Р 7.0.97-2016 п. 3.3 о бесплатных шрифтах. Любая другая
@@ -83,22 +92,28 @@ def doc_text(doc) -> str:
     return "\n".join(p.text for p in iter_paragraphs(doc))
 
 
-def check_docx(path: str, l3: bool = False, dogovor: bool = False) -> list[str]:
+def check_docx(path: str, l3: bool = False, dogovor: bool = False,
+               advokat: bool = False) -> list[str]:
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     problems: list[str] = []
     doc = Document(path)
     sec = doc.sections[0]
-    spec = (SPEC_MARGINS_MM_DOGOVOR if dogovor
+    spec = (SPEC_MARGINS_MM_ADVOKAT if advokat
+            else SPEC_MARGINS_MM_DOGOVOR if dogovor
             else SPEC_MARGINS_MM_L3 if l3 else SPEC_MARGINS_MM)
+    sizes_spec = SPEC_SIZES_ADVOKAT if advokat else SPEC_SIZES
+    spacing_spec = SPEC_LINE_SPACING_ADVOKAT if advokat else SPEC_LINE_SPACING
+    indent_spec = SPEC_INDENT_CM_ADVOKAT if advokat else {SPEC_INDENT_CM}
     got = {"top": sec.top_margin.mm, "bottom": sec.bottom_margin.mm,
            "left": sec.left_margin.mm, "right": sec.right_margin.mm}
     for side, want in spec.items():
         if abs(got[side] - want) > TOLERANCE_MM:
             problems.append(f"поле {side}: {got[side]:.0f} мм вместо {want} мм"
                             + (" (L3/кассация ВС)" if l3 and side == "left" else "")
-                            + (" (профиль договора)" if dogovor else ""))
+                            + (" (бланк адвокатского центра)" if advokat else "")
+                            + (" (профиль договора)" if dogovor and not advokat else ""))
 
     fonts, sizes, italic, underline = set(), set(), 0, 0
     for p in iter_paragraphs(doc):
@@ -115,13 +130,15 @@ def check_docx(path: str, l3: bool = False, dogovor: bool = False) -> list[str]:
     if alien_fonts:
         problems.append(f"чужие шрифты: {', '.join(sorted(alien_fonts))} "
                         f"(допустимы только {', '.join(sorted(SPEC_FONTS))})")
-    alien_sizes = sizes - SPEC_SIZES
+    alien_sizes = sizes - sizes_spec
     if alien_sizes:
         problems.append(f"кегли вне спецификации: {sorted(alien_sizes)} "
-                        f"(допустимы {sorted(SPEC_SIZES)})")
+                        f"(допустимы {sorted(sizes_spec)})")
     if italic:
         problems.append(f"курсив в {italic} фрагментах — спецификация запрещает")
-    if underline:
+    # В бланке подчеркивание — это поля под заполнение («Тел. ______») и место
+    # под подпись, а не оформление текста: запрет §3 писан для судебных документов.
+    if underline and not advokat:
         problems.append(f"подчеркивание в {underline} фрагментах — спецификация запрещает")
 
     # Гиперссылка — отдельная ловушка: ее runs лежат внутри w:hyperlink, в
@@ -147,9 +164,9 @@ def check_docx(path: str, l3: bool = False, dogovor: bool = False) -> list[str]:
 
     spacings = {round(p.paragraph_format.line_spacing, 2) for p in body
                 if p.paragraph_format.line_spacing}
-    bad_spacing = spacings - {SPEC_LINE_SPACING}
+    bad_spacing = spacings - {spacing_spec}
     if bad_spacing:
-        problems.append(f"межстрочный интервал {sorted(bad_spacing)} вместо {SPEC_LINE_SPACING}")
+        problems.append(f"межстрочный интервал {sorted(bad_spacing)} вместо {spacing_spec}")
 
     # Отрицательный отступ первой строки — не ошибка, если это висячий отступ
     # нумерованного абзаца: left_indent положителен и гасит его ровно. Такой
@@ -166,15 +183,15 @@ def check_docx(path: str, l3: bool = False, dogovor: bool = False) -> list[str]:
             continue  # корректный висячий отступ нумерованного абзаца
         if abs(fi_cm) <= 0.05 and li_cm > 0:
             continue  # блок-цитата: отступ слева есть, первой строки нет
-        if abs(fi_cm - SPEC_INDENT_CM) > 0.05:
+        if all(abs(fi_cm - want) > 0.05 for want in indent_spec):
             bad_indent.add(fi_cm)
     if bad_indent:
-        problems.append(f"абзацный отступ {sorted(bad_indent)} см вместо {SPEC_INDENT_CM} см "
+        problems.append(f"абзацный отступ {sorted(bad_indent)} см вместо {sorted(indent_spec)} см "
                         "(висячий отступ нумерованного абзаца засчитывается, если "
                         "левый отступ гасит его ровно)")
 
     text = doc_text(doc)
-    problems += check_text(text, os.path.basename(path), dogovor=dogovor)
+    problems += check_text(text, os.path.basename(path), dogovor=dogovor or advokat)
 
     # Нумерация страниц — безусловное требование протокола (решение владельца
     # 03.08.2026). Порога по объему больше нет: короткий документ тоже может
@@ -695,6 +712,9 @@ def main() -> int:
     ap.add_argument("--l3", action="store_true", help="L3 или кассация ВС: левое поле 35 мм")
     ap.add_argument("--dogovor", action="store_true",
                     help="договор и прочее несудебное: поля 20/20/25/20 мм")
+    ap.add_argument("--dogovor-advokat", dest="advokat", action="store_true",
+                    help="бланк договора адвокатского центра (DOCX_FORMATTING.md §8): "
+                         "поля 20/20/15/10 мм, кегли бланка, подчеркивание допустимо")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
@@ -709,7 +729,7 @@ def main() -> int:
         print(f"нет файла {a.docx}", file=sys.stderr)
         return 2
 
-    problems = check_docx(a.docx, a.l3, a.dogovor)
+    problems = check_docx(a.docx, a.l3, a.dogovor, a.advokat)
     body, items = docx_appendices(a.docx)
     if items:
         problems += check_attachments(body, items)
@@ -724,7 +744,7 @@ def main() -> int:
         # ось — иначе незаполненное поле переживает пересборку и всплывает в
         # следующей редакции (проба 20.08.2026).
         md_text = open(a.md, encoding="utf-8").read()
-        problems += check_text(md_text, os.path.basename(a.md), dogovor=a.dogovor)
+        problems += check_text(md_text, os.path.basename(a.md), dogovor=a.dogovor or a.advokat)
 
     if not problems:
         print(f"✓ {os.path.basename(a.docx)}: формат и согласованность в порядке")
