@@ -31,12 +31,13 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import case_paths as cp  # noqa: E402
+from create_docx import DocBuilder  # noqa: E402
 
 READY = "ГОТОВ К ПОДАЧЕ"
 SCAN = Path.home() / ".claude/skills/humanizer-legal/scripts/scan_legal.sh"
-# Категории scan_legal.sh, при которых документ не выпускается. Совпадает с
-# прежним списком в DocBuilder — перенесено, а не переизобретено.
-BLOCKING = ("ПЛЕЙСХОЛДЕР", "AI-ПАТТЕРН", "КАНЦЕЛЯРИТ-ШТАМП")
+# Категории scan_legal.sh, при которых документ не выпускается. Источник один:
+# DocBuilder.HUMANIZER_BLOCKERS, чтобы verdict и сборка .docx не расходились.
+BLOCKING = DocBuilder.HUMANIZER_BLOCKERS
 
 
 def sha(path):
@@ -73,15 +74,44 @@ def scan(md):
         print(f"ВНИМАНИЕ: humanizer-legal не отработал ({e})", file=sys.stderr)
         return []
     out = (p.stdout or "") + (p.stderr or "")
-    return [c for c in BLOCKING if c in out]
+    hits = []
+    for line in out.splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) == 2 and parts[0].isdigit() and int(parts[0]) > 0:
+            if parts[1] in BLOCKING:
+                hits.append(f"{parts[1]} ({parts[0]})")
+    return hits
 
 
 # Сумма, за ней (необязательно) круглые скобки, за ними слово валюты. Пропись
 # обязана стоять МЕЖДУ числом и словом валюты: «1 000 (одна тысяча) рублей» —
 # решение владельца 19.08.2026. Даты, номера статей/дел/страниц, проценты и
 # ИНН — не деньги, этот шаблон их не задевает (требует слова «рубл*»/«коп*»).
-_MONEY_RE = re.compile(
-    r"(\d{1,3}(?:[  ]\d{3})*(?:[.,]\d+)?)\s*(\([^()]*\))?\s*(рубл\w*|руб\.|коп\w*|коп\.)")
+_NUM = r"\d[\d  .]*(?:[,.]\d{1,2})?"
+_CUR = r"(?:руб(?:\.|л\w*)?|\u20bd|₽|коп(?:\.|е\w*)?|доллар\w*|долл\.?|usd|\$)"
+_CUR_END = r"(?![A-Za-zА-Яа-яЁё])"
+_MONEY_AFTER_RE = re.compile(rf"(?<!\d)({_NUM})\s*(\([^()]*\))?\s*({_CUR}){_CUR_END}", re.I)
+_MONEY_PREFIX_RE = re.compile(rf"(?<!\w)({_CUR})\s*({_NUM})\s*(\([^()]*\))?", re.I)
+_MONEY_PARENS_RE = re.compile(rf"(?<!\d)({_NUM})\s*(\([^()]*{_CUR}[^()]*\))", re.I)
+_MONEY_BEFORE_RE = re.compile(
+    rf"[а-яё][а-яё\s-]{{2,90}}\(\s*({_NUM})\s*\)\s*({_CUR}){_CUR_END}", re.I)
+_PROPIS_WORD_RE = re.compile(
+    r"\b(?:ноль|один|одна|два|две|три|четыр|пят|шест|сем|восем|девят|десят|"
+    r"сто|ста|сот|тысяч|миллион|миллиард|рубл|копе)\w*",
+    re.I)
+_PLACEHOLDER_RE = re.compile(
+    r"\b(?:TODO|FIXME|XXXXX+|XXX+)\b|[\[(]\s*"
+    r"(?:указать|вставить|заполнить|фио|ф\.?\s*и\.?\s*о\.?|сумм[ауеы]?|"
+    r"дата|адрес|инн|огрн|наименование)[^)\]]*[\])]",
+    re.I)
+
+
+def _has_propis_before_number(text, start):
+    """Разрешает форму «сто тысяч рублей (100 000 руб.)»."""
+    prefix = text[:start].rstrip()
+    if not prefix.endswith("("):
+        return False
+    return bool(_PROPIS_WORD_RE.search(prefix[-140:]))
 
 
 def format_problems(md):
@@ -97,10 +127,24 @@ def format_problems(md):
     if square:
         problems.append(f"квадратные скобки — {square} шт. (в практике проекта — "
                         "только круглые)")
-    for num, parens, currency in _MONEY_RE.findall(text):
+    for m in _PLACEHOLDER_RE.finditer(text):
+        problems.append(f"незаполненная вставка «{m.group(0)}»")
+    before_nums = {m.group(1) for m in _MONEY_BEFORE_RE.finditer(text)}
+    for m in _MONEY_AFTER_RE.finditer(text):
+        num, parens, currency = m.groups()
+        if num in before_nums:
+            continue
+        if _has_propis_before_number(text, m.start()):
+            continue
         if not parens or not re.search(r"[а-яёА-ЯЁ]", parens):
             problems.append(f"сумма «{num} {currency}» без прописи в круглых скобках "
                             f"между числом и словом валюты")
+    for currency, num, parens in _MONEY_PREFIX_RE.findall(text):
+        if not parens or not re.search(r"[а-яёА-ЯЁ]", parens):
+            problems.append(f"сумма «{currency}{num}» без прописи в круглых скобках")
+    for num, parens in _MONEY_PARENS_RE.findall(text):
+        if not re.search(r"[а-яёА-ЯЁ]", parens):
+            problems.append(f"сумма «{num}» без прописи в круглых скобках")
     return problems
 
 
@@ -149,6 +193,9 @@ def check(md):
     md = Path(md)
     if not md.is_file():
         return [f"{md}: файла нет — собирать не из чего"]
+    problems = format_problems(md)
+    if problems:
+        return [f"{md.name}: брак формата — {p}" for p in problems]
     now = sha(md)
     hist = history(md)
     if not hist:
