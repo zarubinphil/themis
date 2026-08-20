@@ -4370,6 +4370,41 @@ def check_verdikt_polnota():
     return fails
 
 
+def check_vtoraya_tochka_sborki():
+    """9.19: любая точка сборки судебного документа стоит под вердиктом.
+
+    Круг 7, доказано запуском координатора: `md_to_docx_universal.py` положил
+    .docx прямо в GOTOVO без единого вердикта — «Создано: …/GOTOVO/hod.docx»,
+    код 0. Рядом живут `md_to_docx.py` и `md_to_docx_vozrazhenie.py`.
+
+    Гейт протокола, вердиктный гейт и правило «.docx собирается один раз,
+    после Кони» держатся на ОДНОМ сборщике. Пока рядом стоит второй вход,
+    всё это соблюдается добровольно, а документ ложится на стол юристу
+    непроверенным.
+    """
+    fails = []
+    sborshchiki = sorted(SCRIPTS.glob("md_to_docx*.py"))
+    if not sborshchiki:
+        return fails
+    with tempfile.TemporaryDirectory(prefix="stage9-vtorsborka-") as tmp:
+        td = Path(tmp)
+        delo = td / "cases" / FAM_LAT / "delo-2026"
+        (delo / "GOTOVO").mkdir(parents=True)
+        (delo / ".agent" / "drafts").mkdir(parents=True)
+        md = delo / ".agent" / "drafts" / "hod.md"
+        md.write_text("# ХОДАТАЙСТВО\n\nПрошу истребовать доказательства "
+                      "у третьего лица.\n", encoding="utf-8")
+        for s in sborshchiki:
+            out_doc = delo / "GOTOVO" / f"{s.stem}.docx"
+            py(s, str(md), str(out_doc), cwd=td)
+            if out_doc.is_file():
+                fails.append((f"vtoraya-sborka:{s.name}", f"{s.name} собрал документ в "
+                              f"GOTOVO без вердикта Кони: пока рядом со сборщиком стоит "
+                              f"второй вход, вердикт и равенство одобренному тексту "
+                              f"соблюдаются добровольно"))
+    return fails
+
+
 # ── Реестр проверок ──────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -4462,6 +4497,7 @@ CHECKS = [
     ("9.19 обезличивание молчит на юробиходе", check_pii_obihod_yurteksta),
     ("9.19 heredoc, $HOME и целость интейка", check_heredoc_home_i_intake),
     ("9.19 одобрение покрывает весь документ", check_verdikt_polnota),
+    ("9.19 точка сборки документа одна", check_vtoraya_tochka_sborki),
 ]
 
 
