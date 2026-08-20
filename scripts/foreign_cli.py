@@ -280,6 +280,29 @@ def main() -> int:
     if not a.prompt:
         ap.error("нужен --prompt, либо --selftest")
     if a.role:
+        # Класс роли определяем ДО назначения исполнителя: неизвестна роль —
+        # считаем pd (fail-closed). Роль класса pd за границу процесса по имени
+        # не уходит: имя «claude» в PATH не есть тождество харнесса — заглушка
+        # с тем же именем, положенная в PATH, забирает роль целиком (проба
+        # круга 6). Материалы дела — адвокатская тайна (ст. 8 ФЗ № 63-ФЗ),
+        # и pd-роль исполняет только основной процесс координатора, не чужой
+        # бинарник, найденный по имени.
+        sys.path.insert(0, str(SCRIPTS))
+        try:
+            import cli_router
+            cls = cli_router.role_class(a.role)
+        except Exception:
+            cls = "pd"
+        if cls == "pd":
+            exe = getattr(cli_router, "HARNESS", "claude")
+            resolved = shutil.which(exe) or exe   # факт: куда имя РЕШАЕТСЯ в этом PATH
+            zapisat_zhurnal(Path(a.log) if a.log else None, resolved, 0, "",
+                            f"отказ: роль класса pd ({a.role}) не уходит по имени "
+                            f"из PATH — имя не есть тождество харнесса")
+            return _otkaz(f"роль класса pd ({a.role}) не исполняется чужим процессом "
+                          f"по имени из PATH: имя не есть тождество харнесса, а слово "
+                          f"в PATH подменяется одной строкой. Разрешённый путь: "
+                          f"{resolved}. pd-роль ведёт основной процесс координатора")
         router = [sys.executable, str(SCRIPTS / "cli_router.py"), "--role", a.role,
                   "--registry", a.registry, "--json"]
         if a.cache:
