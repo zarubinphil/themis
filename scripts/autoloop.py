@@ -78,15 +78,30 @@ def run(argv, cwd=ROOT, timeout=1800, env=None):
 
 # ── Заморозка: что автономному циклу трогать нельзя ──────────────────────────
 
+# Мусор операционной системы: Finder переписывает .DS_Store при простом открытии
+# папки, Word кладёт замок рядом с открытым документом. Материалами дела они не
+# являются, а отпечаток двигают — 20.08.2026 из-за этого встал многочасовой прогон,
+# при том что ни один файл дела не менялся шесть часов. Сторож, срабатывающий на
+# обиходе, останавливает работу вместо того, чтобы её защищать.
+MUSOR_OS = (".DS_Store", ".localized", ".Spotlight-V100", ".fseventsd", ".TemporaryItems")
+
+
+def _musor(name):
+    return name in MUSOR_OS or name.startswith("~$") or name.endswith(".tmp")
+
+
 def tree_fingerprint(path):
     """Отпечаток дерева по (путь, размер, mtime). Читать 21 ГБ содержимого не нужно:
-    задача — заметить ЛЮБОЕ касание, а не сверить байты (для этого есть intake_backup)."""
+    задача — заметить ЛЮБОЕ касание, а не сверить байты (для этого есть intake_backup).
+
+    Мусор ОС в отпечаток не входит: см. MUSOR_OS. Правка, создание и удаление
+    настоящего файла дела отпечаток меняют по-прежнему."""
     h = hashlib.sha256()
     if not os.path.isdir(path):
         return "нет-каталога"
     for dirpath, dirnames, filenames in os.walk(path):
         dirnames.sort()
-        for name in sorted(filenames):
+        for name in sorted(n for n in filenames if not _musor(n)):
             full = os.path.join(dirpath, name)
             try:
                 st = os.stat(full)
@@ -591,6 +606,19 @@ def selftest():
             f.write("правка\n")
         assert tree_fingerprint(os.path.join(tmp, "cases")) != fp1, \
             "правка данных дела не изменила отпечаток — заморозка не сторожит"
+        # Пара: мусор ОС отпечаток НЕ двигает, иначе открытая в Finder папка
+        # роняет ночной прогон (20.08.2026).
+        fp2 = tree_fingerprint(os.path.join(tmp, "cases"))
+        for musor in (".DS_Store", "~$isk.docx", "kesh.tmp"):
+            with open(os.path.join(d, musor), "w", encoding="utf-8") as f:
+                f.write("мусор ос\n")
+        assert tree_fingerprint(os.path.join(tmp, "cases")) == fp2, \
+            "мусор ОС сдвинул отпечаток — сторож останавливает прогон на пустом месте"
+        # И при этом новый НАСТОЯЩИЙ файл дела по-прежнему виден.
+        with open(os.path.join(d, "novyy_material.pdf"), "w", encoding="utf-8") as f:
+            f.write("материал\n")
+        assert tree_fingerprint(os.path.join(tmp, "cases")) != fp2, \
+            "новый файл дела не изменил отпечаток — заморозка ослепла"
         assert tree_fingerprint(os.path.join(tmp, "нет")) == "нет-каталога"
 
     # Спин: одинаковый отпечаток подряд обязан копиться
