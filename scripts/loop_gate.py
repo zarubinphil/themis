@@ -185,26 +185,73 @@ def anchor_spec(spec, root=ROOT):
     return 0
 
 
+def _claude_guard_registered(path):
+    """Сторож стоит в блоке PreToolUse, а не упомянут словом в файле.
+
+    Слово в комментарии ловится подстрокой и выглядит как регистрация; git и
+    харнесс читают структуру. Правило смотрит туда же, куда смотрит исполнитель.
+    """
+    try:
+        with open(path, encoding="utf-8", errors="ignore") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return False
+    hooks = (data.get("hooks") or {}).get("PreToolUse") or []
+    for entry in hooks if isinstance(hooks, list) else []:
+        for h in (entry.get("hooks") or []) if isinstance(entry, dict) else []:
+            if "claude_guard" in str(h.get("command", "")):
+                return True
+    return False
+
+
 def check_hooks(root=ROOT):
-    """Регистрация сторожей, а не их наличие на диске: пустой settings.json или
-    снесённый pre-commit оставляли гейт зелёным, хотя сторож не сторожит вовсе."""
+    """Сторож РЕАЛЬНО СРАБОТАЕТ, а не лежит на диске.
+
+    Правило смотрит на цель, а не на имя файла: git зовёт хуки из каталога,
+    который называет он сам (`core.hooksPath` уводит их куда угодно, вплоть до
+    /dev/null), и только исполняемые. Проба 20.08.2026: при `core.hooksPath
+    /dev/null`, при снятом бите исполняемости и при `claude_guard`, упомянутом
+    словом в комментарии рядом с пустым `PreToolUse`, прежняя проверка «файл
+    есть и содержит слово» возвращала зелёный — состояние, неотличимое от
+    рабочего, хотя ни один сторож не сторожил.
+    """
     fails = []
-    checks = (
-        (os.path.join(root, ".git", "hooks", "pre-commit"), "pd_guard", "pre-commit"),
-        (os.path.join(root, ".git", "hooks", "commit-msg"), "pd_guard", "commit-msg"),
-        (os.path.join(root, ".claude", "settings.json"), "claude_guard", ".claude/settings.json"),
-    )
-    for path, needle, what in checks:
+    code, out = run(["git", "rev-parse", "--git-path", "hooks"], cwd=root)
+    hooks_dir = out.strip() if code == 0 and out.strip() else os.path.join(".git", "hooks")
+    if not os.path.isabs(hooks_dir):
+        hooks_dir = os.path.join(root, hooks_dir)
+    # `core.hooksPath` в системный каталог — тот же обход, только вежливее.
+    code, cfg = run(["git", "config", "--get", "core.hooksPath"], cwd=root)
+    if code == 0 and cfg.strip() and not os.path.realpath(
+            os.path.join(root, os.path.expanduser(cfg.strip()))).startswith(os.path.realpath(root)):
+        fails.append(("hooks:hookspath",
+                      f"core.hooksPath уводит хуки вне репозитория ({cfg.strip()}) — "
+                      f"файлы на месте, но git зовёт не их"))
+
+    for name in ("pre-commit", "commit-msg"):
+        path = os.path.join(hooks_dir, name)
         if not os.path.isfile(path):
-            fails.append((f"hooks:missing-{what}", f"{what} не зарегистрирован — файла нет"))
+            fails.append((f"hooks:missing-{name}",
+                          f"{name} не зарегистрирован — в каталоге хуков git его нет"))
             continue
+        if not os.access(path, os.X_OK):
+            fails.append((f"hooks:chmod-{name}",
+                          f"{name} не исполняем — git молча пропускает такой хук"))
         try:
             with open(path, encoding="utf-8", errors="ignore") as f:
                 text = f.read()
         except OSError:
             text = ""
-        if needle not in text:
-            fails.append((f"hooks:empty-{what}", f"{what} есть, но не подключает {needle}"))
+        if "pd_guard" not in text:
+            fails.append((f"hooks:empty-{name}", f"{name} есть, но не подключает pd_guard"))
+
+    settings = os.path.join(root, ".claude", "settings.json")
+    if not os.path.isfile(settings):
+        fails.append(("hooks:missing-settings", ".claude/settings.json не зарегистрирован — файла нет"))
+    elif not _claude_guard_registered(settings):
+        fails.append(("hooks:empty-settings",
+                      ".claude/settings.json есть, но claude_guard не стоит командой "
+                      "в блоке PreToolUse — упоминание словом регистрацией не считается"))
     return fails
 
 
@@ -350,17 +397,46 @@ def selftest():
             f.write("---\nname: kto\ndescription: проба\n---\n\nтело\n")
         assert check_prompts(tmp), "отсутствующее производное не покрасило гейт"
 
-        # Регистрация сторожей: голое дерево краснеет, зарегистрированное — зеленеет.
+        # Регистрация сторожей: пара «сторож работает» + три обхода, при которых
+        # он лежит на диске, но git его не зовёт (проба 20.08.2026).
+        subprocess.run(["git", "init", "-q"], cwd=tmp, capture_output=True)
         assert check_hooks(tmp), "голое дерево без хуков объявлено зарегистрированным"
-        hooks_dir = os.path.join(tmp, ".git", "hooks")
-        os.makedirs(hooks_dir, exist_ok=True)
-        for hname, arg in (("pre-commit", "--staged"), ("commit-msg", '--msg "$1"')):
-            with open(os.path.join(hooks_dir, hname), "w", encoding="utf-8") as f:
+        hp = os.path.join(tmp, ".git", "hooks")
+        os.makedirs(hp, exist_ok=True)
+        for name, arg in (("pre-commit", "--staged"), ("commit-msg", '--msg "$1"')):
+            f_path = os.path.join(hp, name)
+            with open(f_path, "w", encoding="utf-8") as f:
                 f.write(f"#!/bin/sh\nexec python3 scripts/pd_guard.py {arg}\n")
-        os.makedirs(os.path.join(tmp, ".claude"), exist_ok=True)
-        with open(os.path.join(tmp, ".claude", "settings.json"), "w", encoding="utf-8") as f:
-            f.write('{"hooks": {"PreToolUse": [{"command": "python3 scripts/claude_guard.py"}]}}')
-        assert check_hooks(tmp) == [], "зарегистрированные сторожа не признаны"
+            os.chmod(f_path, 0o755)
+        cl = os.path.join(tmp, ".claude")
+        os.makedirs(cl, exist_ok=True)
+        settings = os.path.join(cl, "settings.json")
+        rabochiy = {"hooks": {"PreToolUse": [{"matcher": "Write|Edit|Bash|Read", "hooks": [
+            {"type": "command", "command": "python3 scripts/claude_guard.py"}]}]}}
+        with open(settings, "w", encoding="utf-8") as f:
+            json.dump(rabochiy, f)
+        assert check_hooks(tmp) == [], f"рабочие сторожа не признаны: {check_hooks(tmp)}"
+
+        subprocess.run(["git", "config", "core.hooksPath", "/dev/null"], cwd=tmp,
+                       capture_output=True)
+        assert any(i == "hooks:hookspath" for i, _ in check_hooks(tmp)), \
+            "core.hooksPath /dev/null не пойман — git не зовёт хуки, гейт зелен"
+        subprocess.run(["git", "config", "--unset", "core.hooksPath"], cwd=tmp,
+                       capture_output=True)
+
+        os.chmod(os.path.join(hp, "pre-commit"), 0o644)
+        assert any(i.startswith("hooks:chmod") for i, _ in check_hooks(tmp)), \
+            "неисполняемый хук не пойман — git молча пропускает такой"
+        os.chmod(os.path.join(hp, "pre-commit"), 0o755)
+
+        with open(settings, "w", encoding="utf-8") as f:
+            json.dump({"_комментарий": "раньше был claude_guard",
+                       "hooks": {"PreToolUse": []}}, f, ensure_ascii=False)
+        assert any(i == "hooks:empty-settings" for i, _ in check_hooks(tmp)), \
+            "упоминание сторожа словом принято за регистрацию"
+        with open(settings, "w", encoding="utf-8") as f:
+            json.dump(rabochiy, f)
+        assert check_hooks(tmp) == [], "восстановленная регистрация не признана"
 
     # Якорь приёмки: своя песочница-репозиторий, вне текущего tmp выше (нужен git).
     with tempfile.TemporaryDirectory(prefix="loopgate-anchor-") as agit:
