@@ -11,6 +11,11 @@
 5. Запись артефактов шагов вне порядка протокола (см. _workflow_gate).
 Невалидный JSON на входе — тоже блок: сторож, который молча перестал сторожить, хуже
 отсутствующего. Предупреждает (не блокирует) при работе вне корня проекта.
+
+Сторож судит ЦЕЛЬ, а не строку (враждебная проба 20.08.2026): относительный путь
+резолвится через cwd из payload (Bash — через ведущий `cd`), симлинк цели
+разворачивается, а «наши дела» — только cases/ ЭТОГО проекта, не любой каталог со
+словом cases (чужой репозиторий, /tmp/cases — мимо).
 Проверка: python3 scripts/claude_guard.py --selftest
 
 Правила-инварианты продублированы текстом в .claude/CLAUDE.md;
@@ -25,6 +30,62 @@ import sys
 def block(msg: str) -> None:
     print(msg, file=sys.stderr)
     sys.exit(2)
+
+
+# Корень НАШЕГО проекта и его cases/. Сторож судит материалы наших дел, а не любой
+# путь со словом «cases»: чужой репозиторий под /tmp/chuzhoy/cases и /tmp/cases — не
+# наши дела (проба 20.08.2026 ловила их как свои — сторож с такой тревогой снимают в
+# первый день). Якорь — расположение самого сторожа: он всегда в {корень}/scripts/.
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+PROJECT_CASES = os.path.join(PROJECT_ROOT, "cases")
+
+
+def _resolve(path: str, base: str) -> str:
+    """Абсолютный нормализованный путь цели. Относительный — от base (cwd из payload,
+    ведущий `cd` для Bash: харнесс относительные пути принимает, а цель по ним всё
+    равно вычислима). Затем разворачиваем симлинк самой цели: подмена файла-ссылки
+    бьёт по оригиналу, судить надо назначение, а не имя ссылки."""
+    if not path:
+        return path
+    p = os.path.expanduser(path.strip("'\""))
+    if not os.path.isabs(p):
+        p = os.path.join(base, p)
+    return os.path.realpath(p)     # normpath + разбор симлинков; несуществующий путь — лексически
+
+
+def _under_cases(abspath: str) -> bool:
+    """abspath внутри cases/ НАШЕГО проекта (а не любого каталога со словом cases)."""
+    if not abspath:
+        return False
+    try:
+        rel = os.path.relpath(abspath, PROJECT_CASES)
+    except ValueError:             # разные тома (Windows) — точно не наши дела
+        return False
+    return not (rel == os.pardir or rel.startswith(os.pardir + os.sep))
+
+
+def _case_rel(abspath: str):
+    """Компоненты пути цели относительно наших cases/: [клиент, дело, ...хвост].
+    None — цель вне наших дел."""
+    if not _under_cases(abspath):
+        return None
+    return os.path.relpath(abspath, PROJECT_CASES).replace(os.sep, "/").split("/")
+
+
+_LEADING_CD_RE = re.compile(r"^\s*cd\s+([^\s;&|]+)\s*(?:&&|;|\|)")
+
+
+def _base_dir(cmd: str, payload: dict) -> str:
+    """База относительных целей Bash: ведущий `cd DIR &&|;` → cwd из payload → cwd процесса."""
+    m = _LEADING_CD_RE.match(cmd)
+    base = m.group(1).strip("'\"") if m else ""
+    if not base:
+        cwd = payload.get("cwd")
+        base = cwd if isinstance(cwd, str) and cwd else os.getcwd()
+    base = os.path.expanduser(base)
+    if not os.path.isabs(base):
+        base = os.path.join(os.getcwd(), base)
+    return base
 
 
 def _is_new_intake_file(cmd: str) -> bool:
@@ -82,25 +143,21 @@ PRACTICE_MARKER = r"## (СОВЕТ ЗАВЕРШ|FAST-СИНТЕЗ ФЕМИДЫ)"
 
 
 def _workflow_gate(p: str) -> None:
-    """Порядок шагов протокола — детерминированно.
+    """Порядок шагов протокола — детерминированно. p — уже абсолютная цель записи.
 
     Запись артефакта шага N блокируется, пока нет маркера шага N-1 на диске:
       practice.md   ← требует «## КАРТА ГОТОВА ✓» в knowledge-map.md
       positions.md  ← требует маркер практики (СОВЕТ ЗАВЕРШЕН либо FAST-СИНТЕЗ)
       .agent/drafts/*   ← требует оба маркера (кроме _working/ и _baselines/)
     """
-    norm = p.replace("\\", "/")
-    parts = norm.split("/")
-    if "cases" not in parts:
+    rel = _case_rel(p)
+    # структура cases/{клиент}/{дело}/{хвост...}; служебные папки (_templates, _logs) — мимо
+    if rel is None or len(rel) < 3 or rel[0].startswith("_"):
         return
-    i = parts.index("cases")
-    # структура cases/{клиент}/{дело}/... ; служебные папки (_templates, _logs) — мимо
-    if len(parts) < i + 4 or parts[i + 1].startswith("_"):
-        return
-    case_root = "/".join(parts[: i + 3])
-    km = case_root + "/.agent/context/knowledge-map.md"
-    pr = case_root + "/.agent/context/practice.md"
-    tail = "/".join(parts[i + 3:])
+    case_root = os.path.join(PROJECT_CASES, rel[0], rel[1])
+    km = os.path.join(case_root, ".agent/context/knowledge-map.md")
+    pr = os.path.join(case_root, ".agent/context/practice.md")
+    tail = "/".join(rel[2:])
 
     if tail == ".agent/context/practice.md" and not _has_marker(km, r"## КАРТА ГОТОВА ✓"):
         block(
@@ -118,8 +175,9 @@ def _workflow_gate(p: str) -> None:
     # Кухня и слой человека сторожатся ОДИНАКОВО. После переезда на два слоя
     # (19.08.2026) документ мог лечь прямо в GOTOVO/ мимо конвейера — то есть
     # мимо маркеров попасть сразу на стол юристу, минуя и карту, и практику.
-    guarded = (tail.startswith(".agent/drafts/") or tail.startswith("GOTOVO/"))
-    if guarded and "/_working/" not in norm and "/_baselines/" not in norm:
+    guarded = tail.startswith(".agent/drafts/") or tail.startswith("GOTOVO/")
+    exempt = "_working" in rel[2:] or "_baselines" in rel[2:]
+    if guarded and not exempt:
         if not _has_marker(km, r"## КАРТА ГОТОВА ✓") or not _has_marker(pr, PRACTICE_MARKER):
             where = "GOTOVO/" if tail.startswith("GOTOVO/") else ".agent/drafts/"
             block(
@@ -143,23 +201,17 @@ CODE_EXT = ("py", "sh", "bash", "zsh")
 RASTER_EXT = ("png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp")
 
 
-def _service_dir(parts) -> bool:
-    """cases/_assets, cases/_templates, cases/_logs — служебное хозяйство системы,
-    а не дело. Там растр законен: `cases/_assets/подпись.png` — подпись владельца,
-    её читает sign_and_pdf.py. Правило рендеров туда не распространяется."""
-    i = parts.index("cases")
-    return len(parts) > i + 1 and parts[i + 1].startswith("_")
-
-
 def _cases_write_gate(paths) -> None:
-    """Что нельзя класть под cases/. Пути — уже вычисленные цели записи."""
+    """Что нельзя класть под cases/ НАШЕГО проекта. Пути — уже абсолютные цели записи."""
     for p in paths:
-        norm = p.replace("\\", "/")
-        parts = norm.split("/")
-        if "cases" not in parts:
+        rel = _case_rel(p)
+        if rel is None:
             continue
-        ext = os.path.splitext(norm)[1].lower().lstrip(".")
-        if ext in RASTER_EXT and _service_dir(parts):
+        ext = os.path.splitext(p)[1].lower().lstrip(".")
+        # cases/_assets, cases/_templates, cases/_logs — служебное хозяйство системы, а
+        # не дело. Там растр законен: `cases/_assets/подпись.png` — подпись владельца.
+        service = rel[0].startswith("_")
+        if ext in RASTER_EXT and service:
             continue
         if ext in CODE_EXT:
             block(
@@ -168,7 +220,7 @@ def _cases_write_gate(paths) -> None:
                 "накопились 84 скрипта, 15 с запрещённым шрифтом). Прибор пишется в scripts/, "
                 "разовая обработка — во временный каталог."
             )
-        if ext in RASTER_EXT and "/00_intake/" not in norm:
+        if ext in RASTER_EXT and "00_intake" not in rel:
             block(
                 f"БЛОК: растр (.{ext}) под cases/ вне 00_intake запрещён — рендер страницы "
                 "производен и место ему в кеше: --render-dir /tmp/{дело}/{имя}. "
@@ -192,11 +244,19 @@ _REDIRECT_RE = re.compile(r">>?\s*\|?\s*([^\s;&|<>()]+)")
 # Цель — последний аргумент (cp SRC DST) либо каждый (tee A B, touch A B).
 _VERB_LAST = ("cp", "mv", "install", "rsync", "ditto", "ln")
 _VERB_ALL = ("tee", "touch")
-# Правка на месте — тоже запись: sed -i меняет уже лежащий под cases/ генератор,
-# и запрет «не создавать» без «не править» держится ровно до первого созданного файла.
-_INPLACE_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?sed\s+((?:-\w+\s+)*-i\b[^;&|<>]*)", re.M)
+# Правка на месте — тоже запись: sed -i / perl -i / ruby -i меняют уже лежащий под
+# cases/ файл, и запрет «не создавать» без «не править» держится ровно до первого созданного.
+_INPLACE_RE = re.compile(
+    r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(?:sed|perl|ruby)\s+((?:-\w+\s+)*-i\b[^;&|<>]*)", re.M)
 _VERB_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(" + "|".join(_VERB_LAST + _VERB_ALL)
                       + r")\s+([^;&|<>]+)", re.M)
+# Обнуляют/затирают файл-аргумент, не редиректом и не позицией cp: truncate -s 0 FILE,
+# gzip FILE (заменяет на .gz, удаляя оригинал), split (пишет по префиксу), cpio/zip
+# (сборка/разбор архива), shred (уничтожает). Цель — позиционный аргумент; блокируем
+# лишь когда он резолвится под наши cases/ или в 00_intake/_baselines.
+_FILE_VERB_RE = re.compile(
+    r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?"
+    r"(?:truncate|gzip|gunzip|bzip2|bunzip2|xz|unxz|split|cpio|zip|shred)\s+([^;&|<>]+)", re.M)
 # Загрузчики пишут в файл флагом, а не редиректом.
 _FETCH_RE = re.compile(r"(?:^|\s)(?:-o|--output|-O|--output-document)[=\s]+([^\s;&|<>]+)")
 # Однострочник интерпретатора обходит и редирект, и cp. Целью считаем путь
@@ -209,30 +269,99 @@ _PATH_RE = re.compile(r"[\w./\\~-]*cases/[\w./\\-]+\.\w+")
 
 
 def _split(args: str) -> list:
+    """Позиционные аргументы (без опций). Инлайн-комментарий `# …` и всё после него
+    отбрасываем: слово «00_intake» в комментарии — не цель (проба 20.08.2026)."""
     try:
         import shlex
-        return [a for a in shlex.split(args) if not a.startswith("-")]
+        toks = shlex.split(args)
     except ValueError:
-        return [a for a in args.split() if not a.startswith("-")]
+        toks = args.split()
+    out = []
+    for a in toks:
+        if a.startswith("#"):
+            break
+        if not a.startswith("-"):
+            out.append(a)
+    return out
 
 
-def _write_targets(cmd: str) -> list:
-    """Пути, КУДА команда пишет. Упоминание пути в аргументе чтения целью не считается."""
+def _target_dir_flag(toks: list):
+    """Значение -t/--target-directory (cp/mv/install кладут источники ВНУТРЬ этого
+    каталога, а не в последний позиционный) либо None."""
+    for i, t in enumerate(toks):
+        if t in ("-t", "--target-directory") and i + 1 < len(toks):
+            return toks[i + 1]
+        if t.startswith("--target-directory="):
+            return t.split("=", 1)[1]
+        if t.startswith("-t") and len(t) > 2 and not t.startswith("--"):
+            return t[2:]
+    return None
+
+
+def _is_dir_dest(dst_raw: str, dst_abs: str) -> bool:
+    """DST — каталог: cp SRC DST кладёт SRC внутрь как DST/basename(SRC). Определяем по
+    завершающему слэшу, наличию на диске, либо по структурному каталогу дела без
+    расширения (GOTOVO, 02_hearings, .agent/…, сам корень дела) — цель-каталог без
+    слэша иначе прошла бы мимо гейта протокола (проба 20.08.2026)."""
+    if dst_raw.endswith("/") or dst_raw.endswith(os.sep):
+        return True
+    try:
+        if os.path.isdir(dst_abs):
+            return True
+    except OSError:
+        pass
+    return _under_cases(dst_abs) and not os.path.splitext(dst_abs)[1]
+
+
+def _copy_move_targets(args: str, base: str) -> list:
+    """Абсолютные цели cp/mv/install/rsync/ditto/ln с учётом -t DIR и dst-каталога."""
+    try:
+        import shlex
+        toks = shlex.split(args)
+    except ValueError:
+        toks = args.split()
+    cut = []
+    for t in toks:                 # инлайн-комментарий обрывает разбор
+        if t.startswith("#"):
+            break
+        cut.append(t)
+    toks = cut
+    tdir = _target_dir_flag(toks)
+    pos = [t for t in toks if not t.startswith("-")]
+    if tdir is not None:
+        d = _resolve(tdir, base)
+        srcs = [p for p in pos if p != tdir]     # сам -t DIR — не источник
+        return [os.path.join(d, os.path.basename(s.rstrip("/"))) for s in srcs] or [d]
+    if len(pos) < 2:
+        return [_resolve(p, base) for p in pos]
+    srcs, dst = pos[:-1], pos[-1]
+    dst_abs = _resolve(dst, base)
+    if _is_dir_dest(dst, dst_abs):
+        return [os.path.join(dst_abs, os.path.basename(s.rstrip("/"))) for s in srcs]
+    return [dst_abs]
+
+
+def _write_targets(cmd: str, base: str) -> list:
+    """Абсолютные пути, КУДА команда пишет. Упоминание пути в аргументе чтения целью
+    не считается; относительные резолвятся от base (ведущий cd / cwd payload)."""
     body = _strip_heredocs(cmd)
-    targets = [t.strip("'\"") for t in _REDIRECT_RE.findall(body)]
-    targets += [t.strip("'\"") for t in _FETCH_RE.findall(body)]
-    targets += _git_checkout_targets(body)
-    targets += [t.strip("'\"") for t in _DD_OF_RE.findall(body)]
+    targets = [_resolve(t, base) for t in _REDIRECT_RE.findall(body)]
+    targets += [_resolve(t, base) for t in _FETCH_RE.findall(body)]
+    targets += [_resolve(t, base) for t in _git_checkout_targets(body)]
+    targets += [_resolve(t, base) for t in _DD_OF_RE.findall(body)]
     for verb, args in _VERB_RE.findall(body):
-        parts = _split(args)
-        if not parts:
-            continue
-        targets += parts if verb in _VERB_ALL else parts[-1:]
+        if verb in _VERB_ALL:                       # tee, touch — каждый аргумент
+            targets += [_resolve(t, base) for t in _split(args)]
+        else:                                       # cp mv install rsync ditto ln
+            targets += _copy_move_targets(args, base)
     for args in _INPLACE_RE.findall(body):
         parts = _split(args)
-        targets += parts[1:] if len(parts) > 1 else parts   # первый аргумент — выражение sed
+        # первый позиционный — выражение sed/perl (s/a/b/), файл дальше
+        targets += [_resolve(t, base) for t in (parts[1:] if len(parts) > 1 else parts)]
+    for args in _FILE_VERB_RE.findall(body):
+        targets += [_resolve(t, base) for t in _split(args)]
     if _INTERP_RE.search(body) and _WRITE_HINT_RE.search(body):
-        targets += [t.strip("'\"") for t in _PATH_RE.findall(body)]
+        targets += [_resolve(t, base) for t in _PATH_RE.findall(body)]
     return targets
 
 
@@ -328,10 +457,10 @@ _PATCH_SCOPE_RE = re.compile(
 )
 
 
-def _patch_scope_hits_cases(cmd: str) -> bool:
+def _patch_scope_hits_cases(cmd: str, base: str) -> bool:
     for m in _PATCH_SCOPE_RE.finditer(cmd):
         d = (m.group(1) or m.group(2) or "").strip("'\"")
-        if "cases" in d.replace("\\", "/").split("/"):
+        if d and _under_cases(_resolve(d, base)):
             return True
     return False
 
@@ -357,6 +486,19 @@ def _mv_sources(body: str) -> list:
     return out
 
 
+# rm/rmdir — удаление. Судим ЦЕЛИ команды, а не подстроку по всей строке: слово
+# «00_intake»/«_baselines» в аргументе чтения дальше по строке или в комментарии
+# не делает `rm /tmp/x` ударом по делу (проба 20.08.2026 отбивала обиход координатора).
+_RM_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(?:rm|rmdir)\s+([^;&|<>]+)", re.M)
+
+
+def _rm_targets(cmd: str, base: str) -> list:
+    out = []
+    for args in _RM_RE.findall(cmd):
+        out += [_resolve(t, base) for t in _split(args)]
+    return out
+
+
 # Перенос ЦЕЛОГО каталога расширения не имеет: `mv /tmp/ocr дело/.../ocr` кладёт
 # в дело сотню рендеров, а по имени цели этого не видно. Смотрим на диск —
 # что в каталоге-источнике, то и приедет.
@@ -370,15 +512,15 @@ _UNPACK_RE = re.compile(
     r"\s(?:-d|-C|--directory|-o(?=\s))\s*([^\s;&|<>]+)", re.M)
 
 
-def _unpack_into_cases(cmd: str) -> str:
+def _unpack_into_cases(cmd: str, base: str) -> str:
     for d in _UNPACK_RE.findall(_strip_heredocs(cmd)):
-        d = d.strip("'\"")
-        if "cases" in d.replace("\\", "/").split("/"):
-            return d
+        d_abs = _resolve(d.strip("'\""), base)
+        if _under_cases(d_abs):
+            return d.strip("'\"")
     return ""
 
 
-def _bulk_forbidden(cmd: str) -> str:
+def _bulk_forbidden(cmd: str, base: str) -> str:
     body = _strip_heredocs(cmd)
     for verb, args in _VERB_RE.findall(body):
         if verb in _VERB_ALL:
@@ -386,11 +528,13 @@ def _bulk_forbidden(cmd: str) -> str:
         parts = _split(args)
         if len(parts) < 2:
             continue
-        dst = parts[-1].strip("'\"")
-        if "cases" not in dst.replace("\\", "/").split("/"):
+        dst = _resolve(parts[-1], base)
+        if not _under_cases(dst):
             continue
         for src in parts[:-1]:
             src = os.path.expanduser(src.strip("'\""))
+            if not os.path.isabs(src):
+                src = os.path.join(base, src)
             if not os.path.isdir(src):
                 continue
             for i, (dirpath, _dirs, files) in enumerate(os.walk(src)):
@@ -438,6 +582,8 @@ def main() -> None:
             "scripts/claude_guard.py или временно снять хук из .claude/settings.json."
         )
 
+    if not isinstance(d, dict):
+        d = {}
     tool = d.get("tool_name", "")
     ti = d.get("tool_input")
     if not isinstance(ti, dict):
@@ -475,8 +621,12 @@ def main() -> None:
                 )
 
     if tool in ("Write", "Edit", "NotebookEdit"):
-        p = as_str(ti.get("file_path")) or as_str(ti.get("notebook_path"))
-        if "/00_intake/" in p:
+        # Относительный путь резолвим через cwd payload ДО всех гейтов: харнесс его
+        # принимает, а `00_intake/x.pdf`+cwd=дело — та же цель, что абсолютная.
+        p_raw = as_str(ti.get("file_path")) or as_str(ti.get("notebook_path"))
+        wcwd = as_str(d.get("cwd")) or os.getcwd()
+        p = _resolve(p_raw, wcwd)
+        if "/00_intake/" in p.replace(os.sep, "/"):
             block(
                 "БЛОК: 00_intake/ неприкосновенен — исходники клиента "
                 "не редактировать и не перезаписывать (железное правило)."
@@ -488,37 +638,37 @@ def main() -> None:
         raw_cmd = as_str(ti.get("command"))
         stripped = _strip_heredocs(raw_cmd)     # для _is_new_intake_file — узкая легитимность
         cmd = _normalize(stripped)              # sh -c/bash -c/var=/$( echo )/функция — плоско
+        base = _base_dir(cmd, d)                # ведущий cd → cwd payload → cwd процесса
 
-        targets = _write_targets(cmd)
+        targets = _write_targets(cmd, base)
         _cases_write_gate(targets)
         for t in targets:
             _workflow_gate(t)      # документ въезжает в GOTOVO и обычным cp, не только Write
 
-        unpack = _unpack_into_cases(cmd)
+        unpack = _unpack_into_cases(cmd, base)
         if unpack:
             block(
                 f"БЛОК: распаковка архива прямо в дело ({unpack}) запрещена — сторож не видит, "
                 "что внутри, а по первичке распаковка ещё и затирает оригиналы. Распаковать "
                 "во временный каталог, затем класть файлы по одному (материалы — в 00_intake)."
             )
-        bulk = _bulk_forbidden(cmd)
+        bulk = _bulk_forbidden(cmd, base)
         if bulk:
             block(
                 f"БЛОК: перенос каталога с кодом или рендерами внутрь cases/ — {bulk}. "
                 "Рендеры живут в кеше (/tmp/{дело}/{имя}), приборы — в scripts/. "
                 "Нужны сами материалы — их место в 00_intake, по одному файлу."
             )
-        if _patch_scope_hits_cases(cmd):
+        if _patch_scope_hits_cases(cmd, base):
             block(
                 "БЛОК: применение патча внутри cases/ (git apply / patch) запрещено — "
                 "цель правки не видна из командной строки (она внутри самого патча), "
                 "а дело может измениться мимо конвейера. Патч — во временный каталог, "
                 "материалы дела кладутся по одному новым файлом."
             )
-        # rm только в командной позиции (начало строки / после ; & | $( `) —
-        # иначе ложные срабатывания на прозу со словом «rm» в heredoc
-        rm_cmd = re.search(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(?:rm|rmdir)\s", cmd, re.M)
-        if rm_cmd and re.search(r"00_intake|_baselines", cmd):
+        # rm/rmdir — по ЦЕЛЯМ, не по подстроке: слово в аргументе чтения или комментарии
+        # дальше по строке не превращает удаление во временном каталоге в удар по делу.
+        if any(_under_protected(t) for t in _rm_targets(cmd, base)):
             block(
                 "БЛОК: удаление в 00_intake/ или _baselines/ запрещено "
                 "(железное правило). Действительно нужно — только пользователь вручную."
@@ -540,7 +690,8 @@ def main() -> None:
         # targets, что уже посчитаны выше для code/raster-гейта и workflow-гейта:
         # что реально пишется, а не как это названо в командной строке.
         protected_targets = [t for t in targets if _under_protected(t)]
-        removed_sources = [s for s in _mv_sources(cmd) if _under_protected(s)]
+        removed_sources = [_resolve(s, base) for s in _mv_sources(cmd)]
+        removed_sources = [s for s in removed_sources if _under_protected(s)]
         if (protected_targets or removed_sources) and not _is_new_intake_file(stripped):
             block(
                 "БЛОК: перезапись в 00_intake/ или _baselines/ запрещена — исходники "
@@ -761,6 +912,51 @@ def selftest() -> int:
          run({"tool_name": "Bash", "tool_input": {"command": "env FOO=bar echo hi"}}), 0),
         ("nice перед обычным cp вне cases пропускается",
          run({"tool_name": "Bash", "tool_input": {"command": "nice cp a.md b.md"}}), 0),
+        # ── Сторож судит ЦЕЛЬ, а не строку (враждебная проба 20.08.2026) ──────
+        # Относительный путь: харнесс его принимает, цель резолвится через cwd/cd.
+        ("Write относительной первички с cwd — блок",
+         run({"tool_name": "Write", "tool_input": {
+             "file_path": "00_intake/podmena.pdf", "content": "x"}, "cwd": intake[:-len("/00_intake")]}), 2),
+        ("cd в первичку и cp поверх существующего — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": f"cd {shlex_quote(intake)} && cp /tmp/e.pdf est.pdf"}}), 2),
+        ("truncate первички — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": f"truncate -s 0 {shlex_quote(existing_intake)}"}}), 2),
+        ("truncate во временном каталоге пропускается",
+         run({"tool_name": "Bash", "tool_input": {"command": "truncate -s 0 /tmp/scratch.bin"}}), 0),
+        ("perl -i по первичке — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": f"perl -i -pe 's/a/b/' {shlex_quote(existing_intake)}"}}), 2),
+        ("perl -i по прибору вне cases пропускается",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "perl -i -pe 's/a/b/' scripts/pribor.py"}}), 0),
+        ("cp -t каталог-цель с кодом в дело — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "cp -t cases/klient/delo-2026 /tmp/gen.py"}}), 2),
+        ("cp -t в /tmp пропускается",
+         run({"tool_name": "Bash", "tool_input": {"command": "cp -t /tmp/out /some/gen.py"}}), 0),
+        ("install -t в первичку — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": f"install -m644 -t {shlex_quote(intake)} /tmp/evil.pdf"}}), 2),
+        ("cp в каталог GOTOVO без слэша мимо маркеров — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "cp /tmp/isk.docx cases/klient/delo-2026/GOTOVO"}}), 2),
+        # Ложная тревога снята: rm во временном каталоге не блокируется из-за слова
+        # 00_intake/_baselines в аргументе чтения дальше или в комментарии.
+        ("rm /tmp при чтении 00_intake дальше по строке пропускается",
+         run({"tool_name": "Bash", "tool_input": {"command":
+              "rm -rf /tmp/render && python3 scripts/markdown_extract.py "
+              "cases/k/d/00_intake/isk.pdf --render-dir /tmp/render"}}), 0),
+        ("rm /tmp с комментарием про _baselines пропускается",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "rm /tmp/junk.txt   # база _baselines не трогается"}}), 0),
+        # Чужой репозиторий и /tmp/cases — не наши дела (якорь на корне проекта).
+        ("код в cases/ ЧУЖОГО репозитория пропускается",
+         run({"tool_name": "Write", "tool_input": {
+             "file_path": "/tmp/chuzhoy-repo/cases/util.py", "content": "x"}}), 0),
+        ("распаковка в /tmp/cases пропускается",
+         run({"tool_name": "Bash", "tool_input": {"command": "tar -xf /tmp/mat.tar -C /tmp/cases"}}), 0),
     ]
     bad = [name for name, got, want in cases if got != want]
     for name, got, want in cases:
