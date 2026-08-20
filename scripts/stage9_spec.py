@@ -507,6 +507,32 @@ def check_hook_registration():
         if code != 0:
             fails.append(("hooks:reg", f"зарегистрированные сторожа не признаны: "
                           f"{out.strip()[:300]}"))
+
+        # Обходы, при которых файлы хуков лежат на месте, а git их НЕ ЗОВЁТ.
+        # Проверка «файл есть и содержит слово» на них слепа: сторож на диске,
+        # но не сторожит — состояние, неотличимое от рабочего (19.08.2026).
+        run(["git", "config", "core.hooksPath", "/dev/null"], cwd=td)
+        code, _ = py(gate, "--hooks-only", "--json", cwd=td)
+        if code == 0:
+            fails.append(("hooks:hookspath", "core.hooksPath уведён в сторону, а гейт "
+                          "зелёный — git не зовёт хуки, но сторож объявлен рабочим"))
+        run(["git", "config", "--unset", "core.hooksPath"], cwd=td)
+        # Снятый бит исполняемости: git молча пропускает такой хук.
+        os.chmod(hooks / "pre-commit", 0o644)
+        code, _ = py(gate, "--hooks-only", "--json", cwd=td)
+        if code == 0:
+            fails.append(("hooks:chmod", "с pre-commit снят бит исполняемости, а гейт "
+                          "зелёный — git такой хук молча пропускает"))
+        os.chmod(hooks / "pre-commit", 0o755)
+        # Упоминание сторожа вне блока PreToolUse — не регистрация, а слово в файле.
+        (cl / "settings.json").write_text(json.dumps({
+            "_комментарий": "раньше тут был claude_guard, сейчас отключён",
+            "hooks": {"PreToolUse": []}}, ensure_ascii=False), encoding="utf-8")
+        code, _ = py(gate, "--hooks-only", "--json", cwd=td)
+        if code == 0:
+            fails.append(("hooks:struktura", "claude_guard упомянут в settings.json "
+                          "лишь текстом, PreToolUse пуст — гейт принял слово за "
+                          "регистрацию"))
     # Боевое дерево: сторожа реально зарегистрированы прямо сейчас.
     pre = ROOT / ".git" / "hooks" / "pre-commit"
     cmsg = ROOT / ".git" / "hooks" / "commit-msg"
