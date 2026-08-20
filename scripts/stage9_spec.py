@@ -2391,6 +2391,62 @@ def check_font_nasledovanie():
     return fails
 
 
+def check_humanizer_na_marshrute():
+    """9.17: анти-AI-гейт стоит НА МАРШРУТЕ вердикта, а не рядом с ним.
+
+    Круг 6, доказано запуском координатора: `--scan` забраковал текст
+    (HARD BANS, код 1), и тут же `--record --verdict «ГОТОВ К ПОДАЧЕ»`
+    прошёл, а `--check` разрешил сборку .docx. Гейт живёт отдельной командой,
+    которую вердикт не зовёт: значит он обязателен только для того, кто и так
+    решил его позвать.
+
+    Проверки 9.3 и 9.11 закрывают другое — что гейт не пропускает при
+    пропавшем скрипте и что он жив. Стоять на пути они не требуют.
+    """
+    vd = tool("verdict.py")
+    if not vd.is_file():
+        return [("human-marshrut:missing", "scripts/verdict.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-humanmarsh-") as tmp:
+        td = Path(tmp)
+        plohoy = td / "chernovik.md"
+        plohoy.write_text(
+            "# ИСКОВОЕ ЗАЯВЛЕНИЕ\n\nВ современном мире важно отметить, что данный "
+            "аспект играет ключевую роль. Следует подчеркнуть, что в рамках данного "
+            "вопроса необходимо отметить ряд важных моментов.\n", encoding="utf-8")
+        code_scan, out_scan = py(vd, str(plohoy), "--scan", cwd=td)
+        if code_scan == 0:
+            return [("human-marshrut:scan", f"гейт не забраковал заведомо машинный "
+                     f"текст — проба недействительна: {out_scan.strip()[:160]}")]
+        code_rec, _ = py(vd, str(plohoy), "--record", "--verdict", "ГОТОВ К ПОДАЧЕ",
+                         cwd=td)
+        code_chk, _ = py(vd, str(plohoy), "--check", cwd=td)
+        if code_rec == 0 and code_chk == 0:
+            fails.append(("human-marshrut:obhod", "текст, забракованный анти-AI-гейтом, "
+                          "получил «ГОТОВ К ПОДАЧЕ» и допуск к сборке: обязательный "
+                          "гейт не стоит на маршруте вердикта, а лежит рядом отдельной "
+                          "командой — документ уходит в суд с машинными следами, по "
+                          "которым его атакуют лингвистической экспертизой"))
+        # Ось обихода: живой профессиональный текст вердикт получает.
+        horoshiy = td / "chistyy.md"
+        horoshiy.write_text(
+            "# ИСКОВОЕ ЗАЯВЛЕНИЕ\n\nОтветчик получил товар по накладной от "
+            "01.02.2026, оплату не произвёл. Претензия от 15.03.2026 оставлена без "
+            "ответа. Прошу взыскать 100 000 (сто тысяч) рублей долга (ст. 309 ГК "
+            "РФ).\n", encoding="utf-8")
+        code_scan2, out2 = py(vd, str(horoshiy), "--scan", cwd=td)
+        if code_scan2 != 0:
+            fails.append(("human-marshrut:trevoga", f"обычный процессуальный текст "
+                          f"забракован анти-AI-гейтом: {out2.strip()[:200]}"))
+        else:
+            code_rec2, _ = py(vd, str(horoshiy), "--record", "--verdict",
+                              "ГОТОВ К ПОДАЧЕ", cwd=td)
+            if code_rec2 != 0:
+                fails.append(("human-marshrut:trevoga-record", "чистый текст не смог "
+                              "получить вердикт — конвейер встанет"))
+    return fails
+
+
 def check_docx_raven_odobrennomu():
     """9.17: собранный .docx равен одобренному .md, а не просто сопровождает его.
 
@@ -3656,6 +3712,7 @@ CHECKS = [
     ("9.17 обезличивание: разрыв и обиход", check_pii_normalizaciya_i_obihod),
     ("9.17 детектор держит формы приказа", check_inekcii_formy_prikaza),
     ("9.17 вызов чужого CLI ловится в формах", check_chuzhoy_cli_formy_vyzova),
+    ("9.17 анти-AI-гейт на маршруте вердикта", check_humanizer_na_marshrute),
     ("9.17 .docx равен одобренному .md", check_docx_raven_odobrennomu),
     ("9.17 имя в PATH не тождество харнесса", check_path_ne_tozhdestvo),
     ("9.17 ПД-сторож не слепнет в копии роли", check_pd_v_kopii_roli),
