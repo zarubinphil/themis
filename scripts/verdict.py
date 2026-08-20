@@ -173,6 +173,24 @@ def record(md, verdict, round_no):
             for p in problems:
                 print(f"   · {p}", file=sys.stderr)
             return None
+        # Анти-AI-гейт стоит НА МАРШРУТЕ вердикта, а не рядом отдельной
+        # командой: иначе текст, забракованный --scan (HARD BANS), тут же
+        # получает «ГОТОВ К ПОДАЧЕ» и допуск к сборке (проба круга 6,
+        # 20.08.2026). Недоступный скрипт — fail-closed, как в --scan.
+        blockers = scan(md)
+        if blockers is None:
+            print("⛔ ВЕРДИКТ «ГОТОВ К ПОДАЧЕ» НЕ ЗАПИСАН — humanizer-legal "
+                  "недоступен (fail-closed). Поставить скилл humanizer-legal.",
+                  file=sys.stderr)
+            return None
+        if blockers:
+            print("⛔ ВЕРДИКТ «ГОТОВ К ПОДАЧЕ» НЕ ЗАПИСАН — анти-AI-гейт "
+                  "забраковал текст:", file=sys.stderr)
+            for b in blockers:
+                print(f"   · {b}", file=sys.stderr)
+            print(f"   Прогнать скилл humanizer-legal и повторить. "
+                  f"Отчет: bash {SCAN} {md}", file=sys.stderr)
+            return None
     md = Path(md)
     entry = {
         "document": md.name,
@@ -219,6 +237,18 @@ def check(md):
         return [f"{md.name}: вердикта нет вовсе — документ не проходил проверку Кони"]
     ok = [e for e in hist if e.get("verdict") == READY and e.get("sha256") == now]
     if ok:
+        # Гейт на маршруте СБОРКИ тоже: журнал append-only, но строку в него
+        # можно дописать руками мимо record() — и тогда анти-AI-гейт, стоящий
+        # в record(), обходится. Перепроверяем текст перед допуском к сборке
+        # (проба круга 6, 20.08.2026). Скрипт недоступен — fail-closed.
+        blockers = scan(md)
+        if blockers is None:
+            return [f"{md.name}: humanizer-legal недоступен — fail-closed, "
+                    f"сборка .docx запрещена до установки скилла"]
+        if blockers:
+            return [f"{md.name}: анти-AI-гейт забраковал текст "
+                    f"({', '.join(blockers)}) — сборка .docx запрещена, "
+                    f"прогнать humanizer-legal и повторить раунд"]
         return []
     approved = [e for e in hist if e.get("verdict") == READY]
     if approved:
