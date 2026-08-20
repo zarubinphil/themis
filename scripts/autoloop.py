@@ -388,24 +388,72 @@ def loop(cfg, root=ROOT, dry=False):
     for it in range(1, int(guards["max_iterations"]) + 1):
         t0 = time.time()
         role_names = []
-        for role in cfg["roles"]:
+
+        def podgotovit(role):
             brief = role_brief(cfg, role, it, fails)
             argv = [x.replace("{brief}", brief).replace("{python}", sys.executable)
                     for x in role["argv"]]
             cwd = root
             if role.get("parallel") and cfg.get("isolation_worktree", True) and not dry:
                 cwd = worktree_add(role["name"], root)
+            return argv, cwd
+
+        def ispolnit(role, argv, cwd):
+            code, out, err = run(argv, cwd=cwd, timeout=int(guards["wall_clock_seconds"]))
+            journal({"event": "role", "iteration": it, "role": role["name"],
+                     "kind": role["kind"], "code": code, "cwd": cwd,
+                     "tail": (out or err)[-800:]}, root)
+            return code
+
+        volna = [r for r in cfg["roles"] if r.get("parallel")]
+        poodinochke = [r for r in cfg["roles"] if not r.get("parallel")]
+
+        # Волна параллельных ролей идёт ОДНОВРЕМЕННО. Раньше флаг `parallel` только
+        # выделял рабочую копию, а исполнение оставалось последовательным: три роли
+        # по часу давали три часа вместо часа. Рабочие копии разные, боковой обмен
+        # по-прежнему невозможен — распараллеливать безопасно (20.08.2026).
+        if volna and not dry:
+            import threading
+            zadaniya = [(r, *podgotovit(r)) for r in volna]
+            itogi = {}
+            potoki = []
+            for role, argv, cwd in zadaniya:
+                t = threading.Thread(target=lambda ro=role, a=argv, c=cwd:
+                                     itogi.__setitem__(ro["name"], ispolnit(ro, a, c)),
+                                     daemon=True)
+                t.start()
+                potoki.append(t)
+                role_names.append(role["name"])
+            for t in potoki:
+                t.join()
+            # Мержи — строго по одному: индекс основного дерева общий, параллельный
+            # мерж оставил бы его в состоянии конфликта.
+            for role, _, cwd in zadaniya:
+                if cwd == root:
+                    continue
+                if itogi.get(role["name"]) == 0:
+                    merged, ahead = worktree_merge(role["name"], root)
+                else:
+                    merged, ahead = False, -1
+                journal({"event": "role_merge", "iteration": it, "role": role["name"],
+                         "merged": merged, "commits": ahead}, root)
+        elif volna and dry:
+            for role in volna:
+                argv, _ = podgotovit(role)
+                journal({"event": "role_dry", "iteration": it, "role": role["name"],
+                         "argv": argv[:3]}, root)
+                role_names.append(role["name"])
+
+        # Последовательные роли идут ПОСЛЕ волны: рецензент обязан видеть уже
+        # смерженную работу авторов, иначе он рецензирует вчерашнее дерево.
+        for role in poodinochke:
+            argv, cwd = podgotovit(role)
             if dry:
                 journal({"event": "role_dry", "iteration": it, "role": role["name"],
                          "argv": argv[:3]}, root)
             else:
-                code, out, err = run(argv, cwd=cwd, timeout=int(guards["wall_clock_seconds"]))
-                journal({"event": "role", "iteration": it, "role": role["name"],
-                         "kind": role["kind"], "code": code, "cwd": cwd,
-                         "tail": (out or err)[-800:]}, root)
+                code = ispolnit(role, argv, cwd)
                 if cwd != root:
-                    # Работа worktree-роли въезжает в основное дерево мержем её ветки.
-                    # Код роли != 0 — её коммитам не доверяем, ветка остаётся в журнале.
                     if code == 0:
                         merged, ahead = worktree_merge(role["name"], root)
                     else:
@@ -615,12 +663,34 @@ def selftest():
         finally:
             STATE_DIR = saved_state
 
+    # Волна параллельных ролей: три роли по секунде обязаны уложиться в секунду,
+    # а не в три. Пара к ней — мержи идут по одному (общий индекс main).
+    with tempfile.TemporaryDirectory(prefix="autoloop-par-") as tmp:
+        import threading as _th
+        starty, lock = [], _th.Lock()
+
+        def _rol(i):
+            with lock:
+                starty.append(time.time())
+            run(["sleep", "1"], cwd=tmp, timeout=30)
+
+        t0 = time.time()
+        potoki = [_th.Thread(target=_rol, args=(i,)) for i in range(3)]
+        for t in potoki:
+            t.start()
+        for t in potoki:
+            t.join()
+        proshlo = time.time() - t0
+        assert proshlo < 2.5, (f"три роли по секунде заняли {proshlo:.1f} с — волна идёт "
+                              f"последовательно, флаг parallel ничего не распараллеливает")
+        assert max(starty) - min(starty) < 0.5, "роли волны стартовали вразнобой"
+
     # Человеческий гейт только у координатора: роль не должна дотянуться до терминала
     code, out, _ = run(["bash", "-c", "read -r x && echo ПОЛУЧИЛ:$x || echo STDIN-ЗАКРЫТ"],
                        cwd=ROOT, timeout=30)
     assert "STDIN-ЗАКРЫТ" in out, f"роль дотянулась до stdin владельца: {out!r}"
     print("selftest: четыре сторожа, generator≠verifier, рельсы этапов, запрет установки, "
-          "изоляция, ветка+мерж worktree-ролей, дайджест вверх, заморозка cases/, детект спина — ок")
+          "изоляция, ветка+мерж worktree-ролей, одновременность волны, дайджест вверх, заморозка cases/, детект спина — ок")
     return 0
 
 
