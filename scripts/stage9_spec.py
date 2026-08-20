@@ -4672,6 +4672,89 @@ def check_zamorozka_ne_schitaet_zhurnaly():
     return fails
 
 
+ZOLOTOY_ISK_MD = """# ИСКОВОЕ ЗАЯВЛЕНИЕ
+
+01.02.2026 между сторонами заключён договор поставки. Оплата не произведена.
+
+Прошу взыскать 100 000 (сто тысяч) рублей задолженности (ст. 309 ГК РФ).
+
+| Основание | Сумма |
+| --- | --- |
+| Долг | 100 000 (сто тысяч) руб. |
+| Проценты | 5 000 (пять тысяч) руб. |
+
+ПРИЛОЖЕНИЯ:
+1. Договор поставки от 01.02.2026
+"""
+
+ZOLOTOY_ISK_SBORKA = """import sys; sys.path.insert(0, sys.argv[1])
+from create_docx import DocBuilder
+b = DocBuilder()
+b.add_header_table('Вахитовский районный суд города Казани', 'ул. Лесгафта, 33',
+                   [{'label': 'Истец:', 'lines': [('Тестфам Анна Борисовна', True)]},
+                    {'label': 'Ответчик:',
+                     'lines': [('ООО «Ромашка» (ИНН 7712345678)', True)]}],
+                   'А65-12345/2026')
+b.add_title('ИСКОВОЕ ЗАЯВЛЕНИЕ')
+b.add_body('01.02.2026 между сторонами заключён договор поставки. Оплата не произведена.')
+b.add_body('Прошу взыскать 100 000 (сто тысяч) рублей задолженности (ст. 309 ГК РФ).')
+b.add_table(['Основание', 'Сумма'],
+            [['Долг', '100 000 (сто тысяч) руб.'], ['Проценты', '5 000 (пять тысяч) руб.']])
+b.add_appendices()
+b.add_appendix_item('Договор поставки от 01.02.2026')
+b.add_signature('Представитель по доверенности', '21.08.2026')
+b.save(sys.argv[2])
+"""
+
+
+def check_zolotoy_isk():
+    """9.20: НАСТОЯЩИЙ иск проходит весь путь — вердикт, сборку, формат.
+
+    Круг 8, доказано запуском координатора. Три волны починки подряд ломали
+    основную работу, и каждый раз это ловил только следующий круг пробы:
+    сперва иск к организации не мог получить вердикт (скобки-реквизиты),
+    теперь документ с шапкой суда и таблицей расчёта не собирается вовсе —
+    «СТОП, НЕ СОХРАНЕНО: собранный текст не совпадает с одобренной редакцией».
+
+    Эта проверка — золотой сценарий: один настоящий процессуальный документ,
+    собранный так, как его собирает doc-drafter (шапка суда таблицей,
+    заголовок, тело со ссылками на нормы, таблица расчёта, приложения,
+    подпись), обязан получить вердикт, собраться и пройти проверку формата.
+
+    Она стоит здесь ради целого КЛАССА регрессий: любое ужесточение, которое
+    делает систему непригодной к работе, краснит её сразу, а не через круг.
+    """
+    cd_, vd, dg = tool("create_docx.py"), tool("verdict.py"), tool("document_guard.py")
+    if not (cd_.is_file() and vd.is_file() and dg.is_file()):
+        return [("zolotoy:missing", "нет одного из приборов сборки")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-zolotoy-") as tmp:
+        td = Path(tmp)
+        delo = td / "cases" / FAM_LAT / "delo-2026"
+        drafts, gotovo = delo / ".agent" / "drafts", delo / "GOTOVO"
+        drafts.mkdir(parents=True)
+        gotovo.mkdir(parents=True)
+        md = drafts / "isk.md"
+        md.write_text(ZOLOTOY_ISK_MD, encoding="utf-8")
+        code, out = py(vd, str(md), "--record", "--verdict", "ГОТОВ К ПОДАЧЕ", cwd=td)
+        if code != 0 or "НЕ ЗАПИСАН" in out:
+            return [("zolotoy:verdikt", f"настоящий иск не получил вердикт: "
+                     f"{out.strip()[-220:]}")]
+        doc = gotovo / "isk.docx"
+        code, out = run([sys.executable, "-c", ZOLOTOY_ISK_SBORKA, str(SCRIPTS), str(doc)],
+                        cwd=td, timeout=300)
+        if not doc.is_file():
+            fails.append(("zolotoy:sborka", f"настоящий иск не собрался: "
+                          f"{out.strip()[-220:]} — документ с шапкой суда и таблицей "
+                          f"расчёта это обиход, а не исключение"))
+            return fails
+        code, out = py(dg, str(doc))
+        if code != 0:
+            fails.append(("zolotoy:format", f"собранный настоящий иск забракован "
+                          f"проверкой формата: {out.strip()[-220:]}"))
+    return fails
+
+
 # ── Реестр проверок ──────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -4769,6 +4852,7 @@ CHECKS = [
     ("9.19 фамилия в настоящем .docx из Word", check_pd_v_nastoyashchem_docx),
     ("9.19 регистрация в живых формах", check_registraciya_zhivye_formy),
     ("9.19 заморозка не считает журналы системы", check_zamorozka_ne_schitaet_zhurnaly),
+    ("9.20 золотой сценарий: настоящий иск", check_zolotoy_isk),
 ]
 
 
