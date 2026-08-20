@@ -40,6 +40,37 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 PROJECT_CASES = os.path.join(PROJECT_ROOT, "cases")
 
 
+def _cases_roots() -> list:
+    """Корни cases/, которые сторож признаёт своими. Обычно один — {корень}/cases.
+    Но сторож может жить в git-worktree ({корень}/.autoloop/worktrees/{роль}): тогда
+    cases/ РОДИТЕЛЬСКОГО репозитория — те же материалы дел, и абсолютный путь к ним
+    (`$HOME/…/themis/cases/{дело}`) обязан судиться так же, как локальный. Иначе
+    сторож-в-worktree слеп к родительскому cases, и $HOME-цель уходит мимо (проба
+    круга 7). Вне worktree список из одного корня — поведение не меняется."""
+    roots = [PROJECT_CASES]
+    marker = os.sep + os.path.join(".autoloop", "worktrees") + os.sep
+    if marker in PROJECT_ROOT:
+        roots.append(os.path.join(PROJECT_ROOT.split(marker)[0], "cases"))
+    return roots
+
+
+_CASES_ROOTS = _cases_roots()
+
+
+def _match_cases_root(abspath: str):
+    """Хвост пути относительно первого совпавшего корня cases/ или None. Регистр
+    prefix не важен (APFS/HFS+ не различают регистр), хвост — как на диске."""
+    if not abspath:
+        return None
+    a = abspath.replace(os.sep, "/").split("/")
+    for root in _CASES_ROOTS:
+        c = root.replace(os.sep, "/").split("/")
+        if (len(a) > len(c)
+                and [x.casefold() for x in a[:len(c)]] == [x.casefold() for x in c]):
+            return a[len(c):]
+    return None
+
+
 def _resolve(path: str, base: str) -> str:
     """Абсолютный нормализованный путь цели. Относительный — от base (cwd из payload,
     ведущий `cd` для Bash: харнесс относительные пути принимает, а цель по ним всё
@@ -51,6 +82,12 @@ def _resolve(path: str, base: str) -> str:
     # $PWD/${PWD} собирают путь подстановкой — строкой цель не видна (проба круга 6).
     # Раскрываем в накопленную базу (ведущий cd → cwd payload → cwd процесса).
     p = p.replace("${PWD}", base).replace("$PWD", base)
+    # $HOME/${HOME} — тот же обход подстановкой, что PWD: `rm -rf $HOME/…/cases/{дело}`
+    # оставался литералом, строгая проверка «внутри cases/» давала ложь, и разом
+    # отключались гейты кода/растра/протокола (проба круга 7). Через ~ путь уже
+    # раскрывался — раскрываем и через переменную, чтобы обе формы судились равно.
+    _home = os.path.expanduser("~")
+    p = p.replace("${HOME}", _home).replace("$HOME", _home)
     p = os.path.expanduser(p)
     if not os.path.isabs(p):
         p = os.path.join(base, p)
@@ -60,25 +97,17 @@ def _resolve(path: str, base: str) -> str:
 def _under_cases(abspath: str) -> bool:
     """abspath внутри cases/ НАШЕГО проекта (а не любого каталога со словом cases).
 
+    Своими считаем cases/ проекта и, в git-worktree, cases/ родителя (_cases_roots).
     Сравнение регистронезависимое: APFS/HFS+ регистр не различают, `00_INTAKE` и
     `cases` заглавными — ТОТ ЖЕ каталог, что `00_intake` и `cases`. Сторож, судящий
     по чувствительной к регистру строке, снимается сменой регистра (проба 20.08.2026)."""
-    if not abspath:
-        return False
-    a = abspath.replace(os.sep, "/").split("/")
-    c = PROJECT_CASES.replace(os.sep, "/").split("/")
-    return (len(a) > len(c)
-            and [x.casefold() for x in a[:len(c)]] == [x.casefold() for x in c])
+    return _match_cases_root(abspath) is not None
 
 
 def _case_rel(abspath: str):
     """Компоненты пути цели относительно наших cases/: [клиент, дело, ...хвост].
     None — цель вне наших дел. Регистр prefix не важен (APFS), хвост — как на диске."""
-    if not _under_cases(abspath):
-        return None
-    a = abspath.replace(os.sep, "/").split("/")
-    c = PROJECT_CASES.replace(os.sep, "/").split("/")
-    return a[len(c):]
+    return _match_cases_root(abspath)
 
 
 def _is_protected_ancestor(path: str) -> bool:
@@ -126,38 +155,49 @@ def _base_dir(cmd: str, payload: dict) -> str:
 _FRESH_NAME_RE = re.compile(r"\d{4}[-._]\d{2}[-._]\d{2}|\d{8}|_\d{6,}")
 
 
-def _is_safe_intake_add(cmd: str, base: str) -> bool:
-    """cp/mv кладёт НОВЫЙ файл в 00_intake — пополнение, а не подмена.
+_SAFE_ADD_RE = re.compile(r"(?:^|[;&|\n(]|\$\(|`)\s*(?:sudo\s+)?(cp|mv)\s+([^;&|<>]+)", re.M)
 
-    Неприкосновенность первички — запрет ПЕРЕЗАПИСИ и УВОЗА, а не пополнения:
-    материалы в дело кладут каждую неделю (проба круга 6). Но голый `cp` поверх
-    молча ПОДМЕНЯЕТ скан доверителя, и подмена доказательства незаметна. Поэтому
-    пополнение безопасно лишь когда перезапись исключена:
-      · флаг -n/--no-clobber — штатный путь inbox-triage (шаг 5: «только mv -n»);
-      · свежее имя со штампом даты — не может заместить канонический скан.
-    Всё прочее (голый cp/mv поверх, чужой глагол, источник из первички) — подмена
-    либо увоз, значит блок: сторож ошибается в сторону запрета.
+
+def _safe_intake_adds(cmd: str, base: str) -> set:
+    """Защищённые цели, каждая из которых — БЕЗОПАСНОЕ пополнение первички.
+
+    Неприкосновенность 00_intake — запрет ПЕРЕЗАПИСИ и УВОЗА, а не пополнения:
+    материалы в дело кладут каждую неделю (inbox-triage, шаг 5 — «только mv -n,
+    пофайлово»). Пополнение безопасно, когда перезапись исключена:
+      · флаг -n/--no-clobber — штатный путь интейка;
+      · свежее имя со штампом даты — не заместит канонический скан.
+    Судим ПОКОМАНДНО, а не всю строку: компаунд обихода интейка законен —
+    `mv -n … 00_intake/ && ls`, `for f in …; do mv -n "$f" 00_intake/; done` (проба
+    круга 7; прежняя проверка требовала ровно cp/mv на два аргумента и рубила их).
+    Источник из первички — увоз, не пополнение: такую цель не признаём. Цели считаем
+    тем же _copy_move_targets, что и гейт, — строки совпадают дословно, и покрытие
+    защищённой цели проверяется тождеством, а не эвристикой (иначе dd/sed -i по первичке
+    проехали бы под прикрытием одного mv -n).
     """
-    try:
-        import shlex
-        parts = shlex.split(cmd)
-    except ValueError:
-        return False
-    if not parts or parts[0] not in ("cp", "mv"):
-        return False
-    opts = [p for p in parts[1:] if p.startswith("-")]
-    pos = [p for p in parts[1:] if not p.startswith("-")]
-    if len(pos) != 2:
-        return False
-    src, dst = pos
-    if _under_protected(_resolve(src, base)):
-        return False                  # источник из первички — увоз, не пополнение
-    if not re.search(r"/00_intake/", dst.replace(os.sep, "/"), re.I):
-        return False                  # цель не в первичке — этой ветке тут не место
-    if any(o in ("-n", "--no-clobber") for o in opts):
-        return True                   # no-clobber: перезапись физически исключена
-    base_name = os.path.basename(dst.rstrip("/"))
-    return bool(base_name) and bool(_FRESH_NAME_RE.search(base_name))
+    safe = set()
+    for _verb, args in _SAFE_ADD_RE.findall(cmd):
+        try:
+            import shlex
+            toks = shlex.split(args)
+        except ValueError:
+            toks = args.split()
+        cut = []
+        for t in toks:                     # инлайн-комментарий обрывает разбор
+            if t.startswith("#"):
+                break
+            cut.append(t)
+        toks = cut
+        no_clobber = any(o in ("-n", "--no-clobber") for o in toks if o.startswith("-"))
+        srcs = [t for t in toks if not t.startswith("-")][:-1]     # последний позиционный — цель
+        if any(_under_protected(_resolve(s, base)) for s in srcs):
+            continue                       # источник из первички — увоз, не пополнение
+        for t in _copy_move_targets(args, base):
+            if not _under_protected(t):
+                continue
+            name = os.path.basename(t.rstrip("/"))
+            if no_clobber or (name and _FRESH_NAME_RE.search(name)):
+                safe.add(t)
+    return safe
 
 
 # Маркер, названный в отрицании, — не маркер. Поиск вхождением по всему файлу
@@ -384,6 +424,7 @@ _INTERP_RE = re.compile(r"\b(?:python3?|node|ruby|perl|php)\b[^\n|;]*?\s-(?:c|e)
 _WRITE_HINT_RE = re.compile(
     r"open\s*\([^)]*['\"][wax]b?['\"]|write_bytes|write_text|savefig|to_csv"
     r"|shutil\.(?:copy|move)|writeFileSync|File\.write|os\.rename"
+    r"|open\s*\([^)]*['\"]\s*>{1,2}"   # perl/ruby open(F,">",…) / open(F,">>",…) — режим шелл-стилем
     r"|\.save\s*\(")            # python-docx/openpyxl d.save('дело/GOTOVO/x.docx') — мимо сборщика
 _PATH_RE = re.compile(r"[\w./\\~-]*cases/[\w./\\-]+\.\w+")
 # Путь записи ОТНОСИТЕЛЬНЫЙ: `cd дело && python3 -c "open('00_intake/x.pdf','w')"` —
@@ -806,8 +847,22 @@ _EXTRACT_VERB_RE = re.compile(
 _DIR_FLAG_RE = re.compile(r"(?:^|\s)(?:-C|--directory|-d)\b")
 
 
+# tar/bsdtar в режиме СОЗДАНИЯ архива (`-c`, `-czf`, `--create`) ЧИТАЕТ файлы, а не
+# высыпает их: `tar -czf /tmp/rezerv.tgz -C {дело} 00_intake` — резервная копия первички
+# наружу (сохранность), и флаг -C здесь меняет каталог ЧТЕНИЯ. Принимать его за каталог
+# назначения — ложная тревога, ломающая штатную сохранность (проба круга 7). Извлечение
+# (`x`, `--extract`) в тех же формах остаётся распаковкой в дело — при обоих режимах в
+# одной строке (компаунд) вето снимаем, сторож ошибается в сторону запрета.
+_TAR_CREATE_RE = re.compile(
+    r"\b(?:tar|bsdtar)\b[^;&|<>\n]*?(?:\s--create\b|\s-[A-Za-z]*c[A-Za-z]*\b)", re.M)
+_TAR_EXTRACT_RE = re.compile(
+    r"\b(?:tar|bsdtar)\b[^;&|<>\n]*?(?:\s--extract\b|\s-[A-Za-z]*x[A-Za-z]*\b)", re.M)
+
+
 def _unpack_into_cases(cmd: str, base: str) -> str:
     body = _strip_heredocs(cmd)
+    if _TAR_CREATE_RE.search(body) and not _TAR_EXTRACT_RE.search(body):
+        return ""                    # tar -c … -C {дело}: чтение файлов в архив, не распаковка в дело
     for d in _UNPACK_RE.findall(body) + _PY_UNPACK_RE.findall(body):
         d_abs = _resolve(d.strip("'\""), base)
         if _under_cases(d_abs):
@@ -926,6 +981,31 @@ def _exec_heredoc_bodies(raw: str) -> list:
     return [m.group(2) for m in _EXEC_HEREDOC_RE.finditer(raw)]
 
 
+# Тело исполняемого heredoc судит ТОЛЬКО правило чужого CLI — а внутри `bash <<EOF …
+# EOF` исполняется и `rm` первички, и запись кода в дело, и документ мимо вердикта
+# (проба круга 7). Разворачиваем тело в командную позицию (как eval/herestring), чтобы
+# ВСЕ гейты — удаления, кода, растра, протокола — судили его наравне с обычной командой.
+# Оболочку (`sh|bash|zsh|source|.`) кладём плоско; язык (`python3 - <<EOF`) — как
+# `интерпретатор -c ТЕЛО`, чтобы признак записи (open(...,'w')) сработал в _write_targets.
+# Data-heredoc (`cat > файл <<EOF`) сюда не попадает — глагол не интерпретатор, тело
+# остаётся данными и его срежет _strip_heredocs (иначе вернулась бы ложная тревога
+# 19.08.2026 — cp/00_intake ВНУТРИ текста файла).
+_EXEC_HEREDOC_EXPAND_RE = re.compile(
+    r"(?:^|[;&|\n(]|\$\(|`)\s*(?:sudo\s+|env\s+[^\n<]*?\s)?"
+    r"(sh|bash|zsh|source|\.|python3?|ruby|perl|node|php)\b[^\n]*?"
+    r"<<-?\s*['\"]?(\w+)['\"]?[^\n]*\n(.*?)^\s*\2\s*$",
+    re.S | re.M)
+
+
+def _expand_exec_heredocs(raw: str) -> str:
+    def repl(m):
+        interp, body = m.group(1), m.group(3)
+        if interp in ("sh", "bash", "zsh", "source", "."):
+            return " ; " + body + " ; "                       # оболочка исполняет тело — судим как команды
+        return " ; " + interp + " -c " + body + " ; "         # язык: тело — код, признак записи ищем в нём
+    return _EXEC_HEREDOC_EXPAND_RE.sub(repl, raw)
+
+
 def main() -> None:
     raw = sys.stdin.read()
     if not raw.strip():
@@ -1008,8 +1088,9 @@ def main() -> None:
 
     if tool == "Bash":
         raw_cmd = as_str(ti.get("command"))
-        stripped = _strip_heredocs(raw_cmd)     # для _is_safe_intake_add — узкая легитимность
-        cmd = _normalize(stripped)              # sh -c/bash -c/var=/$( echo )/функция — плоско
+        expanded = _expand_exec_heredocs(raw_cmd)   # тело исполняемого heredoc → в командную позицию
+        stripped = _strip_heredocs(raw_cmd)     # для _find_destruct_hits — по СЫРОЙ форме без exec-тел
+        cmd = _normalize(_strip_heredocs(expanded))  # exec-тела развёрнуты, data-heredoc срезаны, обёртки — плоско
         base = _base_dir(cmd, d)                # ведущий cd → cwd payload → cwd процесса
 
         # Прямой вызов чужого CLI мимо коннектора: за границей процесса ворот нет.
@@ -1093,7 +1174,13 @@ def main() -> None:
         removed_sources = [_resolve(s, base) for s in _mv_sources(cmd)]
         removed_sources = [s for s in removed_sources
                            if _under_protected(s) or _is_protected_ancestor(s)]
-        if (protected_targets or removed_sources) and not _is_safe_intake_add(stripped, base):
+        # Блок лишь по защищённой цели, которую НЕ покрывает безопасное пополнение
+        # (cp/mv -n или с датой в имени), либо по увозу источника из первички. Судим
+        # цели тождеством с safe_adds, а не «вся строка — один cp/mv»: компаунд обихода
+        # интейка (`mv -n … 00_intake/ && ls`, цикл по инбоксу) — не ложная тревога.
+        safe_adds = _safe_intake_adds(cmd, base)
+        unsafe_targets = [t for t in protected_targets if t not in safe_adds]
+        if unsafe_targets or removed_sources:
             block(
                 "БЛОК: перезапись или увоз 00_intake/ или _baselines/ (в т.ч. как "
                 "поддерево переносимой папки дела/клиента) запрещены — исходники клиента "
