@@ -2391,6 +2391,75 @@ def check_font_nasledovanie():
     return fails
 
 
+def check_raskhod_chuzhih_cli():
+    """9.16: расход ролей на чужих CLI не выдаётся за полную картину.
+
+    Проба 20.08.2026: `token_ledger` по своей же документации читает
+    session-JSONL Claude Code (основной поток плюс транскрипты субагентов).
+    Ролей на codex и kimi он не видит: у них свои журналы (`~/.codex/sessions`,
+    `~/.kimi`). А `.autoloop/etap9.json` назначает три роли на ТРИ разных CLI.
+    Значит сторож бюджета меряет одну сторону из трёх и выдаёт треть за целое —
+    молча, тем же числом, каким считал бы полную картину.
+
+    Контракт мягкий и выполнимый: читать чужие форматы не требуется, но
+    прогон, где есть роли на не измеряемых CLI, обязан НАЗВАТЬ слепоту в
+    журнале и отчёте. Молчаливое занижение хуже отсутствия цифры: на неё
+    смотрят как на полную и проезжают потолок.
+    """
+    al = tool("autoloop.py")
+    if not al.is_file():
+        return [("chuzhoy-raskhod:missing", "scripts/autoloop.py отсутствует")]
+    fails = []
+
+    def dry_progon(roli, tag):
+        with tempfile.TemporaryDirectory(prefix=f"stage9-chuzhoy-{tag}-") as tmp:
+            td = Path(tmp)
+            (td / "scripts").mkdir()
+            shutil.copy(al, td / "scripts" / "autoloop.py")
+            (td / "cases").mkdir()
+            cfg = {"task": "проба учёта расхода", "stage": "9",
+                   "guards": {"max_iterations": 1, "max_money": 5.0,
+                              "wall_clock_seconds": 120, "no_progress_limit": 2,
+                              "stop_when": "gate_green"},
+                   "isolation_worktree": False, "roles": roli,
+                   "gate": ["/bin/echo",
+                            '{"green": true, "fingerprint": "zzz", "fails": []}']}
+            (td / "cfg.json").write_text(json.dumps(cfg, ensure_ascii=False),
+                                         encoding="utf-8")
+            for cmd in (["init", "-q"], ["add", "-A"],
+                        ["-c", "user.email=t@t", "-c", "user.name=t",
+                         "commit", "-qm", "baza"]):
+                run(["git", *cmd], cwd=td)
+            # --dry: роли НЕ вызываются. Чужой CLI наружу не дёргается ни разу.
+            code, out = py(td / "scripts" / "autoloop.py", "cfg.json", "--dry",
+                           cwd=td, timeout=300)
+            for f in (td / ".autoloop" / "journal.jsonl", td / ".autoloop" / "REPORT.md"):
+                if f.is_file():
+                    out += f.read_text(encoding="utf-8", errors="replace")
+            return out
+
+    chuzhie = [{"name": "avtor-codex", "kind": "generator", "argv": ["codex", "exec", "{brief}"]},
+               {"name": "avtor-kimi", "kind": "generator", "argv": ["kimi", "-p", "{brief}"]},
+               {"name": "rev", "kind": "reviewer", "argv": ["claude", "-p", "{brief}"]}]
+    svoi = [{"name": "avtor", "kind": "generator", "argv": ["claude", "-p", "{brief}"]},
+            {"name": "rev", "kind": "reviewer", "argv": ["claude", "-p", "{brief}"]}]
+
+    # Ось пропуска: две роли из трёх вне учёта — прогон обязан это назвать.
+    out = dry_progon(chuzhie, "chuzhie")
+    if not re.search(r"расход.{0,60}(не изм|не вид|неполн)|неизмер|вне учёта|"
+                     r"учтён (?:лишь|только)", out, re.I):
+        fails.append(("chuzhoy-raskhod:molchit", "в прогоне две роли из трёх работают "
+                      "на CLI, чей расход прибор не читает, а цифра бюджета подаётся "
+                      "как полная: слепота учёта не названа ни в журнале, ни в отчёте, "
+                      "и на треть картины смотрят как на целое"))
+    # Ось обихода: прогон целиком на своём CLI лишних оговорок не делает.
+    out = dry_progon(svoi, "svoi")
+    if re.search(r"расход.{0,60}(не изм|не вид)|неизмер|вне учёта", out, re.I):
+        fails.append(("chuzhoy-raskhod:trevoga", "прогон целиком на измеряемом CLI "
+                      "объявил расход неизмеримым — оговорка без повода"))
+    return fails
+
+
 def check_matcher_pokrytie():
     """9.16: регистрация сторожа — это покрытие дверей, а не строка в блоке.
 
@@ -2882,6 +2951,7 @@ CHECKS = [
     ("9.16 сработавший ПД-сторож в цикле отличим", check_otkaz_pd_v_cikle),
     ("9.16 сторож окружения видит не только pip", check_env_vne_python),
     ("9.16 регистрация сторожа покрывает двери", check_matcher_pokrytie),
+    ("9.16 расход чужих CLI не выдан за полный", check_raskhod_chuzhih_cli),
 ]
 
 
