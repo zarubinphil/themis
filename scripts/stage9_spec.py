@@ -4302,6 +4302,74 @@ def check_heredoc_home_i_intake():
     return fails
 
 
+def check_verdikt_polnota():
+    """9.19: одобрение покрывает ВЕСЬ документ и отзывается вердиктом «ТРЕБУЕТ ПРАВОК».
+
+    Круг 7, доказано запуском координатора. Две половинчатые починки:
+
+    1. «Документ равен одобренному» сделано как «одобренный текст — подстрока
+       документа». Значит в конец можно ДОПИСАТЬ новое требование: одобрено
+       «взыскать 100 000 рублей задолженности», собрано то же плюс «обратить
+       взыскание на квартиру ответчика» — сборка прошла. Проверяющий видел
+       меньше, чем уходит в суд.
+    2. Вердикт нельзя отозвать: после «ТРЕБУЕТ ПРАВОК» на ту же редакцию
+       `--check` по-прежнему отвечает «редакция одобрена Кони — сборка
+       разрешена». Кони нашёл ошибку, а документ всё равно собирается.
+    """
+    cd_, vd = tool("create_docx.py"), tool("verdict.py")
+    if not cd_.is_file() or not vd.is_file():
+        return [("verdikt-poln:missing", "create_docx.py или verdict.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-verdpoln-") as tmp:
+        td = Path(tmp)
+        delo = td / "cases" / FAM_LAT / "delo-2026"
+        drafts, gotovo = delo / ".agent" / "drafts", delo / "GOTOVO"
+        drafts.mkdir(parents=True)
+        gotovo.mkdir(parents=True)
+        odobreno = "Прошу взыскать 100 000 (сто тысяч) рублей задолженности (ст. 309 ГК РФ)."
+        md = drafts / "isk.md"
+        md.write_text(f"# ИСКОВОЕ ЗАЯВЛЕНИЕ\n\n{odobreno}\n", encoding="utf-8")
+        code, out = py(vd, str(md), "--record", "--verdict", "ГОТОВ К ПОДАЧЕ", cwd=td)
+        if code != 0:
+            return [("verdikt-poln:zapis", f"вердикт не записался: {out.strip()[:200]}")]
+
+        def sobrat(*abzacy):
+            tela = "\n".join(f"b.add_body({a!r})" for a in abzacy)
+            snippet = (
+                "import sys; sys.path.insert(0, sys.argv[1])\n"
+                "from create_docx import DocBuilder\n"
+                "b = DocBuilder()\n"
+                "b.add_title('ИСКОВОЕ ЗАЯВЛЕНИЕ')\n"
+                f"{tela}\n"
+                "b.add_signature('Представитель', '21.08.2026')\n"
+                "b.save(sys.argv[2])\n"
+            )
+            put = gotovo / "isk.docx"
+            put.unlink(missing_ok=True)
+            run([sys.executable, "-c", snippet, str(SCRIPTS), str(put)], cwd=td, timeout=300)
+            return put.is_file()
+
+        if sobrat(odobreno, "Также обратить взыскание на квартиру ответчика."):
+            fails.append(("verdikt-poln:dopisano", "в конец одобренного документа "
+                          "дописано новое требование, и сборка прошла: одобрение "
+                          "проверяется как вхождение подстроки, а значит покрывает "
+                          "начало документа, но не весь его"))
+        # Ось обихода: документ, равный одобренному, собирается.
+        if not sobrat(odobreno):
+            fails.append(("verdikt-poln:trevoga", "документ, равный одобренному тексту, "
+                          "не собрался — работа встанет"))
+        # Отзыв вердикта.
+        code, _ = py(vd, str(md), "--record", "--verdict", "ТРЕБУЕТ ПРАВОК", "-r", "2",
+                     cwd=td)
+        code_chk, out_chk = py(vd, str(md), "--check", cwd=td)
+        if code_chk == 0:
+            fails.append(("verdikt-poln:otzyv", f"после вердикта «ТРЕБУЕТ ПРАВОК» на ту "
+                          f"же редакцию сборка осталась разрешённой ({out_chk.strip()[:90]}): "
+                          f"вердикт нельзя отозвать, и найденная Кони ошибка не "
+                          f"останавливает выдачу документа"))
+    return fails
+
+
 # ── Реестр проверок ──────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -4393,6 +4461,7 @@ CHECKS = [
     ("9.19 настоящий иск получает вердикт", check_verdikt_ne_lomaet_isk),
     ("9.19 обезличивание молчит на юробиходе", check_pii_obihod_yurteksta),
     ("9.19 heredoc, $HOME и целость интейка", check_heredoc_home_i_intake),
+    ("9.19 одобрение покрывает весь документ", check_verdikt_polnota),
 ]
 
 
