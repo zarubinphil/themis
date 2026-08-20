@@ -21,6 +21,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -163,6 +164,35 @@ def _load_anchors(store_path):
         return {}
 
 
+def _load_anchors_strict(store_path):
+    """None — файл есть, но не читается: испорченное хранилище якорей это не
+    «якорей нет», а сломанный контур приёмки."""
+    try:
+        with open(store_path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _log_remembers(log_path, rel):
+    """Журнал якорений помнит дайджест этой приёмки — значит, якорь БЫЛ, и его
+    исчезновение из хранилища это удаление, а не отсутствие (проба 20.08.2026:
+    подмена контракта обходилась двумя командами — правка и удаление файла)."""
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(entry, dict) and entry.get("spec") == rel:
+                    return True
+    except OSError:
+        pass
+    return False
+
+
 def anchor_spec(spec, root=ROOT):
     """Фиксирует текущую редакцию приёмки как базу сверки, оставляет след в журнале."""
     path = os.path.join(root, spec) if not os.path.isabs(spec) else spec
@@ -204,6 +234,25 @@ def _claude_guard_registered(path):
     return False
 
 
+def _hook_calls(text, marker):
+    """Хук жив, если сторож реально ВЫЗЫВАЕТСЯ до любого безусловного выхода.
+
+    Проба 20.08.2026: «exit 0» первой строкой и слово marker в комментарии
+    выключали сторож при зелёном гейте — подстрока по файлу этого не различает.
+    Читаем тело как шелл: пустые строки и комментарии (включая шебанг) не
+    исполняются; первый же безусловный exit до вызова хоронит всё ниже.
+    """
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if re.match(r"exit\b", line):
+            return False
+        if marker in line:
+            return True
+    return False
+
+
 def check_hooks(root=ROOT):
     """Сторож РЕАЛЬНО СРАБОТАЕТ, а не лежит на диске.
 
@@ -242,8 +291,10 @@ def check_hooks(root=ROOT):
                 text = f.read()
         except OSError:
             text = ""
-        if "pd_guard" not in text:
-            fails.append((f"hooks:empty-{name}", f"{name} есть, но не подключает pd_guard"))
+        if not _hook_calls(text, "pd_guard.py"):
+            fails.append((f"hooks:empty-{name}",
+                          f"{name} есть, но pd_guard в нём не вызывается — слово в "
+                          f"комментарии или выход до вызова сторожом не считаются"))
 
     settings = os.path.join(root, ".claude", "settings.json")
     if not os.path.isfile(settings):
@@ -269,14 +320,27 @@ def check_spec(spec, root=ROOT):
 
     # Заякоренная редакция — база сверки ВНЕ подвижного HEAD, который двигает
     # сам исполнитель атомарным коммитом. Якорь есть — сверяем с ним, а не с git.
-    _, store_path, _ = _anchor_paths(root)
-    anchors = _load_anchors(store_path)
+    _, store_path, log_path = _anchor_paths(root)
+    if os.path.isfile(store_path):
+        anchors = _load_anchors_strict(store_path)
+        if anchors is None:
+            return [("spec:anchor-corrupt",
+                     f"файл якорей {os.path.relpath(store_path, root)} испорчен — "
+                     f"это подмена контура приёмки, а не отсутствие якоря. "
+                     f"Восстановить вправе только координатор: --anchor-spec {rel}")]
+    else:
+        anchors = {}
     if rel in anchors:
         digest = hashlib.sha256(current.encode("utf-8")).hexdigest()
         if digest != anchors[rel]:
             return [("spec:tampered",
                      f"{rel} изменён относительно заякоренной редакции — приёмку правит "
                      f"только координатор. Переякорить: --anchor-spec {rel}")]
+    elif _log_remembers(log_path, rel):
+        return [("spec:anchor-lost",
+                 f"журнал якорений помнит дайджест {rel}, а в файле якорей его нет — "
+                 f"якорь удалён, приёмка обойдена. Восстановить вправе только "
+                 f"координатор: --anchor-spec {rel}")]
     else:
         # Без якоря — прежнее поведение: сверка с зафиксированной в git редакцией.
         code, committed = run(["git", "show", f"HEAD:{rel}"], cwd=root)

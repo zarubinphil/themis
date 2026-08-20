@@ -47,6 +47,9 @@ cases/*
 !cases/.gitkeep
 # Генераторы документов содержат ПД строковыми литералами — только локально.
 cases/_archive_generators/
+# Карантин вывоза кода из-под cases/ (case_code_gc.py) — пути с именами папок
+# дел, в отслеживаемое дерево не ложатся никогда.
+cases_quarantine/
 scripts/_build_*.py
 scripts/gen_*.py
 scripts/_merge_prilozhenia.py
