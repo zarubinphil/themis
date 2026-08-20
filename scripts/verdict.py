@@ -153,10 +153,19 @@ def format_problems(md):
             continue
         if _has_propis_before_number(text, m.start()):
             continue
+        # «… рублей 00 копеек» — нулевые копейки цифрами после суммы, обиходная
+        # форма, а не вторая сумма без прописи (проба круга 6, 20.08.2026).
+        if re.fullmatch(r"0+", num.strip()) and \
+                currency.lower().startswith("коп"):
+            continue
         if not parens or not re.search(r"[а-яёА-ЯЁ]", parens):
             problems.append(f"сумма «{num} {currency}» без прописи в круглых скобках "
                             f"между числом и словом валюты")
     for currency, num, parens in _MONEY_PREFIX_RE.findall(text):
+        # «рублей 00 копеек» — тот же хвост нулевых копеек в зеркальной форме.
+        if re.fullmatch(r"0+", num.strip()) and \
+                currency.lower().startswith(("руб", "коп")):
+            continue
         if not parens or not re.search(r"[а-яёА-ЯЁ]", parens):
             problems.append(f"сумма «{currency}{num}» без прописи в круглых скобках")
     for num, parens in _MONEY_PARENS_RE.findall(text):

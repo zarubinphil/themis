@@ -523,6 +523,20 @@ def _words_match(words: list[str], variants: list[list[str]]) -> bool:
     return any(words == v for v in variants)
 
 
+def _strip_currency_words(words: list[str]) -> tuple[bool, list[str]]:
+    """Валюта внутри прописи: последнее слово «рубл…/копе…» — та же денежная
+    сумма («1 000 (сто тысяч рублей)»). Полная форма «… рублей ноль копеек»
+    внутри скобок — валюта после числительных и нулевые копейки словами —
+    обиходная, несовпадением не является (проба круга 6, 20.08.2026)."""
+    if not words or not words[-1].startswith(("руб", "коп")):
+        return False, words
+    nul = next((i for i, w in enumerate(words[:-1]) if w.startswith("руб")), None)
+    if (nul is not None and words[-1].startswith("коп")
+            and words[nul + 1:-1] in (["ноль"], ["нуль"])):
+        return True, words[:nul]
+    return True, words[:-1]
+
+
 def check_money_propis(text: str, where: str) -> list[str]:
     """Денежная сумма обязана нести пропись в круглых скобках, и пропись обязана
     совпадать с числом: «1 000 (сто тысяч) рублей» глазами не ловится, для того
@@ -611,11 +625,11 @@ def check_money_propis(text: str, where: str) -> list[str]:
         words = re.sub(r"\s+", " ", (words_raw or "").strip().lower()).split()
         words = [w for w in words if w]
         # Якорь-валюта: снаружи скобок или последним словом внутри них —
-        # «1 000 (сто тысяч рублей)» та же денежная сумма.
+        # «1 000 (сто тысяч рублей)» та же денежная сумма; полная форма
+        # «… рублей ноль копеек» внутри скобок — тоже.
         has_cur = cur is not None
-        if words and (words[-1].startswith("руб") or words[-1].startswith("коп")):
-            has_cur = True
-            words = words[:-1]
+        inner_cur, words = _strip_currency_words(words)
+        has_cur = has_cur or inner_cur
         if not has_cur:
             continue  # не деньги: дата, статья, номер дела, ИНН, ставка
         int_str, kop_str = _money_int(num_raw)
@@ -711,9 +725,8 @@ def _scan_quote(fragment: str, where: str, _propis) -> list[str]:
         if not words:
             continue  # прописи нет — в цитате это не нарушение
         has_cur = cur is not None
-        if words[-1].startswith("руб") or words[-1].startswith("коп"):
-            has_cur = True
-            words = words[:-1]
+        inner_cur, words = _strip_currency_words(words)
+        has_cur = has_cur or inner_cur
         if not has_cur or not words:
             continue
         int_str, kop_str = _money_int(m.group("num"))
