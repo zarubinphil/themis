@@ -92,6 +92,44 @@ def doc_text(doc) -> str:
     return "\n".join(p.text for p in iter_paragraphs(doc))
 
 
+def money_text(doc) -> str:
+    """Текст для денежной проверки: тело ДО перечня приложений плюс таблицы и
+    колонтитулы целиком.
+
+    Раньше срез приложений применялся к общей склейке, а `iter_paragraphs` отдаёт
+    таблицы ПОСЛЕ абзацев верхнего уровня — поэтому строка «ПРИЛОЖЕНИЯ:» отрезала
+    заодно все таблицы документа. Приложения есть в каждом иске, а расчёт сумм
+    и цена иска в шапке живут именно в таблицах: денежная проверка не работала
+    ни в одном реальном иске (проба круга 5, 20.08.2026).
+    """
+    telo = "\n".join(p.text for p in getattr(doc, "paragraphs", []))
+    m = re.search(r"(?im)^\s*(?:Приложени[ея]|ПРИЛОЖЕНИ[ЕЯ])\s*:?\s*$", telo)
+    if m:
+        telo = telo[:m.start()]
+    prochee = []
+
+    def _iz_yacheek(container):
+        """Абзацы ячеек, включая вложенные таблицы. iter_paragraphs сюда не годится:
+        она в конце просит doc.sections, которых у ячейки нет."""
+        for par in getattr(container, "paragraphs", []):
+            yield par
+        for tbl in getattr(container, "tables", []):
+            for r in tbl.rows:
+                for c in r.cells:
+                    yield from _iz_yacheek(c)
+
+    for table in getattr(doc, "tables", []):
+        for row in table.rows:
+            for cell in row.cells:
+                prochee.extend(par.text for par in _iz_yacheek(cell))
+    for sec in doc.sections:
+        for part in (sec.header, sec.footer, getattr(sec, "first_page_header", None),
+                     getattr(sec, "first_page_footer", None)):
+            if part is not None:
+                prochee.extend(par.text for par in getattr(part, "paragraphs", []))
+    return "\n".join([telo] + prochee)
+
+
 def check_docx(path: str, l3: bool = False, dogovor: bool = False,
                advokat: bool = False) -> list[str]:
     from docx import Document
@@ -192,6 +230,11 @@ def check_docx(path: str, l3: bool = False, dogovor: bool = False,
 
     text = doc_text(doc)
     problems += check_text(text, os.path.basename(path), dogovor=dogovor or advokat)
+    # Деньги проверяются по СТРУКТУРЕ документа, а не по склейке: перечень
+    # приложений режется в теле, а таблицы и колонтитулы идут в проверку целиком.
+    # Иначе строка «ПРИЛОЖЕНИЯ:» отрезала все таблицы разом (проба круга 5).
+    problems = [p for p in problems if "пропис" not in p and "совпадает" not in p]
+    problems += check_money_propis(money_text(doc), os.path.basename(path))
 
     # Нумерация страниц — безусловное требование протокола (решение владельца
     # 03.08.2026). Порога по объему больше нет: короткий документ тоже может
@@ -274,6 +317,23 @@ def _money_int(num_raw: str) -> tuple[str, str | None]:
     return s, kop
 
 
+def _sklonenie(n: int, odna: str, dve: str, pyat: str) -> str:
+    """Форма существительного после числительного: 1 рубль, 2 рубля, 5 рублей."""
+    n = abs(n) % 100
+    if 11 <= n <= 14:
+        return pyat
+    n %= 10
+    return odna if n == 1 else dve if 2 <= n <= 4 else pyat
+
+
+def _sklonenie_rubl(n: int) -> str:
+    return _sklonenie(n, "рубль", "рубля", "рублей")
+
+
+def _sklonenie_kop(n: int) -> str:
+    return _sklonenie(n, "копейка", "копейки", "копеек")
+
+
 def check_money_propis(text: str, where: str) -> list[str]:
     """Денежная сумма обязана нести пропись в круглых скобках, и пропись обязана
     совпадать с числом: «1 000 (сто тысяч) рублей» глазами не ловится, для того
@@ -290,9 +350,15 @@ def check_money_propis(text: str, where: str) -> list[str]:
                 f"с числом НЕ проверено (fail-closed)"]
     # Перечень приложений — реквизиты прилагаемых документов, а не денежные
     # суммы документа: прописи он не несет никогда (ложная тревога круга 4).
+    # Срез перечня приложений делает money_text по СТРУКТУРЕ документа: резать
+    # склейку строкой нельзя — таблицы в ней идут после приложений и терялись.
+    # Для вызовов по .md (плоский текст) срез остаётся здесь.
     m_app = re.search(r"(?im)^\s*(?:Приложени[ея]|ПРИЛОЖЕНИ[ЕЯ])\s*:?\s*$", text)
-    if m_app:
-        text = text[:m_app.start()]
+    if m_app and "\n" in text[m_app.end():]:
+        hvost = text[m_app.end():]
+        # В .md после приложений идёт только перечень; в .docx money_text уже
+        # отдал тело без него, поэтому повторный срез безвреден.
+        text = text[:m_app.start()] if not hvost.strip().startswith("|") else text
     # Дословная цитата нормы в кавычках-елочках воспроизводится как в законе —
     # требовать там пропись значит запретить цитирование (правило проекта —
     # цитировать дословно). Сверяем текст без цитат.
@@ -334,10 +400,21 @@ def check_money_propis(text: str, where: str) -> list[str]:
             problems.append(f"{where}: число {num_raw} не конвертируется ({e}) — "
                             f"сумма осталась НЕ проверенной")
             continue
+        # Подсказка обязана называть ПОЛНУЮ верную форму. Прежде она давала
+        # пропись без копеек, а пропись в судебном документе — контролирующая
+        # форма: исполнение подсказки меняло взыскиваемую сумму (проба круга 5).
+        polnoe = expected
+        if kop_str and int(kop_str):
+            try:
+                polnoe = (f"{expected} {_sklonenie_rubl(int(int_str))} "
+                          f"{_propis.propis(int(kop_str), gender='ж')} "
+                          f"{_sklonenie_kop(int(kop_str))}")
+            except ValueError:
+                pass
         if not words:
             problems.append(f"{where}: сумма {num_raw} {cur_show} без прописи в "
                             f"круглых скобках — денежная сумма пишется цифрами "
-                            f"и прописью: «{num_raw} ({expected}) {cur_show}»")
+                            f"и прописью: «{num_raw} ({polnoe}) {cur_show}»")
             continue
         exp_rub = expected.split()
         try:
@@ -360,7 +437,7 @@ def check_money_propis(text: str, where: str) -> list[str]:
                   and words[n + 1:] == exp_kop)
         if not ok:
             problems.append(f"{where}: пропись «{words_raw.strip()}» НЕ совпадает "
-                            f"с числом {num_raw} — ожидалось «{expected}»")
+                            f"с числом {num_raw} — ожидалось «{polnoe}»")
     return problems
 
 
