@@ -2136,6 +2136,125 @@ def check_verdict_markers():
                               f"(«{text[:45]}»): {out.strip()[-140:]}"))
     return fails
 
+# ── 9.15 Две критические из круга 5 (решение владельца 20.08.2026) ───────────
+
+# Формы ровно из штатного шаблона cases/_templates/_client_template.md и из карты
+# дела. Метка отделена от значения разметкой, а не пробелом — и оба рубежа молчат.
+PD_V_RAZMETKE = [
+    ("zhirnaya-metka-pasport", "- **Паспорт:** серия 9203 номер 456789 выдан ОВД"),
+    ("zhirnaya-metka-rozhd", "- **Дата рождения:** 14.03.1985"),
+    ("stroka-tablicy", "| Ответчик | 14.03.1985 | 9203 456789 |"),
+    ("tire-posle-metki", "Паспорт — 9203 456789, выдан ОВД района."),
+    ("slovo-nomer", "Паспорт серия 9203 номер 456789 выдан ОВД."),
+    ("dvuznachnyy-god", "Ответчик Петров И.И., 14.03.85 г.р., трудоустроен."),
+]
+# Юридический обиход: заглавное существительное родительного множественного и
+# относительные прилагательные. Круг 4 закрывал их поштучно литералами — класс
+# остался открыт (проба круга 5).
+OBIHOD_ROD_MN = [
+    "Доводов о несоразмерности неустойки ответчик не привел.",
+    "Убытков истец не доказал в заявленном размере.",
+    "Процентов по статье 395 ГК РФ заявлено не было.",
+    "Актов сверки между сторонами не подписывалось.",
+    "Товаров надлежащего качества поставлено не было.",
+    "Взносов на капитальный ремонт ответчик не вносил.",
+    "Сроков исковой давности истец не пропустил.",
+    "Целевой характер использования участка нарушен.",
+    "Кадастровой стоимости объекта соответствует рыночная.",
+]
+
+
+def check_pd_v_razmetke():
+    """9.15: разметка не снимает обезличивание, обиход не поднимает тревогу."""
+    pg = tool("pii_gate.py")
+    if not pg.is_file():
+        return [("razmetka:missing", "scripts/pii_gate.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-razmetka-") as tmp:
+        td = Path(tmp)
+        for name, text in PD_V_RAZMETKE:
+            f = td / f"u_{name}.txt"
+            f.write_text(text + "\n", encoding="utf-8")
+            code, _ = py(pg, "--residual", str(f))
+            if code == 0:
+                fails.append((f"razmetka:propusk-{name}", f"ПД в разметке уходят дословно: "
+                              f"«{text[:60]}» — форма из штатного шаблона клиента"))
+        for i, text in enumerate(OBIHOD_ROD_MN):
+            f = td / f"o{i}.txt"
+            f.write_text(text + "\n", encoding="utf-8")
+            code, _ = py(pg, "--residual", str(f))
+            if code != 0:
+                fails.append((f"razmetka:trevoga-{i}", f"обиход принят за фамилию: "
+                              f"«{text[:60]}» — внешний поиск практики глохнет"))
+        # Маскировщик не портит обезличенный текст судебного акта.
+        akt = td / "akt.txt"
+        akt.write_text("Взыскать с Общества в пользу Предпринимателя расходы. "
+                       "Гражданин Российской Федерации вправе требовать возмещения.\n",
+                       encoding="utf-8")
+        out = td / "akt_masked.txt"
+        py(pg, "--mask", str(akt), "--out", str(out), "--map", str(td / "k.json"))
+        if out.is_file() and "PII" in out.read_text(encoding="utf-8"):
+            fails.append(("razmetka:portit", "маскировщик правит обезличенный текст "
+                          "судебного акта («с Общества», «Российской Федерации») — "
+                          "охотник цитирует испорченную практику"))
+    return fails
+
+
+def check_money_v_iske():
+    """9.15: приложения не глушат денежную проверку, подсказка не меняет сумму."""
+    dg = tool("document_guard.py")
+    if not dg.is_file():
+        return [("iski:missing", "scripts/document_guard.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-iski-") as tmp:
+        td = Path(tmp)
+        # Иск с приложениями — форма КАЖДОГО реального иска.
+        snippet = (
+            "import sys; sys.path.insert(0, sys.argv[1])\n"
+            "from create_docx import DocBuilder\n"
+            "b = DocBuilder()\n"
+            "b.add_title('ИСКОВОЕ ЗАЯВЛЕНИЕ')\n"
+            "b.add_table(['№', 'Сумма'], [['1', '100 000 руб.'], ['2', '50 000 руб.']])\n"
+            "b.add_appendices()\n"
+            "b.add_appendix_item('Договор поставки от 01.02.2026')\n"
+            "b.add_signature('Представитель по доверенности', '20.08.2026')\n"
+            "b.save(sys.argv[2])\n"
+        )
+        isk = td / "isk.docx"
+        code, _ = run([sys.executable, "-c", snippet, str(SCRIPTS), str(isk)],
+                      cwd=td, timeout=300)
+        if code != 0 or not isk.is_file():
+            return [("iski:build", "иск с приложениями не собрался")]
+        code, out = py(dg, str(isk))
+        if code == 0:
+            fails.append(("iski:prilozheniya", "раздел приложений заглушил денежную "
+                          "проверку во всех таблицах документа — в реальном иске суммы "
+                          "не проверяются никогда"))
+        # Подсказка обязана называть ВЕРНУЮ форму, включая копейки.
+        s2 = snippet.replace(
+            "b.add_table(['№', 'Сумма'], [['1', '100 000 руб.'], ['2', '50 000 руб.']])",
+            "b.add_body('Взыскать 1 234,56 руб. задолженности.')")
+        kop = td / "kop.docx"
+        run([sys.executable, "-c", s2, str(SCRIPTS), str(kop)], cwd=td, timeout=300)
+        if kop.is_file():
+            code, out = py(dg, str(kop))
+            if code != 0 and "копе" not in out:
+                fails.append(("iski:podskazka", "подсказка сторожа называет пропись без "
+                              "копеек — исполнение подсказки МЕНЯЕТ сумму в судебном "
+                              "документе, а пропись там контролирующая форма"))
+        # Ось обихода: верно оформленный иск с приложениями проходит.
+        s3 = snippet.replace(
+            "[['1', '100 000 руб.'], ['2', '50 000 руб.']]",
+            "[['1', '100 000 (сто тысяч) руб.'], ['2', '50 000 (пятьдесят тысяч) руб.']]")
+        verno = td / "verno.docx"
+        run([sys.executable, "-c", s3, str(SCRIPTS), str(verno)], cwd=td, timeout=300)
+        if verno.is_file():
+            code, out = py(dg, str(verno))
+            if code != 0:
+                fails.append(("iski:trevoga", f"верно оформленный иск забракован: "
+                              f"{out.strip()[-200:]}"))
+    return fails
+
 # ── Реестр проверок ──────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -2191,6 +2310,8 @@ CHECKS = [
     ("9.14 фамилия не уходит веткой и тегом", check_pd_push_channels),
     ("9.14 перенос внутри слова не снимает детект", check_instruction_perenos),
     ("9.14 маркеры незаполненности и валюты", check_verdict_markers),
+    ("9.15 разметка не снимает обезличивание", check_pd_v_razmetke),
+    ("9.15 суммы проверяются в реальном иске", check_money_v_iske),
 ]
 
 
@@ -2231,7 +2352,9 @@ def selftest():
                              ("check_instruction_obihod", check_instruction_obihod),
                              ("check_pd_push_channels", check_pd_push_channels),
                              ("check_instruction_perenos", check_instruction_perenos),
-                             ("check_verdict_markers", check_verdict_markers)):
+                             ("check_verdict_markers", check_verdict_markers),
+                             ("check_pd_v_razmetke", check_pd_v_razmetke),
+                             ("check_money_v_iske", check_money_v_iske)):
                 assert fn(), f"{name}: пропавший прибор не пойман"
     finally:
         SCRIPTS, REGISTRY = saved_scripts, saved_registry
