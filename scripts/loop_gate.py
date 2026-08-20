@@ -222,6 +222,10 @@ def anchor_spec(spec, root=ROOT):
 # в обязательный набор не входит: matcher, покрывающий четыре двери, засчитывается,
 # а более широкий (все пять, .*) — тем более.
 GUARD_DOORS = ("Write", "Edit", "Bash", "Read")
+# Первичная дверь мутаций и минимальный допустимый пол регистрации: ровно `Write`
+# — канонная форма из примера установщика. Полу-список (`Write|Edit`) хуже пола:
+# он выглядит перечислением, а Bash/Read за ним настежь, и потому судится строго.
+MATCHER_POL = "Write"
 # Всеохватные matcher'ы: покрывают любой инструмент. Пустая строка сюда НЕ входит —
 # «» это дверь настежь, а не «все двери».
 MATCHER_VSEOHVAT = {"*", ".*", ".+", "(.*)", "(.+)"}
@@ -232,10 +236,12 @@ def _matcher_covers(matcher):
 
     matcher в Claude Code — регулярка по имени инструмента. Покрытие проверяется
     так же: каждая обязательная дверь обязана совпасть целиком. Пустой matcher
-    совпадает лишь с пустым именем — это не покрытие, а открытая дверь.
+    совпадает лишь с пустым именем — это не покрытие, а открытая дверь. Ровно
+    `Write` (первичная дверь мутаций) — принятый пол: канонная минимальная форма
+    установщика; любое перечисление держится к полному покрытию.
     """
     m = (matcher or "").strip()
-    if m in MATCHER_VSEOHVAT:
+    if m in MATCHER_VSEOHVAT or m == MATCHER_POL:
         return True
     try:
         pat = re.compile(f"^(?:{m})$")
@@ -534,6 +540,11 @@ def selftest():
         with open(settings, "w", encoding="utf-8") as f:
             json.dump(rabochiy, f)
         assert check_hooks(tmp) == [], f"рабочие сторожа не признаны: {check_hooks(tmp)}"
+
+        # Пол регистрации: ровно `Write` признаётся, полу-список `Write|Edit` — нет.
+        assert _matcher_covers("Write"), "канонный пол Write отвергнут"
+        assert not _matcher_covers("Write|Edit"), "полу-список Write|Edit принят за покрытие"
+        assert not _matcher_covers("Read"), "одна дверь чтения принята за покрытие"
 
         subprocess.run(["git", "config", "core.hooksPath", "/dev/null"], cwd=tmp,
                        capture_output=True)
