@@ -4599,6 +4599,79 @@ def check_registraciya_zhivye_formy():
     return fails
 
 
+def check_zamorozka_ne_schitaet_zhurnaly():
+    """9.19: заморозка сторожит ДАННЫЕ ДЕЛ, а не служебные журналы системы.
+
+    Круг 7, доказано дважды на живом прогоне и объяснено сравнением снимков.
+    Цикл останавливался словами «ТРОНУТЫ ДАННЫЕ ДЕЛ» при полностью зелёном
+    гейте. Сравнение 11 669 файлов до и после показало: изменился РОВНО ОДИН
+    файл — служебный `_session_history.txt` (20032 → 20064 байта). Его
+    дописывает Stop-хук самого проекта в конце каждой сессии.
+
+    То есть система сама себе двигает отпечаток и сама себя останавливает.
+    Ночной прогон гарантированно не доживает до утра, а владелец получает
+    тревогу «тронуты данные дел», за которой ничего нет.
+
+    Обратная ось критична: настоящие файлы дела — включая служебные с
+    подчёркивания, `_client.md` и `_case.md`, — обязаны отпечаток двигать.
+    Иначе исключение станет каналом.
+    """
+    al = tool("autoloop.py")
+    if not al.is_file():
+        return [("zamor-zhurnal:missing", "scripts/autoloop.py отсутствует")]
+    fails = []
+    snippet = ("import sys; sys.path.insert(0, sys.argv[1]); import autoloop; "
+               "print(autoloop.tree_fingerprint(sys.argv[2]))")
+    with tempfile.TemporaryDirectory(prefix="stage9-zamzhur-") as tmp:
+        td = Path(tmp)
+        cases = td / "cases"
+        delo = cases / FAM_LAT / "delo-2026"
+        delo.mkdir(parents=True)
+        (cases / "_logs").mkdir()
+        (cases / FAM_LAT / "_client.md").write_text("профиль\n", encoding="utf-8")
+        (delo / "opis.md").write_text("материал\n", encoding="utf-8")
+        (cases / FAM_LAT / "_session_history.txt").write_text("start\n", encoding="utf-8")
+        (cases / "_logs" / "session_21-08-2026.md").write_text("лог\n", encoding="utf-8")
+
+        def otpechatok():
+            code, out = run([sys.executable, "-c", snippet, str(SCRIPTS), str(cases)],
+                            cwd=td)
+            return out.strip().splitlines()[-1] if out.strip() else ""
+
+        do = otpechatok()
+        if not do:
+            return [("zamor-zhurnal:zov", "отпечаток не считается")]
+        # Ось обихода: служебные журналы системы отпечаток не двигают.
+        sluzhebnye = [
+            ("session-history", cases / FAM_LAT / "_session_history.txt"),
+            ("logs", cases / "_logs" / "session_21-08-2026.md"),
+        ]
+        for name, f in sluzhebnye:
+            f.write_text(f.read_text(encoding="utf-8") + "Session ended: 21.08.2026\n",
+                         encoding="utf-8")
+            if otpechatok() != do:
+                fails.append((f"zamor-zhurnal:{name}", f"служебный журнал системы "
+                              f"({name}) сдвинул отпечаток данных дел: его дописывает "
+                              f"сам проект в конце сессии, поэтому ночной прогон "
+                              f"останавливается собственной записью, а владелец видит "
+                              f"тревогу «тронуты данные дел», за которой ничего нет"))
+                do = otpechatok()
+        # Обратная ось: настоящие файлы дела обязаны двигать отпечаток.
+        do = otpechatok()
+        nastoyashchie = [
+            ("material", delo / "opis.md"),
+            ("profil-klienta", cases / FAM_LAT / "_client.md"),
+        ]
+        for name, f in nastoyashchie:
+            f.write_text(f.read_text(encoding="utf-8") + "правка\n", encoding="utf-8")
+            if otpechatok() == do:
+                fails.append((f"zamor-zhurnal:propusk-{name}", f"правка настоящего файла "
+                              f"дела ({name}) отпечаток не сдвинула — исключение стало "
+                              f"каналом, и касание данных доверителя пройдёт незаметно"))
+            do = otpechatok()
+    return fails
+
+
 # ── Реестр проверок ──────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -4695,6 +4768,7 @@ CHECKS = [
     ("9.19 обращение опознаётся не по списку", check_vokativ_shire_spiska),
     ("9.19 фамилия в настоящем .docx из Word", check_pd_v_nastoyashchem_docx),
     ("9.19 регистрация в живых формах", check_registraciya_zhivye_formy),
+    ("9.19 заморозка не считает журналы системы", check_zamorozka_ne_schitaet_zhurnaly),
 ]
 
 
