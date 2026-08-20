@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -26,9 +27,11 @@ HARNESS_LOCKED = ("invoke", "probe", "data_classes")
 HARNESS_CANONICAL = ("invoke", "data_classes")
 REQUIRED_KEYS = ("probe", "invoke", "model", "effort", "data_classes")
 
-# Двойник харнесса: «Claude» по регистру или «clаude» с кириллической «а» в
-# журнале неотличим от настоящего claude — в реестр такое имя не принимается
-# ни из какого слоя (проба скептика, круг 4 этапа 9).
+# Двойник харнесса: «Claude» по регистру, «clаude» с кириллической «а», «cláude»
+# с диакритикой, «claude » с хвостовым пробелом или знаком нулевой ширины — в
+# журнале неотличим от настоящего claude, в реестр такое имя не принимается ни из
+# какого слоя. Невидимый двойник (пробел, U+200B) опаснее гомоглифа: диакритику
+# глаз ещё ловит, пустоту — нет (пробы скептика, круг 4 этапа 9).
 _CONFUSABLES = str.maketrans({
     "а": "a", "с": "c", "е": "e", "о": "o", "р": "p", "х": "x",
     "у": "y", "н": "h", "т": "t", "м": "m", "в": "b", "к": "k",
@@ -36,9 +39,21 @@ _CONFUSABLES = str.maketrans({
 })
 
 
+def _fold_double(name: str) -> str:
+    """Имя, сведённое к канону харнесса: NFKD снимает диакритику («cláude»→claude),
+    выкидываются пробелы и невидимые знаки нулевой ширины (категория Cf), гомоглифы
+    складываются в латиницу, регистр снимается. Всё, чем «claude» подделывают в
+    журнале, не отличив глазом."""
+    nfkd = unicodedata.normalize("NFKD", name)
+    bare = "".join(ch for ch in nfkd if not unicodedata.combining(ch)
+                   and not ch.isspace() and unicodedata.category(ch) != "Cf")
+    return bare.lower().translate(_CONFUSABLES)
+
+
 def _is_harness_double(name: str) -> bool:
-    """Имя складывается в «claude» после снятия регистра и гомоглифов."""
-    return name != HARNESS and name.lower().translate(_CONFUSABLES) == HARNESS
+    """Имя не равно харнессу, но складывается в «claude» после снятия регистра,
+    гомоглифов, диакритики, пробелов и невидимых знаков нулевой ширины."""
+    return name != HARNESS and _fold_double(name) == HARNESS
 
 
 def _canonical_harness() -> dict:
@@ -238,6 +253,26 @@ def selftest() -> int:
         assert "Claude" not in reg, "двойник харнесса по регистру принят в реестр"
         assert "clаude" not in reg, "двойник харнесса по гомоглифу принят в реестр"
         assert HARNESS in reg, "настоящий харнесс потерян при отсеве двойников"
+
+        # Хвостовой пробел, знак нулевой ширины и диакритика — тот же двойник,
+        # в журнале он неотличим от «claude» вернее гомоглифа. Двойник класса pd
+        # исполнял бы чужой invoke под именем харнесса (проба скептика, круг 4).
+        (home / ".themis" / "cli_registry.json").write_text(json.dumps({
+            "claude ": {"probe": ["z"], "invoke": ["z"], "model": "z", "effort": "max",
+                        "data_classes": ["pd", "text"]},
+            "cla\u200bude": {"probe": ["z"], "invoke": ["z"], "model": "z", "effort": "max",
+                             "data_classes": ["text"]},
+            "cláude": {"probe": ["z"], "invoke": ["z"], "model": "z", "effort": "max",
+                       "data_classes": ["text"]}}, ensure_ascii=False), encoding="utf-8")
+        reg = load_registry(base)
+        assert "claude " not in reg, "двойник харнесса по хвостовому пробелу принят"
+        assert "cla\u200bude" not in reg, "двойник по знаку нулевой ширины принят"
+        assert "cláude" not in reg, "двойник по диакритике принят в реестр"
+        assert HARNESS in reg, "настоящий харнесс потерян при отсеве невидимых двойников"
+        # Ложная тревога: провайдер с ВИДИМЫМИ добавочными знаками — не двойник,
+        # иначе легитимный claude-fast/claude-code выпал бы из реестра.
+        assert not _is_harness_double("claude-fast"), "легитимный claude-fast принят за двойника"
+        assert not _is_harness_double("claude-code"), "легитимный claude-code принят за двойника"
 
         (home / ".themis" / "cli_registry.json").write_text(json.dumps({
             "zloy": {"probe": ["z"], "invoke": ["z"], "model": "z", "effort": "max",
