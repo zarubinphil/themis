@@ -2391,6 +2391,108 @@ def check_font_nasledovanie():
     return fails
 
 
+def check_cel_a_ne_glagol():
+    """9.17: сторож судит ПУТЬ, которого команда достигает, а не знакомый глагол.
+
+    Круг 6 подтвердил запуском двенадцать новых форм поверх шестнадцати,
+    закрытых этапом 4. Общий корень один: правило ищет знакомое слово в
+    командной позиции. Значит его снимает всё, что меняет форму слова или
+    его позицию — абсолютный путь к тому же бинарю, глагол внутри git,
+    удаление без глагола удаления, конструкция оболочки, обёртка чужой
+    программой, подстановка переменной в путь.
+    """
+    if not tool("claude_guard.py").is_file():
+        return [("cel:missing", "scripts/claude_guard.py отсутствует")]
+    case = os.path.join("cases", FAM_LAT, "delo-2026")
+    intake = f"{case}/00_intake"
+    fails = []
+    formy = [
+        # Глагол тот же, но записан абсолютным путём — самый дешёвый обход.
+        ("absolyutnyy-rm", f"/bin/rm -rf {intake}"),
+        ("absolyutnyy-cp", f"/bin/cp /tmp/x.pdf {intake}/x.pdf"),
+        # Глагол внутри git: команда одна, разрушение то же.
+        ("git-clean", f"git clean -fdx {case}"),
+        ("git-rm", f"git rm -r --cached {intake}"),
+        # Удаление вообще без глагола удаления в начале.
+        ("find-delete", f"find {intake} -name '*.pdf' -delete"),
+        ("find-exec", f"find {intake} -name '*.pdf' -exec rm -f {{}} ;"),
+        # Конструкция оболочки уводит глагол из командной позиции.
+        ("posle-then", f"if true; then rm -rf {intake}; fi"),
+        ("posle-do", f"for f in 1; do rm -rf {intake}; done"),
+        ("posle-while", f"while read f; do rm -rf {intake}; done < /tmp/spisok"),
+        # Путь собирается подстановкой — строкой его не видно.
+        ("podstanovka-pwd", f"cp /tmp/x.pdf $PWD/{intake}/x.pdf"),
+        ("podstanovka-peremennoy", f"D={intake}; cp /tmp/x.pdf $D/x.pdf"),
+        # Обёртка чужой программой.
+        ("osascript", f'osascript -e "do shell script \\"rm -rf {intake}\\""'),
+        # Смена каталога иными флагами и программами.
+        ("cd-P", f"cd -P {intake} && cp /tmp/x.pdf y.pdf"),
+        ("env-C", f"env -C {intake} cp /tmp/x.pdf y.pdf"),
+        ("tar-directory-ravno", f"tar --directory={intake} -xf /tmp/a.tar"),
+        # Перенос глаголами вне перечня.
+        ("rsync-remove", f"rsync --remove-source-files -a {intake}/ /tmp/uvez/"),
+        ("scp-uvoz", f"scp -r {intake} /tmp/uvez"),
+    ]
+    for name, cmd in formy:
+        if _bash(cmd) != 2:
+            fails.append((f"cel:{name}", f"путь дела достигнут мимо сторожа ({name}): "
+                          f"правило судит знакомый глагол в командной позиции, а не "
+                          f"путь, которого команда достигает"))
+    # Инструмент записи — та же дверь: Bash к этому пути блокируется.
+    for name, path in (("baselines", f"{case}/.agent/drafts/_baselines/isk.docx"),
+                       ("intake", f"{intake}/skan.pdf")):
+        code = _guard({"tool_name": "Write",
+                       "tool_input": {"file_path": path, "content": "затёрто"}})
+        if code != 2:
+            fails.append((f"cel:write-{name}", f"Write затирает защищённый файл "
+                          f"({name}), тогда как Bash к тому же пути блокируется: "
+                          f"сторож стоит на одной двери из двух"))
+    return fails
+
+
+def check_obihod_pervichki():
+    """9.17: сторож не ломает предписанную работу с первичкой.
+
+    Круг 6: сторож блокирует `mv -n` из инбокса в 00_intake — то есть ровно
+    ту команду, которую предписывает агент интейка (`.claude/agents/
+    inbox-triage.md`, шаг 5: «Перенос — только `mv -n`, пофайлово»). Штатный
+    путь пополнения дела физически не работает; агент упрётся в блок и либо
+    встанет, либо начнёт искать обход. Туда же распаковка архива ИЗ дела во
+    временный каталог и чужая папка `00_intake` вне нашего проекта.
+
+    Неприкосновенность первички — это запрет ПЕРЕЗАПИСИ и УВОЗА, а не запрет
+    пополнения: материалы в дело кладут каждую неделю.
+    """
+    if not tool("claude_guard.py").is_file():
+        return [("obihod-perv:missing", "scripts/claude_guard.py отсутствует")]
+    case = os.path.join("cases", FAM_LAT, "delo-2026")
+    intake = f"{case}/00_intake"
+    fails = []
+    razreshennoe = [
+        ("intake-mv-n", f'mv -n ~/Desktop/inbox/"skan.pdf" "{intake}/"'),
+        ("intake-novoe-imya", f"cp /tmp/novyy-skan.pdf {intake}/skan-2026-08-20.pdf"),
+        ("raspakovka-iz-dela", f"unzip -o {intake}/arhiv.zip -d /tmp/raspakovka"),
+        ("chuzhaya-papka", "rm -rf /tmp/chuzhoy-proekt/00_intake"),
+        ("chtenie-spiska", f"ls -la {intake}"),
+    ]
+    for name, cmd in razreshennoe:
+        if _bash(cmd) == 2:
+            fails.append((f"obihod-perv:{name}", f"предписанная работа заблокирована "
+                          f"({name}): сторож, ломающий штатный путь, выключают в первый "
+                          f"день, а выключенный не сторожит вовсе"))
+    # Обратная ось: перезапись существующего файла первички и увоз запрещены.
+    zapreshchennoe = [
+        ("perezapis", f"cp /tmp/x.pdf {intake}/skan.pdf"),
+        ("uvoz", f"mv {intake}/skan.pdf /tmp/uvez.pdf"),
+        ("uvoz-papki", f"mv {intake} /tmp/uvez"),
+    ]
+    for name, cmd in zapreshchennoe:
+        if _bash(cmd) != 2:
+            fails.append((f"obihod-perv:propusk-{name}", f"перезапись или увоз первички "
+                          f"прошли ({name}) — исходники доверителя неприкосновенны"))
+    return fails
+
+
 def check_raskhod_chuzhih_cli():
     """9.16: расход ролей на чужих CLI не выдаётся за полную картину.
 
@@ -2952,6 +3054,8 @@ CHECKS = [
     ("9.16 сторож окружения видит не только pip", check_env_vne_python),
     ("9.16 регистрация сторожа покрывает двери", check_matcher_pokrytie),
     ("9.16 расход чужих CLI не выдан за полный", check_raskhod_chuzhih_cli),
+    ("9.17 сторож судит цель пути, не глагол", check_cel_a_ne_glagol),
+    ("9.17 обиход первички не сломан", check_obihod_pervichki),
 ]
 
 
