@@ -2391,6 +2391,85 @@ def check_font_nasledovanie():
     return fails
 
 
+def check_pd_v_kopii_roli():
+    """9.17: ПД-сторож не слепнет в рабочей копии роли и на мерже.
+
+    Круг 6, цепочка воспроизведена целиком запуском координатора:
+      1. в основном дереве сторож ловит фамилию доверителя — коммит не проходит;
+      2. в рабочей копии роли (git worktree) дел не видно ВООБЩЕ: настоящие
+         папки дел не отслеживаются git — и правильно, что не отслеживаются.
+         Список имён строится из рабочей копии, значит он пуст, шаблон не
+         строится, и сторож пропускает фамилию;
+      3. мерж ветки роли вносит её в основную ветку, а git на мерже
+         pre-commit не зовёт.
+    В боевом дереве сторож знает 60 имён, в копии роли — ноль. Роли работают
+    именно в копиях: так устроена изоляция. Значит штатный путь работы роя
+    обходит ПД-контур публичного репозитория целиком.
+
+    Источник имён обязан быть не рабочей копией, а основным деревом (главный
+    worktree) либо реестром вне git — и мерж обязан проверяться наравне с
+    коммитом.
+    """
+    pg = tool("pd_guard.py")
+    if not pg.is_file():
+        return [("pd-kopiya:missing", "scripts/pd_guard.py отсутствует")]
+    fails = []
+    fam = "testfam-cd"
+    with tempfile.TemporaryDirectory(prefix="stage9-pdkopiya-") as tmp:
+        td = Path(tmp)
+        (td / "scripts").mkdir()
+        for name in ("pd_guard.py", "pii_gate.py"):
+            src = tool(name)
+            if src.is_file():
+                shutil.copy(src, td / "scripts" / name)
+        # Дело живёт на диске и НЕ отслеживается git — как в бою.
+        (td / "cases" / fam / "delo-2026").mkdir(parents=True)
+        (td / "cases" / fam / "_client.md").write_text("профиль\n", encoding="utf-8")
+        (td / ".gitignore").write_text(f"cases/{fam}/\n", encoding="utf-8")
+        for cmd in (["init", "-q"], ["add", "-A"],
+                    ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "baza"]):
+            run(["git", *cmd], cwd=td)
+        py(td / "scripts" / "pd_guard.py", "--install", cwd=td)
+
+        def kommit(cwd: Path, text: str, msg: str):
+            (cwd / "zametka.md").write_text(text, encoding="utf-8")
+            run(["git", "add", "zametka.md"], cwd=cwd)
+            code, _ = run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                           "commit", "-qm", msg], cwd=cwd)
+            return code
+
+        # Опора: в основном дереве сторож работает.
+        if kommit(td, f"Позиция по делу {fam} обсуждена.\n", "osnovnoe") == 0:
+            return [("pd-kopiya:baza", "сторож не ловит фамилию даже в основном дереве — "
+                     "проба недействительна, чинить надо раньше")]
+        run(["git", "reset", "-q"], cwd=td)
+        (td / "zametka.md").unlink(missing_ok=True)
+
+        wt = td / ".wt" / "avtor"
+        run(["git", "worktree", "add", "-q", "-B", "autoloop/avtor", str(wt), "HEAD"],
+            cwd=td)
+        if not wt.is_dir():
+            return [("pd-kopiya:worktree", "рабочая копия роли не создалась")]
+        # Ось пропуска: та же фамилия в копии роли.
+        if kommit(wt, f"Позиция по делу {fam} обсуждена.\n", "rabota roli") == 0:
+            fails.append(("pd-kopiya:slep", "в рабочей копии роли ПД-сторож пропустил "
+                          "фамилию доверителя: список имён строится из рабочей копии, а "
+                          "в ней данных дел нет по устройству изоляции — сторож "
+                          "вырождается ровно там, где работают роли"))
+            code, _ = run(["git", "merge", "--no-edit", "autoloop/avtor"], cwd=td)
+            zametka = td / "zametka.md"
+            if code == 0 and zametka.is_file() and fam in zametka.read_text(encoding="utf-8"):
+                fails.append(("pd-kopiya:merzh", "мерж внёс фамилию доверителя в основную "
+                              "ветку: git на мерже pre-commit не зовёт, а установщик "
+                              "сторожа канал мержа не закрывает — публичный репозиторий "
+                              "получает персональные данные штатным путём работы роя"))
+        # Ось обихода: обычная работа роли коммитится свободно.
+        if kommit(wt, "Правка сторожа путей: добавлена проверка цели.\n", "obihod") != 0:
+            fails.append(("pd-kopiya:trevoga", "обычная правка в копии роли не "
+                          "коммитится — рой встанет на первой же итерации"))
+    return fails
+
+
 def check_dengi_formy_lzhi():
     """9.17: ложь о сумме ловится во всех живых формах записи.
 
@@ -3233,6 +3312,7 @@ CHECKS = [
     ("9.16 регистрация сторожа покрывает двери", check_matcher_pokrytie),
     ("9.16 расход чужих CLI не выдан за полный", check_raskhod_chuzhih_cli),
     ("9.17 гейт требует все каналы сторожа", check_hooks_polnota),
+    ("9.17 ПД-сторож не слепнет в копии роли", check_pd_v_kopii_roli),
     ("9.17 ложь о сумме ловится во всех формах", check_dengi_formy_lzhi),
     ("9.17 гарнитура видна во всех атрибутах", check_font_atributy_i_stili),
     ("9.17 сторож судит цель пути, не глагол", check_cel_a_ne_glagol),
