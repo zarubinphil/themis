@@ -215,11 +215,43 @@ def anchor_spec(spec, root=ROOT):
     return 0
 
 
-def _claude_guard_registered(path):
-    """Сторож стоит в блоке PreToolUse, а не упомянут словом в файле.
+# Двери, которые сторож обязан покрывать: записи и команды (Write/Edit/Bash) плюс
+# чтение (Read — маршрутизация бинарников). Регистрация на «Read» одной или на
+# чужой инструмент («WebFetch»), на «Write|Edit» без Bash — это дыра, неотличимая
+# от рабочей конфигурации при подстрочном чтении (проба 20.08.2026). NotebookEdit
+# в обязательный набор не входит: matcher, покрывающий четыре двери, засчитывается,
+# а более широкий (все пять, .*) — тем более.
+GUARD_DOORS = ("Write", "Edit", "Bash", "Read")
+# Всеохватные matcher'ы: покрывают любой инструмент. Пустая строка сюда НЕ входит —
+# «» это дверь настежь, а не «все двери».
+MATCHER_VSEOHVAT = {"*", ".*", ".+", "(.*)", "(.+)"}
 
-    Слово в комментарии ловится подстрокой и выглядит как регистрация; git и
-    харнесс читают структуру. Правило смотрит туда же, куда смотрит исполнитель.
+
+def _matcher_covers(matcher):
+    """matcher покрывает все защищаемые двери — списком имён либо всеохватным шаблоном.
+
+    matcher в Claude Code — регулярка по имени инструмента. Покрытие проверяется
+    так же: каждая обязательная дверь обязана совпасть целиком. Пустой matcher
+    совпадает лишь с пустым именем — это не покрытие, а открытая дверь.
+    """
+    m = (matcher or "").strip()
+    if m in MATCHER_VSEOHVAT:
+        return True
+    try:
+        pat = re.compile(f"^(?:{m})$")
+    except re.error:
+        return False
+    return all(pat.fullmatch(d) for d in GUARD_DOORS)
+
+
+def _claude_guard_registered(path):
+    """Сторож ВЫЗЫВАЕТСЯ на защищаемых дверях, а не упомянут словом в файле.
+
+    Две ошибки закрываются разом. Первая: слово в комментарии ловится подстрокой и
+    выглядит как регистрация — читаем структуру PreToolUse, как её читает харнесс.
+    Вторая: сторож повешен не на те двери (matcher «Read», «WebFetch», пустая
+    строка) — на записи и команды он тогда не зовётся вовсе. Регистрацией считается
+    только запись, где claude_guard стоит командой И matcher покрывает двери.
     """
     try:
         with open(path, encoding="utf-8", errors="ignore") as f:
@@ -228,9 +260,12 @@ def _claude_guard_registered(path):
         return False
     hooks = (data.get("hooks") or {}).get("PreToolUse") or []
     for entry in hooks if isinstance(hooks, list) else []:
-        for h in (entry.get("hooks") or []) if isinstance(entry, dict) else []:
-            if "claude_guard" in str(h.get("command", "")):
-                return True
+        if not isinstance(entry, dict):
+            continue
+        has_guard = any("claude_guard" in str(h.get("command", ""))
+                        for h in (entry.get("hooks") or []))
+        if has_guard and _matcher_covers(entry.get("matcher", "")):
+            return True
     return False
 
 
@@ -251,6 +286,22 @@ def _hook_calls(text, marker):
         if marker in line:
             return True
     return False
+
+
+def _required_hooks(root=ROOT):
+    """Обязательные git-хуки = ровно то, что ставит установщик pd_guard.
+
+    База — pre-commit и commit-msg: без ПД-сторожа содержимого и сообщения коммит
+    нельзя. Если установщик (`scripts/pd_guard.py`) на месте, он ставит ещё pre-push
+    (имя ветки/тега — тоже публичная ссылка), и гейт обязан требовать весь его
+    комплект: что установщик ставит, то гейт требует. Проба 20.08.2026: pre-push
+    стоял в песочнице установщика, но отсутствовал в боевом репозитории при зелёном
+    гейте — списки обязательного и ставимого разъехались.
+    """
+    hooks = ["pre-commit", "commit-msg"]
+    if os.path.isfile(os.path.join(root, "scripts", "pd_guard.py")):
+        hooks.append("pre-push")
+    return hooks
 
 
 def check_hooks(root=ROOT):
@@ -277,7 +328,7 @@ def check_hooks(root=ROOT):
                       f"core.hooksPath уводит хуки вне репозитория ({cfg.strip()}) — "
                       f"файлы на месте, но git зовёт не их"))
 
-    for name in ("pre-commit", "commit-msg"):
+    for name in _required_hooks(root):
         path = os.path.join(hooks_dir, name)
         if not os.path.isfile(path):
             fails.append((f"hooks:missing-{name}",
@@ -467,7 +518,8 @@ def selftest():
         assert check_hooks(tmp), "голое дерево без хуков объявлено зарегистрированным"
         hp = os.path.join(tmp, ".git", "hooks")
         os.makedirs(hp, exist_ok=True)
-        for name, arg in (("pre-commit", "--staged"), ("commit-msg", '--msg "$1"')):
+        for name, arg in (("pre-commit", "--staged"), ("commit-msg", '--msg "$1"'),
+                          ("pre-push", "--push")):
             f_path = os.path.join(hp, name)
             with open(f_path, "w", encoding="utf-8") as f:
                 f.write(f"#!/bin/sh\nexec python3 scripts/pd_guard.py {arg}\n")
@@ -475,8 +527,10 @@ def selftest():
         cl = os.path.join(tmp, ".claude")
         os.makedirs(cl, exist_ok=True)
         settings = os.path.join(cl, "settings.json")
-        rabochiy = {"hooks": {"PreToolUse": [{"matcher": "Write|Edit|Bash|Read", "hooks": [
-            {"type": "command", "command": "python3 scripts/claude_guard.py"}]}]}}
+        # matcher обязан покрывать ВСЕ защищаемые двери, иначе сторож на них не зовётся.
+        rabochiy = {"hooks": {"PreToolUse": [
+            {"matcher": "Write|Edit|Bash|Read|NotebookEdit", "hooks": [
+                {"type": "command", "command": "python3 scripts/claude_guard.py"}]}]}}
         with open(settings, "w", encoding="utf-8") as f:
             json.dump(rabochiy, f)
         assert check_hooks(tmp) == [], f"рабочие сторожа не признаны: {check_hooks(tmp)}"
