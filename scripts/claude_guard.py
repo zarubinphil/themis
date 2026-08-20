@@ -567,7 +567,7 @@ def _sudact_allowed() -> bool:
 
 
 # Чужой CLI за границей процесса — мимо наших ворот. claude_guard живёт ВНУТРИ
-# нашего процесса; прямой `codex exec …`/`kimi -p …` из Bash уносит материалы дела
+# нашего процесса; прямой вызов чужого CLI из Bash уносит материалы дела
 # без обезличивания и пробы, а за границей процесса сторожа нет вовсе (проба
 # 20.08.2026). Имена берём из декларативного реестра (единственный дом имён, этап
 # 9.1) — не хардкод; наш claude и наш коннектор foreign_cli/cli_router под запрет
@@ -996,24 +996,33 @@ def selftest() -> int:
              "file_path": "/tmp/chuzhoy-repo/cases/util.py", "content": "x"}}), 0),
         ("распаковка в /tmp/cases пропускается",
          run({"tool_name": "Bash", "tool_input": {"command": "tar -xf /tmp/mat.tar -C /tmp/cases"}}), 0),
-        # ── Чужой CLI мимо коннектора (проба 20.08.2026) ── имена из реестра, обе оси.
-        ("прямой вызов codex из Bash блокируется",
-         run({"tool_name": "Bash", "tool_input": {"command": 'codex exec "составь карту дела"'}}), 2),
-        ("прямой вызов kimi из Bash блокируется",
-         run({"tool_name": "Bash", "tool_input": {"command": 'kimi -p "$(cat /tmp/v.txt)"'}}), 2),
-        ("cd && codex — тоже блок (командная позиция после &&)",
-         run({"tool_name": "Bash", "tool_input": {"command": "cd /tmp && gemini exec 'x'"}}), 2),
+        # ── Чужой CLI мимо коннектора (проба 20.08.2026) ── обе оси.
+        # Имена берутся ИЗ РЕЕСТРА, а не пишутся здесь: подключение нового CLI
+        # строкой реестра обязано сразу попадать под сторожа, без правки кода.
+        ("прямой вызов чужого CLI из Bash блокируется",
+         all(run({"tool_name": "Bash", "tool_input": {
+             "command": f'{imya} exec "составь карту дела"'}}) == 2
+             for imya in _foreign_cli_names()) if _foreign_cli_names() else True, True),
+        ("чужой CLI после && — тоже блок (командная позиция)",
+         all(run({"tool_name": "Bash", "tool_input": {
+             "command": f"cd /tmp && {imya} -p 'x'"}}) == 2
+             for imya in _foreign_cli_names()) if _foreign_cli_names() else True, True),
         ("наш claude -p пропускается (наш харнесс, не чужой CLI)",
          run({"tool_name": "Bash", "tool_input": {"command": "claude -p 'вопрос'"}}), 0),
+        ("поиск по имени чужого CLI не блокируется — это чтение, не вызов",
+         all(run({"tool_name": "Bash", "tool_input": {
+             "command": f"grep -n {imya} scripts/cli_registry.json"}}) == 0
+             for imya in _foreign_cli_names()) if _foreign_cli_names() else True, True),
         ("коннектор foreign_cli.py --role пропускается",
          run({"tool_name": "Bash", "tool_input": {
              "command": "python3 scripts/foreign_cli.py --role hunter-leaf --prompt v.txt"}}), 0),
         ("cli_router.py --role пропускается",
          run({"tool_name": "Bash", "tool_input": {
              "command": "python3 scripts/cli_router.py --role hunter-leaf --json"}}), 0),
-        ("имя чужого CLI в кавычках/прозе не блокирует",
-         run({"tool_name": "Bash", "tool_input": {
-             "command": "echo 'реестр codex/kimi описан в scripts/cli_registry.json'"}}), 0),
+        ("имя чужого CLI в прозе не блокирует",
+         all(run({"tool_name": "Bash", "tool_input": {
+             "command": f"echo 'реестр {imya} описан в scripts/cli_registry.json'"}}) == 0
+             for imya in _foreign_cli_names()) if _foreign_cli_names() else True, True),
     ]
     bad = [name for name, got, want in cases if got != want]
     for name, got, want in cases:
