@@ -299,14 +299,15 @@ def _required_hooks(root=ROOT):
 
     База — pre-commit и commit-msg: без ПД-сторожа содержимого и сообщения коммит
     нельзя. Если установщик (`scripts/pd_guard.py`) на месте, он ставит ещё pre-push
-    (имя ветки/тега — тоже публичная ссылка), и гейт обязан требовать весь его
+    (имя ветки/тега — публичная ссылка) и reference-transaction (тело тега уезжает
+    при push, а git-хука на создание тега нет), и гейт обязан требовать весь его
     комплект: что установщик ставит, то гейт требует. Проба 20.08.2026: pre-push
     стоял в песочнице установщика, но отсутствовал в боевом репозитории при зелёном
     гейте — списки обязательного и ставимого разъехались.
     """
     hooks = ["pre-commit", "commit-msg"]
     if os.path.isfile(os.path.join(root, "scripts", "pd_guard.py")):
-        hooks.append("pre-push")
+        hooks += ["pre-push", "reference-transaction"]
     return hooks
 
 
@@ -525,7 +526,7 @@ def selftest():
         hp = os.path.join(tmp, ".git", "hooks")
         os.makedirs(hp, exist_ok=True)
         for name, arg in (("pre-commit", "--staged"), ("commit-msg", '--msg "$1"'),
-                          ("pre-push", "--push")):
+                          ("pre-push", "--push"), ("reference-transaction", '--ref-txn "$1"')):
             f_path = os.path.join(hp, name)
             with open(f_path, "w", encoding="utf-8") as f:
                 f.write(f"#!/bin/sh\nexec python3 scripts/pd_guard.py {arg}\n")

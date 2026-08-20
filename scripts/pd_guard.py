@@ -38,10 +38,12 @@ scripts/registry_check.py и в тело сообщения коммита. **И
 """
 import argparse
 import glob
+import io
 import os
 import re
 import subprocess
 import sys
+import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CASES = os.path.join(ROOT, "cases")
@@ -232,6 +234,38 @@ def git(*args: str) -> str:
     return r.stdout.decode("utf-8", "replace") if r.returncode == 0 else ""
 
 
+def git_bytes(*args: str) -> bytes:
+    """Сырой блоб без декодирования: .docx это zip, декодировать его в utf-8
+    значит потерять содержимое до проверки."""
+    r = subprocess.run(["git", *args], capture_output=True, cwd=ROOT)
+    return r.stdout if r.returncode == 0 else b""
+
+
+# Office-форматы — это zip с XML внутри, а не двоичная непрозрачность. Судебные
+# документы именно .docx: фамилия доверителя лежит в word/document.xml, и без
+# распаковки сторож объявляет такой коммит чистым (ложная уверенность хуже молчания).
+OFFICE_ZIP_EXT = (".docx", ".xlsx", ".pptx")
+
+
+def _office_xml_text(blob: bytes) -> str:
+    """Видимый текст из office-zip: снимаем zip и XML-разметку, чтобы фамилия
+    внутри стала обычной строкой для scan_text/scan_pii. Не zip — пусто."""
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(blob))
+    except (zipfile.BadZipFile, OSError):
+        return ""
+    parts = []
+    for name in zf.namelist():
+        if not name.endswith(".xml"):
+            continue
+        try:
+            raw = zf.read(name).decode("utf-8", "replace")
+        except (OSError, KeyError, RuntimeError):
+            continue
+        parts.append(re.sub(r"<[^>]+>", " ", raw))
+    return "\n".join(parts)
+
+
 def staged_files() -> list[str]:
     return [f for f in git("diff", "--cached", "--name-only", "--diff-filter=ACMRT").split("\n") if f]
 
@@ -251,11 +285,49 @@ def check_staged(pat: re.Pattern | None) -> list[str]:
     problems = []
     for f in staged_files():
         problems += scan_text(f, pat, "путь файла")
+        if f.lower().endswith(OFFICE_ZIP_EXT):
+            # .docx/.xlsx/.pptx — это zip: читаем сырьё и распаковываем текст.
+            text = _office_xml_text(git_bytes("show", f":{f}"))
+            hits = scan_text(text, pat, f) + scan_pii(text, f) if text else []
+            if hits:
+                # Отклонённый бинарный судебный документ снимается с индекса:
+                # заблокированный коммит иначе оставляет .docx в staged, и каждый
+                # следующий коммит наследует ту же блокировку. Снятие с индекса
+                # (файл на диске цел) даёт работать с остальным.
+                subprocess.run(["git", "reset", "-q", "--", f], cwd=ROOT,
+                               capture_output=True)
+                problems += hits
+            continue
         blob = git("show", f":{f}")
         if blob:
             problems += scan_text(blob, pat, f)
             if not _is_test_fixture_code(f):
                 problems += scan_pii(blob, f)
+    return problems
+
+
+def check_ref_txn(pat: re.Pattern | None, state: str, stdin: str | None = None) -> list[str]:
+    """reference-transaction: тело и имя аннотированного тега — публичная ссылка.
+
+    Тег создаётся ЛОКАЛЬНО и уезжает при push, а git-хука на создание тега нет.
+    Но reference-transaction срабатывает на обновлении refs/tags/* и в фазе
+    `prepared` его можно отменить ненулевым кодом. Обновления refs/heads/* (обычный
+    коммит) не трогаем — их держат pre-commit/commit-msg; иначе сторож заблокирует
+    всякую работу с ветками."""
+    if state != "prepared":
+        return []
+    text = sys.stdin.read() if stdin is None else stdin
+    problems = []
+    for line in text.splitlines():
+        row = line.split()
+        if len(row) < 3:
+            continue
+        new, ref = row[1], row[2]
+        if not ref.startswith("refs/tags/"):
+            continue
+        problems += scan_text(ref[len("refs/tags/"):], pat, "имя тега")
+        if git("cat-file", "-t", new).strip() == "tag":   # тело только у аннотированного
+            problems += scan_text(git("cat-file", "-p", new), pat, "тело тега")
     return problems
 
 
@@ -333,13 +405,14 @@ def install() -> int:
     os.makedirs(hooks, exist_ok=True)
     for name, arg in (("pre-commit", "--staged"),
                       ("commit-msg", '--msg "$1"'),
-                      ("pre-push", "--push")):
+                      ("pre-push", "--push"),
+                      ("reference-transaction", '--ref-txn "$1"')):
         path = os.path.join(hooks, name)
         with open(path, "w", encoding="utf-8") as f:
             f.write(HOOK % arg)
         os.chmod(path, 0o755)
         print(f"поставлен {path}")
-    print("Теперь коммит с фамилией доверителя не пройдёт ни содержимым, ни сообщением.")
+    print("Теперь ни коммит, ни тег с фамилией доверителя не пройдёт наружу.")
     return 0
 
 
@@ -370,6 +443,8 @@ def main() -> int:
     ap.add_argument("--local-logs", action="store_true",
                     help="рабочие логи (audit.log, cases/_logs/) вне git")
     ap.add_argument("--push", action="store_true", help="проверить имена веток/тегов pre-push")
+    ap.add_argument("--ref-txn", metavar="STATE",
+                    help="reference-transaction: тело/имя тега (фаза prepared)")
     ap.add_argument("--install", action="store_true", help="поставить git-хуки")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
@@ -395,6 +470,11 @@ def main() -> int:
         return report(check_local_logs(), "рабочих логах")
     if a.push:
         return report(check_push_refs(pat), "имени ветки или тега")
+    if a.ref_txn:
+        # Тело тега — проза (пишут по-русски), имя — латиница; кириллический
+        # шаблон покрывает и то и другое.
+        pat = name_pattern(client_names(), cyrillic=True)
+        return report(check_ref_txn(pat, a.ref_txn), "теле или имени тега")
     if a.tree:
         return report(check_tree(pat), "дереве git")
     if a.staged:
@@ -431,6 +511,17 @@ def selftest() -> int:
     names = client_names(cases)
     pat = name_pattern(names)
     pat_msg = name_pattern(names, cyrillic=True)
+
+    def _docx_bytes(body: str) -> bytes:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("word/document.xml",
+                        "<w:document><w:body><w:p><w:r><w:t>"
+                        f"{body}</w:t></w:r></w:p></w:body></w:document>")
+        return buf.getvalue()
+
+    dirty_docx = _office_xml_text(_docx_bytes("По делу familiya-ab прошу"))
+    clean_docx = _office_xml_text(_docx_bytes("Ходатайство об истребовании"))
 
     checks = [
         # Кириллица: пара «утечка в сообщении коммита + обиход в содержимом».
@@ -494,6 +585,23 @@ def selftest() -> int:
          not _is_test_fixture_code("knowledge/x.md")),
         ("тот же литерал в .md по-прежнему ловится scan_pii (утечка не потеряна)",
          len(scan_pii("СНИЛС 123-456-789 64", "note.md")) >= 1),
+        # .docx это zip: фамилия внутри word/document.xml видна, чистый — молчит.
+        ("фамилия внутри .docx (zip) распакована и поймана",
+         len(scan_text(dirty_docx, pat, "hod.docx")) >= 1),
+        ("чистый .docx без имён проходит", scan_text(clean_docx, pat, "hod.docx") == []),
+        ("не-zip под видом .docx не роняет сторож", _office_xml_text(b"not a zip") == ""),
+        # reference-transaction: тело/имя тега судится в фазе prepared.
+        ("тело аннотированного тега с фамилией ловится",
+         len(scan_text("релиз по делу familiya-ab", pat_msg, "тело тега")) >= 1),
+        ("имя тега с фамилией ловится в prepared",
+         len(check_ref_txn(pat, "prepared",
+                           "0 0 refs/tags/familiya-ab\n")) >= 1),
+        ("фаза committed тег не судит (отмена уже невозможна)",
+         check_ref_txn(pat, "committed", "0 0 refs/tags/familiya-ab\n") == []),
+        ("обновление ветки reference-transaction не трогает",
+         check_ref_txn(pat, "prepared", "0 0 refs/heads/familiya-ab\n") == []),
+        ("чистый тег в prepared проходит",
+         check_ref_txn(pat, "prepared", "0 0 refs/tags/v2.0\n") == []),
     ]
     for name, ok in checks:
         print(f"  {'✓' if ok else '✗'} {name}")
