@@ -146,17 +146,39 @@ def _is_new_intake_file(cmd: str) -> bool:
 # найдена и закрыта в scripts/themis_status.py (дело 04.08.2026). Проверка
 # построчная — все маркеры конвейера однострочные.
 _NEGATED_MARKER_RE = re.compile(r"\b(?:без|нет|не)\s+маркера", re.I)
+_FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
 
 
-def _has_marker(path, pattern: str) -> bool:
+def _has_marker(path, pattern: str, anchored: bool = True) -> bool:
+    """Маркер шага — СТРУКТУРА файла, а не подстрока в строке. Заголовок стоит в
+    СВОЕЙ строке: вне блока кода, вне цитаты (`>`), не зачёркнут (`~~`), не в
+    HTML-комментарии, не в отрицании. Карта, прямым текстом говорящая «маркер
+    ## КАРТА ГОТОВА ✓ отсутствует», готовой не считается (проба 20.08.2026).
+    anchored=True (шаговые маркеры-заголовки) — паттерн в НАЧАЛЕ строки; иначе
+    строка «Маркер ## КАРТА ГОТОВА ✓ отсутствует» прошла бы вхождением. Логика
+    единая с themis_status.has_marker: разошедшиеся копии одного гейта проект уже
+    проходил (humanizer-гейт)."""
     try:
         with open(path, encoding="utf-8") as f:
             text = f.read()
     except OSError:
         return False
     rx = re.compile(pattern)
-    return any(rx.search(line) and not _NEGATED_MARKER_RE.search(line)
-               for line in text.splitlines())
+    in_fence = False
+    for line in text.splitlines():
+        if _FENCE_RE.match(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        s = line.lstrip()
+        if s.startswith((">", "~~", "<!--")):
+            continue
+        if _NEGATED_MARKER_RE.search(line):
+            continue
+        if rx.match(s) if anchored else rx.search(s):
+            return True
+    return False
 
 
 # Практика считается закрытой ДВУМЯ путями, и они не равны по силе:

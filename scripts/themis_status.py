@@ -42,16 +42,38 @@ FLAGS = ("[ОБНОВИТЬ КЛИЕНТА]", "[ОБНОВИТЬ ИНДЕКС]")
 # маркера», прибор показывал ✓, а claude_guard.py пускал запись черновиков).
 # Проверка идёт построчно, потому что все маркеры однострочные.
 NEGATED_MARKER_RE = re.compile(r"\b(?:без|нет|не)\s+маркера", re.I)
+FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
 
 
-def has_marker(f: Path, pattern: str) -> bool:
+def has_marker(f: Path, pattern: str, anchored: bool = True) -> bool:
+    """Маркер шага — СТРУКТУРА файла, а не подстрока в строке. Заголовок стоит в
+    СВОЕЙ строке: вне блока кода, вне цитаты (`>`), не зачёркнут (`~~`), не в
+    HTML-комментарии, не в отрицании. Строка «Маркер ## КАРТА ГОТОВА ✓
+    отсутствует» готовой картой не является (проба 20.08.2026). anchored=True
+    (шаговые маркеры-заголовки) — паттерн в НАЧАЛЕ строки; anchored=False
+    (вердикт, флаги) — паттерн бывает внутри строки, ищем вхождением. Логика
+    единая с claude_guard._has_marker: разошедшиеся копии одного гейта проект
+    уже проходил (humanizer-гейт)."""
     try:
         text = f.read_text(encoding="utf-8")
     except OSError:
         return False
     rx = re.compile(pattern)
-    return any(rx.search(line) and not NEGATED_MARKER_RE.search(line)
-               for line in text.splitlines())
+    in_fence = False
+    for line in text.splitlines():
+        if FENCE_RE.match(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        s = line.lstrip()
+        if s.startswith((">", "~~", "<!--")):
+            continue
+        if NEGATED_MARKER_RE.search(line):
+            continue
+        if rx.match(s) if anchored else rx.search(s):
+            return True
+    return False
 
 
 def fakty_zamorozheny(case: Path) -> bool:
@@ -63,7 +85,7 @@ def fakty_zamorozheny(case: Path) -> bool:
     (та же дыра, что закрыта в has_marker).
     """
     return has_marker(case / ".agent/context" / "_working" / "brief.md",
-                      r"ФАКТУРА ЗАМОРОЖЕНА")
+                      r"ФАКТУРА ЗАМОРОЖЕНА", anchored=False)
 
 
 def age_days(f: Path) -> int:
@@ -239,7 +261,7 @@ def main() -> int:
     # ФЕМИДЫ»). Без второго маркера FAST-прогон упирался в шаг 3 навсегда: совета
     # на нём не бывает, а ставить «СОГЛАСОВАНО СОВЕТОМ» без совета — врать прибору.
     s3 = has_marker(pos, r"СОГЛАСОВАНО СОВЕТОМ") or has_marker(pos, r"## FAST-ПОЗИЦИЯ ФЕМИДЫ")
-    s3_skip = has_marker(case_md, r"position-council пропущен")
+    s3_skip = has_marker(case_md, r"position-council пропущен", anchored=False)
 
     level = "?"
     try:
@@ -267,7 +289,8 @@ def main() -> int:
     # и в «документ пока НЕ готов к подаче» — машина принимала отказ Кони за приёмку
     # и пускала протокол на шаг вперёд. Отрицание отсекаем явно.
     approved_in = next((f for f in candidates
-                        if has_marker(f, r"(?<!НЕ )(?<!не )ГОТОВ К ПОДАЧЕ")), None)
+                        if has_marker(f, r"(?<!НЕ )(?<!не )ГОТОВ К ПОДАЧЕ",
+                                      anchored=False)), None)
     approved = approved_in is not None
 
     def mark(ok: bool) -> str:
