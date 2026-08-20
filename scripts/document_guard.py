@@ -209,54 +209,108 @@ def check_docx(path: str, l3: bool = False, dogovor: bool = False) -> list[str]:
     return problems
 
 
-# Денежная сумма: число (пробелы/неразрывные как разряды, запятая — копейки),
-# затем опционально пропись в круглых скобках, затем валюта. Якорь — слово
+# Денежная сумма: число (пробелы/неразрывные или точка-между-тройками как
+# разряды, запятая — копейки), затем опционально пропись в круглых скобках,
+# затем валюта — либо валюта последним словом внутри скобок. Якорь — слово
 # валюты: без него даты, статьи, номера дел, ИНН, ставки и листы дела сюда
 # не попадают, и правильно — прописи требует только сумма денег.
+# Разряд склеивается ТОЛЬКО пробелом/неразрывным или точкой между тройками:
+# перевод строки числа не склеивает — иначе ячейка таблицы сливается с номером
+# строки, а номер счета — с суммой под ним (ложные тревоги пробы 20.08.2026).
+# «руб.» с точкой — основная письменная форма («Цена иска: 1 250 000 руб.»);
+# граница слова после точки не строится \b, поэтому хвост проверяется
+# явным запретом буквы.
+_MONEY_NUM = (r"\d{1,3}(?:[ \u00a0]\d{3})+(?:,\d{1,2})?"
+              r"|\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?"
+              r"|\d+(?:,\d{1,2})?")
+_MONEY_CUR = r"руб(?:л[а-я]*)?\.?|коп(?:е[а-я]*)?\.?"
 _MONEY_RE = re.compile(
-    r"(?P<num>\d[\d\s]*\d(?:,\d{1,2})?|\d(?:,\d{1,2})?)"
-    r"(?:\s*\((?P<propis>[^()]*)\))?"
-    r"\s+(?P<cur>руб(?:\.|л[а-я]*)|коп(?:\.|е[а-я]*))\b",
+    rf"(?P<num>{_MONEY_NUM})"
+    rf"(?:\s*\((?P<propis>[^()]*)\))?"
+    rf"(?:\s+(?P<cur>{_MONEY_CUR}))?(?![а-яА-Я])",
     re.I)
+
+
+def _money_int(num_raw: str) -> tuple[str, str | None]:
+    """Целая часть и копейки найденного числа: пробелы и точки между тройками —
+    разряды, запятая — копейки."""
+    s = num_raw.replace("\u00a0", " ").strip()
+    kop = None
+    if "," in s:
+        s, kop = s.split(",", 1)
+    s = s.replace(" ", "")
+    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", s):
+        s = s.replace(".", "")
+    return s, kop
 
 
 def check_money_propis(text: str, where: str) -> list[str]:
     """Денежная сумма обязана нести пропись в круглых скобках, и пропись обязана
     совпадать с числом: «1 000 (сто тысяч) рублей» глазами не ловится, для того
-    и прибор. Конвертер — свой `scripts/propis.py`; недоступен — fail-closed,
-    непроверенный документ чистым не считается."""
+    и прибор. Сверка — по словам целиком: «пять» внутри «пятьдесят» и префикс
+    «одна тысяча» в «одна тысяча двести» совпадением не считаются. Конвертер —
+    свой `scripts/propis.py`; недоступен — fail-closed. Число сверх предела
+    конвертера — строка нарушения, а не трасса: до остальных проверок документа
+    авария недопустима."""
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import propis as _propis
     except ImportError:
         return [f"{where}: scripts/propis.py недоступен — совпадение прописи "
                 f"с числом НЕ проверено (fail-closed)"]
+    # Дословная цитата нормы в кавычках-елочках воспроизводится как в законе —
+    # требовать там пропись значит запретить цитирование (правило проекта —
+    # цитировать дословно). Сверяем текст без цитат.
+    text = re.sub(r"«[^»]*»", " ", text)
     problems = []
     for m in _MONEY_RE.finditer(text):
         num_raw = m.group("num")
-        int_str = re.sub(r"\s", "", num_raw).split(",")[0]
-        kop_str = num_raw.split(",")[1] if "," in num_raw else None
-        # «рублей 00 копеек» — нулевые копейки цифрами это обиход, не сумма.
-        if int(int_str) == 0:
-            continue
+        words_raw = m.group("propis")
         cur = m.group("cur")
-        words = m.group("propis")
-        if words is None:
-            problems.append(f"{where}: сумма {num_raw} {cur} без прописи в "
-                            f"круглых скобках — денежная сумма пишется цифрами "
-                            f"и прописью: «{num_raw} ({_propis.propis(int(int_str))}) {cur}»")
+        words = re.sub(r"\s+", " ", (words_raw or "").strip().lower()).split()
+        words = [w for w in words if w]
+        # Якорь-валюта: снаружи скобок или последним словом внутри них —
+        # «1 000 (сто тысяч рублей)» та же денежная сумма.
+        has_cur = cur is not None
+        if words and (words[-1].startswith("руб") or words[-1].startswith("коп")):
+            has_cur = True
+            words = words[:-1]
+        if not has_cur:
+            continue  # не деньги: дата, статья, номер дела, ИНН, ставка
+        int_str, kop_str = _money_int(num_raw)
+        if not int_str or int(int_str) == 0:
+            continue  # «рублей 00 копеек» — нулевые копейки цифрами это обиход
+        cur_show = cur or (words_raw or "").strip().split()[-1]
+        try:
+            expected = _propis.propis(int(int_str))
+        except ValueError as e:
+            problems.append(f"{where}: число {num_raw} не конвертируется ({e}) — "
+                            f"сумма осталась НЕ проверенной")
             continue
-        expected = _propis.propis(int(int_str))
-        norm = re.sub(r"\s+", " ", words.strip().lower())
-        if kop_str is None or int(kop_str) == 0:
-            ok = norm == expected
+        if not words:
+            problems.append(f"{where}: сумма {num_raw} {cur_show} без прописи в "
+                            f"круглых скобках — денежная сумма пишется цифрами "
+                            f"и прописью: «{num_raw} ({expected}) {cur_show}»")
+            continue
+        exp_rub = expected.split()
+        try:
+            exp_kop = (_propis.propis(int(kop_str)).split()
+                       if kop_str and int(kop_str) else None)
+        except ValueError as e:
+            problems.append(f"{where}: копейки {num_raw} не конвертируются ({e}) — "
+                            f"сумма осталась НЕ проверенной")
+            continue
+        if exp_kop is None:
+            ok = words == exp_rub
         else:
             # Копейки: «одна тысяча двести тридцать четыре рубля пятьдесят
-            # шесть копеек» — сверяем обе части внутри одних скобок.
-            ok = norm.startswith(expected) and \
-                _propis.propis(int(kop_str)) in norm
+            # шесть копеек» — обе части внутри одних скобок, словами целиком.
+            n = len(exp_rub)
+            ok = (words[:n] == exp_rub and len(words) > n
+                  and words[n].startswith("руб")
+                  and words[n + 1:] == exp_kop)
         if not ok:
-            problems.append(f"{where}: пропись «{words.strip()}» НЕ совпадает "
+            problems.append(f"{where}: пропись «{words_raw.strip()}» НЕ совпадает "
                             f"с числом {num_raw} — ожидалось «{expected}»")
     return problems
 
@@ -665,15 +719,12 @@ def main() -> int:
         problems += check_attachments(text)
     if a.md:
         problems += check_md_vs_docx(a.md, a.docx)
-        # Источник правят руками чаще, чем сборку: скобки ловим и в .md,
-        # иначе они переживут пересборку и всплывут в следующей редакции.
+        # .md уходит доверителю тем же документом, поэтому проверяется ЦЕЛИКОМ
+        # той же машиной: плейсхолдеры, «ё», даты, скобки, пропуски и денежная
+        # ось — иначе незаполненное поле переживает пересборку и всплывает в
+        # следующей редакции (проба 20.08.2026).
         md_text = open(a.md, encoding="utf-8").read()
-        md_square = len(re.findall(r"[\[\]]", md_text))
-        if md_square:
-            problems.append(f"{os.path.basename(a.md)}: квадратные скобки — "
-                            f"{md_square} шт. Ссылки и вставки только в круглых")
-        # .md уходит доверителю тем же документом: ось прописи общая с .docx.
-        problems += check_money_propis(md_text, os.path.basename(a.md))
+        problems += check_text(md_text, os.path.basename(a.md), dogovor=a.dogovor)
 
     if not problems:
         print(f"✓ {os.path.basename(a.docx)}: формат и согласованность в порядке")
