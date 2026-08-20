@@ -54,22 +54,27 @@ def _resolve(path: str, base: str) -> str:
 
 
 def _under_cases(abspath: str) -> bool:
-    """abspath внутри cases/ НАШЕГО проекта (а не любого каталога со словом cases)."""
+    """abspath внутри cases/ НАШЕГО проекта (а не любого каталога со словом cases).
+
+    Сравнение регистронезависимое: APFS/HFS+ регистр не различают, `00_INTAKE` и
+    `cases` заглавными — ТОТ ЖЕ каталог, что `00_intake` и `cases`. Сторож, судящий
+    по чувствительной к регистру строке, снимается сменой регистра (проба 20.08.2026)."""
     if not abspath:
         return False
-    try:
-        rel = os.path.relpath(abspath, PROJECT_CASES)
-    except ValueError:             # разные тома (Windows) — точно не наши дела
-        return False
-    return not (rel == os.pardir or rel.startswith(os.pardir + os.sep))
+    a = abspath.replace(os.sep, "/").split("/")
+    c = PROJECT_CASES.replace(os.sep, "/").split("/")
+    return (len(a) > len(c)
+            and [x.casefold() for x in a[:len(c)]] == [x.casefold() for x in c])
 
 
 def _case_rel(abspath: str):
     """Компоненты пути цели относительно наших cases/: [клиент, дело, ...хвост].
-    None — цель вне наших дел."""
+    None — цель вне наших дел. Регистр prefix не важен (APFS), хвост — как на диске."""
     if not _under_cases(abspath):
         return None
-    return os.path.relpath(abspath, PROJECT_CASES).replace(os.sep, "/").split("/")
+    a = abspath.replace(os.sep, "/").split("/")
+    c = PROJECT_CASES.replace(os.sep, "/").split("/")
+    return a[len(c):]
 
 
 _LEADING_CD_RE = re.compile(r"^\s*cd\s+([^\s;&|]+)\s*(?:&&|;|\|)")
@@ -103,9 +108,9 @@ def _is_new_intake_file(cmd: str) -> bool:
     if len(parts) != 3 or parts[0] not in ("cp", "mv"):
         return False
     src, dst = parts[1], parts[2]
-    if re.search(r"00_intake|_baselines", src):
+    if re.search(r"00_intake|_baselines", src, re.I):
         return False
-    if "/00_intake/" not in dst.replace(os.sep, "/"):
+    if not re.search(r"/00_intake/", dst.replace(os.sep, "/"), re.I):
         return False
     dst_abs = os.path.expanduser(dst)
     if os.path.isdir(dst_abs):        # цель-папка: имя внутри неизвестно, не рискуем
@@ -158,14 +163,15 @@ def _workflow_gate(p: str) -> None:
     km = os.path.join(case_root, ".agent/context/knowledge-map.md")
     pr = os.path.join(case_root, ".agent/context/practice.md")
     tail = "/".join(rel[2:])
+    tail_cf = tail.casefold()       # APFS регистр не различает — сторож обязан тоже
 
-    if tail == ".agent/context/practice.md" and not _has_marker(km, r"## КАРТА ГОТОВА ✓"):
+    if tail_cf == ".agent/context/practice.md" and not _has_marker(km, r"## КАРТА ГОТОВА ✓"):
         block(
             "БЛОК ПРОТОКОЛА: practice.md пишется только после Шага 1 — "
             "в knowledge-map.md нет маркера «## КАРТА ГОТОВА ✓». Запустить case-mapper. "
             "Статус: python3 scripts/themis_status.py " + case_root
         )
-    if tail == ".agent/context/positions.md" and not _has_marker(pr, PRACTICE_MARKER):
+    if tail_cf == ".agent/context/positions.md" and not _has_marker(pr, PRACTICE_MARKER):
         block(
             "БЛОК ПРОТОКОЛА: positions.md пишется только после Шага 2 — "
             "в practice.md нет ни «## СОВЕТ ЗАВЕРШЕН», ни «## FAST-СИНТЕЗ ФЕМИДЫ». "
@@ -175,11 +181,12 @@ def _workflow_gate(p: str) -> None:
     # Кухня и слой человека сторожатся ОДИНАКОВО. После переезда на два слоя
     # (19.08.2026) документ мог лечь прямо в GOTOVO/ мимо конвейера — то есть
     # мимо маркеров попасть сразу на стол юристу, минуя и карту, и практику.
-    guarded = tail.startswith(".agent/drafts/") or tail.startswith("GOTOVO/")
-    exempt = "_working" in rel[2:] or "_baselines" in rel[2:]
+    guarded = tail_cf.startswith(".agent/drafts/") or tail_cf.startswith("gotovo/")
+    tail_parts_cf = [x.casefold() for x in rel[2:]]
+    exempt = "_working" in tail_parts_cf or "_baselines" in tail_parts_cf
     if guarded and not exempt:
         if not _has_marker(km, r"## КАРТА ГОТОВА ✓") or not _has_marker(pr, PRACTICE_MARKER):
-            where = "GOTOVO/" if tail.startswith("GOTOVO/") else ".agent/drafts/"
+            where = "GOTOVO/" if tail_cf.startswith("gotovo/") else ".agent/drafts/"
             block(
                 f"БЛОК ПРОТОКОЛА: документ в {where} пишется только после Шагов 1-2 — "
                 "нет маркера карты и/или практики. Судебные документы вне конвейера запрещены. "
@@ -211,6 +218,7 @@ def _cases_write_gate(paths) -> None:
         # cases/_assets, cases/_templates, cases/_logs — служебное хозяйство системы, а
         # не дело. Там растр законен: `cases/_assets/подпись.png` — подпись владельца.
         service = rel[0].startswith("_")
+        in_intake = any(c.casefold() == "00_intake" for c in rel)   # APFS: 00_INTAKE == 00_intake
         if ext in RASTER_EXT and service:
             continue
         if ext in CODE_EXT:
@@ -220,7 +228,7 @@ def _cases_write_gate(paths) -> None:
                 "накопились 84 скрипта, 15 с запрещённым шрифтом). Прибор пишется в scripts/, "
                 "разовая обработка — во временный каталог."
             )
-        if ext in RASTER_EXT and "00_intake" not in rel:
+        if ext in RASTER_EXT and not in_intake:
             block(
                 f"БЛОК: растр (.{ext}) под cases/ вне 00_intake запрещён — рендер страницы "
                 "производен и место ему в кеше: --render-dir /tmp/{дело}/{имя}. "
@@ -266,6 +274,9 @@ _WRITE_HINT_RE = re.compile(
     r"open\s*\([^)]*['\"][wax]b?['\"]|write_bytes|write_text|savefig|to_csv"
     r"|shutil\.(?:copy|move)|writeFileSync|File\.write|os\.rename")
 _PATH_RE = re.compile(r"[\w./\\~-]*cases/[\w./\\-]+\.\w+")
+# Путь записи ОТНОСИТЕЛЬНЫЙ: `cd дело && python3 -c "open('00_intake/x.pdf','w')"` —
+# `cases/` в строке нет, _PATH_RE слеп, а цель резолвится от ведущего cd (проба круга 4).
+_OPEN_TARGET_RE = re.compile(r"open\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"][wax]b?['\"]")
 
 
 def _split(args: str) -> list:
@@ -362,6 +373,7 @@ def _write_targets(cmd: str, base: str) -> list:
         targets += [_resolve(t, base) for t in _split(args)]
     if _INTERP_RE.search(body) and _WRITE_HINT_RE.search(body):
         targets += [_resolve(t, base) for t in _PATH_RE.findall(body)]
+        targets += [_resolve(t, base) for t in _OPEN_TARGET_RE.findall(body)]
     return targets
 
 
@@ -376,6 +388,24 @@ _VAR_REF_RE = re.compile(r"\$\{?(\w+)\}?")
 _ECHO_SUBST_RE = re.compile(r"\$\(\s*echo\s+([^\s)]+)\s*\)")
 _SHC_RE = re.compile(r"\b(?:sh|bash|zsh)\s+-c\s+([\"'])(.*?)\1", re.S)
 _FUNC_RE = re.compile(r"\b\w+\s*\(\)\s*\{(.*?)\}", re.S)
+# Ещё обёртки, прячущие ГЛАГОЛ от regexp (проба круга 4, 20.08.2026). Ни одна не меняет
+# ЦЕЛЬ записи — разворачиваем к плоскому глаголу тем же приёмом, что sh -c/var=/$(echo):
+#   eval 'cp … дело'            — тело-строка исполняется оболочкой;
+#   bash <<< 'cp … дело'        — here-string кормит команду на stdin;
+#   $(which cp) … дело          — глагол через подстановку пути;
+#   echo … | xargs -I F cp F …  — глагол за пределами командной позиции;
+#   find … -exec cp {} … \;     — то же, глагол внутри -exec.
+_EVAL_RE = re.compile(r"\beval\s+([\"'])(.*?)\1", re.S)
+_HERESTRING_RE = re.compile(r"\b(?:sh|bash|zsh)\s+<<<\s*([\"'])(.*?)\1", re.S)
+_WHICH_SUBST_RE = re.compile(r"\$\(\s*which\s+([^\s)]+)\s*\)")
+# xargs + его опции (значение-берущие -I/-E/-d/-n/-P/-s/-L/-a глотают следующий токен,
+# флаги -0/-r/-t/-p/-x — нет) → следующий токен и есть исполняемый глагол.
+_XARGS_RE = re.compile(
+    r"\bxargs\b"
+    r"(?:\s+-[IEdnPsLa]\s*\S+|\s+-[0rtpx]+|\s+--[\w-]+(?:=\S+)?)*"
+    r"\s+", re.M)
+# find … -exec CMD … {} … \;|+  — CMD исполняется для каждого совпадения.
+_FIND_EXEC_RE = re.compile(r"-exec(?:dir)?\s+(.+?)\s+(?:\\?;|\+)", re.S)
 
 # Префикс-модификатор команды прячет ГЛАГОЛ от regexp, не трогая ЦЕЛЬ записи:
 # `env A=B cp`, `command cp`, `nice -n5 cp`, `exec cp`, `FOO=bar cp`, `\cp` — всё
@@ -406,17 +436,22 @@ def _normalize(cmd: str, depth: int = 0) -> str:
     """Разворачивает типовые обёртки shell до плоского текста. Не полноценный
     интерпретатор — эвристика под обходы, которые реально нашла проба.
 
-    ponytail: static-target модель. `find -exec cp … цель` и `echo цель | xargs cp`
-    прячут цель за пределы командной позиции и здесь не ловятся — редкая для модели
-    форма; закрывать её значило бы разбирать -exec/{}/\\; ради низкой вероятности."""
+    ponytail: static-target модель — эвристика под реально найденные пробой обёртки,
+    не полный shell. `xargs`/`find -exec` разворачиваем к командной позиции (`; глагол`),
+    ставя следующий за обёрткой токен глаголом; редкие формы (`-P4 cp` без -I) — потолок."""
     if depth > 4:
         return cmd
     out = cmd
     assigns = dict(_ASSIGN_RE.findall(out))
     out = _VAR_REF_RE.sub(lambda m: assigns.get(m.group(1), m.group(0)), out)
     out = _ECHO_SUBST_RE.sub(lambda m: m.group(1), out)
+    out = _WHICH_SUBST_RE.sub(lambda m: m.group(1), out)
     out = _strip_cmd_prefixes(out)
     out = _SHC_RE.sub(lambda m: _normalize(m.group(2), depth + 1), out)
+    out = _EVAL_RE.sub(lambda m: "; " + _normalize(m.group(2), depth + 1) + " ;", out)
+    out = _HERESTRING_RE.sub(lambda m: "; " + _normalize(m.group(2), depth + 1) + " ;", out)
+    out = _XARGS_RE.sub("; ", out)
+    out = _FIND_EXEC_RE.sub(lambda m: "; " + m.group(1) + " ;", out)
     out = _FUNC_RE.sub(lambda m: "; " + _normalize(m.group(1), depth + 1) + " ;", out)
     return out
 
@@ -468,7 +503,7 @@ def _patch_scope_hits_cases(cmd: str, base: str) -> bool:
 def _under_protected(path: str) -> bool:
     """Цель лежит внутри 00_intake/ или _baselines/ — первичка и база «ДО»."""
     norm = path.replace(os.sep, "/").strip("'\"")
-    return bool(re.search(r"(?:^|/)(?:00_intake|_baselines)(?:/|$)", norm))
+    return bool(re.search(r"(?:^|/)(?:00_intake|_baselines)(?:/|$)", norm, re.I))
 
 
 # mv УДАЛЯЕТ источник — перенос СУЩЕСТВУЮЩЕГО файла ИЗ 00_intake/_baselines
@@ -510,14 +545,37 @@ _BULK_LIMIT = 400
 _UNPACK_RE = re.compile(
     r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(?:unzip|tar|bsdtar|7z|unrar)\b[^;&|<>]*?"
     r"\s(?:-d|-C|--directory|-o(?=\s))\s*([^\s;&|<>]+)", re.M)
+# python3 -m zipfile -e ARCH DST  /  python3 -m tarfile -e ARCH DST — распаковка модулем
+# stdlib: каталог назначения — последний позиционный (проба круга 4).
+_PY_UNPACK_RE = re.compile(
+    r"\bpython3?\s+-m\s+(?:zipfile|tarfile)\s+-e\s+\S+\s+(\S+)", re.M)
+# Распаковка БЕЗ флага каталога кладёт архив в CWD. После ведущего `cd дело/00_intake`
+# CWD — внутри дела: `cd дело/00_intake && tar xf a.tar` высыпает архив в первичку,
+# хотя каталог назначения в командной строке не назван (проба круга 4).
+_EXTRACT_VERB_RE = re.compile(
+    r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?"
+    r"(?:tar\s+-?[A-Za-z]*x|unzip\b|bsdtar\s+-?[A-Za-z]*x|7z\s+[ex]\b|unrar\s+[ex]\b)", re.M)
+_DIR_FLAG_RE = re.compile(r"(?:^|\s)(?:-C|--directory|-d)\b")
 
 
 def _unpack_into_cases(cmd: str, base: str) -> str:
-    for d in _UNPACK_RE.findall(_strip_heredocs(cmd)):
+    body = _strip_heredocs(cmd)
+    for d in _UNPACK_RE.findall(body) + _PY_UNPACK_RE.findall(body):
         d_abs = _resolve(d.strip("'\""), base)
         if _under_cases(d_abs):
             return d.strip("'\"")
     return ""
+
+
+def _extract_into_cwd(cmd: str, base: str) -> bool:
+    """Распаковка без явного каталога назначения — цель есть CWD (ведущий cd / cwd payload)."""
+    body = _strip_heredocs(cmd)
+    if not _EXTRACT_VERB_RE.search(body) or _DIR_FLAG_RE.search(body):
+        return False              # каталог назван явно — им займётся _unpack_into_cases
+    b = os.path.expanduser(base)
+    if not os.path.isabs(b):
+        b = os.path.join(os.getcwd(), b)
+    return _under_cases(os.path.realpath(b))
 
 
 def _bulk_forbidden(cmd: str, base: str) -> str:
@@ -594,6 +652,17 @@ def _foreign_cli_re():
 
 _FOREIGN_CLI_RE = _foreign_cli_re()
 
+# Имя чужого CLI в ТЕКСТЕ команды — не вызов: `git commit -m "… ; ИМЯ через коннектор"`,
+# `git log --grep=ИМЯ` упоминают имя как данные. Снимаем содержимое кавычек ДО поиска
+# командной позиции — иначе `;` внутри сообщения читается как разделитель и собственный
+# коммит цикла встаёт (проба круга 4). Реальный вызов `ИМЯ exec "…"` держит имя ВНЕ
+# кавычек и переживает стрижку. (Имена — только в реестре, в коде их нет: этап 9.1.)
+_QUOTED_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
+
+
+def _strip_quoted(s: str) -> str:
+    return _QUOTED_RE.sub(" ", s)
+
 
 def main() -> None:
     raw = sys.stdin.read()
@@ -632,13 +701,18 @@ def main() -> None:
                 "(роутер выдаст кеш-путь, срезы и requisites.json). "
                 "Read напрямую для .docx/.pdf/.xlsx/.pptx запрещен."
             )
+        # Порог бюджета обходили регистром (/THEMIS/), симлинком (ссылка вне проекта на
+        # файл внутри) и `~` (getsize не раскрывает тильду → размер 0). Резолвим цель
+        # ДО замера: expanduser + realpath снимают все три; регистр держит re.I.
+        rcwd = as_str(d.get("cwd")) or os.getcwd()
+        p_res = _resolve(p, rcwd)
         # Гейт держим на файлах проекта: внешние материалы (справки, чужие репозитории)
         # аудитор обязан читать целиком, и запрещать ему это — не экономия, а слепота.
-        if (re.search(r"\.(md|txt|jsonl|log|csv)$", p, re.I)
-                and "/themis/" in p.replace("\\", "/")
+        if (re.search(r"\.(md|txt|jsonl|log|csv)$", p_res, re.I)
+                and re.search(r"/themis/", p_res.replace("\\", "/"), re.I)
                 and not ti.get("offset") and not ti.get("limit")):
             try:
-                size = os.path.getsize(p)
+                size = os.path.getsize(p_res)
             except OSError:
                 size = 0
             if size > BIG_READ_BYTES:
@@ -655,7 +729,7 @@ def main() -> None:
         p_raw = as_str(ti.get("file_path")) or as_str(ti.get("notebook_path"))
         wcwd = as_str(d.get("cwd")) or os.getcwd()
         p = _resolve(p_raw, wcwd)
-        if "/00_intake/" in p.replace(os.sep, "/"):
+        if re.search(r"/00_intake/", p.replace(os.sep, "/"), re.I):   # APFS: 00_INTAKE == 00_intake
             block(
                 "БЛОК: 00_intake/ неприкосновенен — исходники клиента "
                 "не редактировать и не перезаписывать (железное правило)."
@@ -670,7 +744,9 @@ def main() -> None:
         base = _base_dir(cmd, d)                # ведущий cd → cwd payload → cwd процесса
 
         # Прямой вызов чужого CLI мимо коннектора: за границей процесса ворот нет.
-        if _FOREIGN_CLI_RE is not None and _FOREIGN_CLI_RE.search(cmd):
+        # Ищем ГЛАГОЛ в командной позиции по строке БЕЗ содержимого кавычек — имя в
+        # тексте сообщения/аргумента вызовом не считается.
+        if _FOREIGN_CLI_RE is not None and _FOREIGN_CLI_RE.search(_strip_quoted(cmd)):
             block(
                 "БЛОК: прямой вызов чужого CLI мимо коннектора запрещён — за границей "
                 "процесса claude_guard нет, и материалы дела уйдут без обезличивания и "
@@ -685,9 +761,10 @@ def main() -> None:
             _workflow_gate(t)      # документ въезжает в GOTOVO и обычным cp, не только Write
 
         unpack = _unpack_into_cases(cmd, base)
-        if unpack:
+        if unpack or _extract_into_cwd(cmd, base):
+            where = unpack or (base + " (CWD после ведущего cd)")
             block(
-                f"БЛОК: распаковка архива прямо в дело ({unpack}) запрещена — сторож не видит, "
+                f"БЛОК: распаковка архива прямо в дело ({where}) запрещена — сторож не видит, "
                 "что внутри, а по первичке распаковка ещё и затирает оригиналы. Распаковать "
                 "во временный каталог, затем класть файлы по одному (материалы — в 00_intake)."
             )
@@ -773,6 +850,18 @@ def selftest() -> int:
     small = tmp + "/small.md"
     with open(small, "w", encoding="utf-8") as f:
         f.write("ok")
+    # Обход бюджета Read: симлинк ИЗ вне проекта на большой файл внутри — путь ссылки
+    # «/themis/» не содержит, но realpath ведёт в проект. И большой файл вне проекта —
+    # его аудитор читает целиком, гейт молчит (обе оси, круг 4).
+    ext = tempfile.mkdtemp()          # без «themis» в пути — внешний материал
+    ext_big = ext + "/plain.md"
+    with open(ext_big, "w", encoding="utf-8") as f:
+        f.write("y" * (BIG_READ_BYTES + 10))
+    ext_link = ext + "/link.md"
+    try:
+        os.symlink(big, ext_link)
+    except (OSError, NotImplementedError):
+        ext_link = None
     # Первичка для проверки границы «затирание против пополнения»: один файл на
     # диске есть, второго нет. Пути реальные — правило смотрит именно на диск.
     from shlex import quote as shlex_quote
@@ -1023,6 +1112,68 @@ def selftest() -> int:
          all(run({"tool_name": "Bash", "tool_input": {
              "command": f"echo 'реестр {imya} описан в scripts/cli_registry.json'"}}) == 0
              for imya in _foreign_cli_names()) if _foreign_cli_names() else True, True),
+        # ── Регистр пути не снимает правил (APFS = тот же каталог, круг 4) ──────
+        ("Write кода в CASES заглавными — блок",
+         run({"tool_name": "Write", "tool_input": {
+             "file_path": "CASES/klient/delo-2026/gen.py", "content": "x"}}), 2),
+        ("Write в 00_INTAKE заглавными — блок",
+         run({"tool_name": "Write", "tool_input": {
+             "file_path": "cases/klient/delo-2026/00_INTAKE/scan.pdf", "content": "x"}}), 2),
+        ("rm в 00_INTAKE заглавными — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "rm cases/klient/delo-2026/00_INTAKE/est.pdf"}}), 2),
+        ("документ в gotovo строчными мимо маркеров — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "cp /tmp/x.md cases/klient/delo-2026/gotovo/isk.md"}}), 2),
+        ("каталог со словом Cases в имени — не наши дела, пропуск",
+         run({"tool_name": "Write", "tool_input": {
+             "file_path": "/tmp/DataCases/util.py", "content": "x"}}), 0),
+        # ── Обёртки глагола: eval/here-string/$(which)/xargs/find -exec (круг 4) ──
+        ("eval кладёт код в дело — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "eval 'cp /tmp/x.py cases/klient/delo-2026/gen.py'"}}), 2),
+        ("here-string кладёт код в дело — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "bash <<< 'cp /tmp/x.py cases/klient/delo-2026/gen.py'"}}), 2),
+        ("$(which cp) кладёт код в дело — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "$(which cp) /tmp/x.py cases/klient/delo-2026/gen.py"}}), 2),
+        ("xargs -I кладёт код в дело — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "echo /tmp/x.py | xargs -I F cp F cases/klient/delo-2026/gen.py"}}), 2),
+        ("find -exec кладёт код в дело — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "find /tmp -name x.py -exec cp {} cases/klient/delo-2026/gen.py \\;"}}), 2),
+        ("eval вне дела пропускается",
+         run({"tool_name": "Bash", "tool_input": {"command": "eval 'cp /tmp/a /tmp/b'"}}), 0),
+        ("xargs вне дела пропускается",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "echo /tmp/a | xargs -I F cp F /tmp/b"}}), 0),
+        # ── Распаковка без флага каталога после ведущего cd (круг 4) ────────────
+        ("tar без -C после cd в дело — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "cd cases/klient/delo-2026/00_intake && tar xf /tmp/a.tar"}}), 2),
+        ("unzip без -d после cd в дело — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "cd cases/klient/delo-2026/00_intake && unzip /tmp/a.zip"}}), 2),
+        ("python3 -m zipfile в дело — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "python3 -m zipfile -e /tmp/a.zip cases/klient/delo-2026/00_intake/"}}), 2),
+        ("tar без флага в /tmp пропускается",
+         run({"tool_name": "Bash", "tool_input": {"command": "cd /tmp && tar xf /tmp/a.tar"}}), 0),
+        ("python3 -c с относительным путём после cd — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "cd cases/klient/delo-2026 && python3 -c \"open('00_intake/est.pdf','w')\""}}), 2),
+        # ── Имя чужого CLI в тексте команды — не вызов (круг 4) ─────────────────
+        ("имя CLI в сообщении коммита — не вызов",
+         all(run({"tool_name": "Bash", "tool_input": {
+             "command": f'git commit -m "fix: убран прямой вызов; {imya} через коннектор"'}}) == 0
+             for imya in _foreign_cli_names()) if _foreign_cli_names() else True, True),
+        # ── Бюджет Read: обход симлинком снят, внешний большой файл читается (круг 4) ──
+        ("большой файл вне проекта читается целиком",
+         run({"tool_name": "Read", "tool_input": {"file_path": ext_big}}), 0),
+        ("симлинк вне проекта на большой файл внутри — блок",
+         run({"tool_name": "Read", "tool_input": {"file_path": ext_link}}) if ext_link else 2, 2),
     ]
     bad = [name for name, got, want in cases if got != want]
     for name, got, want in cases:
