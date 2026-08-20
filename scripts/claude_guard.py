@@ -566,6 +566,35 @@ def _sudact_allowed() -> bool:
     return bool(re.search(r"^SUDACT_SEARCH_ALLOWED\s*=\s*True", src, re.M))
 
 
+# Чужой CLI за границей процесса — мимо наших ворот. claude_guard живёт ВНУТРИ
+# нашего процесса; прямой `codex exec …`/`kimi -p …` из Bash уносит материалы дела
+# без обезличивания и пробы, а за границей процесса сторожа нет вовсе (проба
+# 20.08.2026). Имена берём из декларативного реестра (единственный дом имён, этап
+# 9.1) — не хардкод; наш claude и наш коннектор foreign_cli/cli_router под запрет
+# не попадают. Судим ГЛАГОЛ в командной позиции, а не подстроку: имя в пути
+# (`scripts/foreign_cli.py`) или в кавычках (`echo '… cli_registry.json'`) — не вызов.
+def _foreign_cli_names() -> list:
+    reg = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cli_registry.json")
+    try:
+        names = json.loads(open(reg, encoding="utf-8").read())
+    except (OSError, ValueError):
+        return []
+    return [n for n in names if isinstance(n, str) and n and n != "claude"]
+
+
+def _foreign_cli_re():
+    names = _foreign_cli_names()
+    if not names:
+        return None
+    body = "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
+    # Командная позиция: начало, после ;/&/|, сабшелла $(…) или обратной кавычки.
+    # Префиксы (env/sudo/…) уже сняты _normalize. `\b` — имя целым словом, не куском.
+    return re.compile(rf"(?:^|[;&|]|\$\(|`)\s*(?:{body})\b")
+
+
+_FOREIGN_CLI_RE = _foreign_cli_re()
+
+
 def main() -> None:
     raw = sys.stdin.read()
     if not raw.strip():
@@ -639,6 +668,16 @@ def main() -> None:
         stripped = _strip_heredocs(raw_cmd)     # для _is_new_intake_file — узкая легитимность
         cmd = _normalize(stripped)              # sh -c/bash -c/var=/$( echo )/функция — плоско
         base = _base_dir(cmd, d)                # ведущий cd → cwd payload → cwd процесса
+
+        # Прямой вызов чужого CLI мимо коннектора: за границей процесса ворот нет.
+        if _FOREIGN_CLI_RE is not None and _FOREIGN_CLI_RE.search(cmd):
+            block(
+                "БЛОК: прямой вызов чужого CLI мимо коннектора запрещён — за границей "
+                "процесса claude_guard нет, и материалы дела уйдут без обезличивания и "
+                "пробы (ст. 8 ФЗ № 63-ФЗ). Чужой инструмент вызывается только через "
+                "python3 scripts/foreign_cli.py --role … — он обезличит текст, вычистит "
+                "окружение и обернёт вызов гейтами."
+            )
 
         targets = _write_targets(cmd, base)
         _cases_write_gate(targets)
@@ -957,6 +996,24 @@ def selftest() -> int:
              "file_path": "/tmp/chuzhoy-repo/cases/util.py", "content": "x"}}), 0),
         ("распаковка в /tmp/cases пропускается",
          run({"tool_name": "Bash", "tool_input": {"command": "tar -xf /tmp/mat.tar -C /tmp/cases"}}), 0),
+        # ── Чужой CLI мимо коннектора (проба 20.08.2026) ── имена из реестра, обе оси.
+        ("прямой вызов codex из Bash блокируется",
+         run({"tool_name": "Bash", "tool_input": {"command": 'codex exec "составь карту дела"'}}), 2),
+        ("прямой вызов kimi из Bash блокируется",
+         run({"tool_name": "Bash", "tool_input": {"command": 'kimi -p "$(cat /tmp/v.txt)"'}}), 2),
+        ("cd && codex — тоже блок (командная позиция после &&)",
+         run({"tool_name": "Bash", "tool_input": {"command": "cd /tmp && gemini exec 'x'"}}), 2),
+        ("наш claude -p пропускается (наш харнесс, не чужой CLI)",
+         run({"tool_name": "Bash", "tool_input": {"command": "claude -p 'вопрос'"}}), 0),
+        ("коннектор foreign_cli.py --role пропускается",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "python3 scripts/foreign_cli.py --role hunter-leaf --prompt v.txt"}}), 0),
+        ("cli_router.py --role пропускается",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "python3 scripts/cli_router.py --role hunter-leaf --json"}}), 0),
+        ("имя чужого CLI в кавычках/прозе не блокирует",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "echo 'реестр codex/kimi описан в scripts/cli_registry.json'"}}), 0),
     ]
     bad = [name for name, got, want in cases if got != want]
     for name, got, want in cases:
