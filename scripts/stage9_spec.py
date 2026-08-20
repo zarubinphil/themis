@@ -2391,6 +2391,130 @@ def check_font_nasledovanie():
     return fails
 
 
+def check_dengi_formy_lzhi():
+    """9.17: ложь о сумме ловится во всех живых формах записи.
+
+    Круг 6, доказано запуском: сторож сверяет пропись только когда она стоит
+    ПОСЛЕ числа и валюта названа словом «руб»/«коп». Мимо проходят:
+    пропись перед числом, символ валюты, запятая как разделитель разрядов,
+    сумма внутри кавычек-ёлочек. В судебном документе пропись — форма
+    контролирующая: расхождение означает не ту цену иска.
+    """
+    dg = tool("document_guard.py")
+    if not dg.is_file():
+        return [("lozh-summy:missing", "scripts/document_guard.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-lozh-") as tmp:
+        td = Path(tmp)
+        lzhivye = [
+            ("propis-pered", "Взыскать двести тысяч (100 000) рублей задолженности."),
+            ("simvol-rublya", "Взыскать 100 000 (пять) ₽ задолженности."),
+            ("zapyataya-razryad", "Взыскать 1,250,000 (сто рублей) рублей задолженности."),
+            ("elochki", "Согласно расчёту «сумма 100 000 (пять тысяч) рублей» "
+                        "подлежит взысканию."),
+            ("dve-summy-odna-valyuta", "Взыскать 100 000 (сто тысяч) и 50 000 "
+                                       "(девятьсот) рублей."),
+        ]
+        for name, telo in lzhivye:
+            doc = _sobrat_isk(td, telo, f"lozh_{name}.docx")
+            if not doc.is_file():
+                fails.append((f"lozh-summy:build-{name}", "иск не собрался"))
+                continue
+            code, out = py(dg, str(doc))
+            if code == 0:
+                fails.append((f"lozh-summy:{name}", f"пропись, не совпадающая с числом, "
+                              f"принята ({name}): в судебном документе пропись — форма "
+                              f"контролирующая, значит взыскивается не та сумма"))
+        # Ось обихода: верные формы тех же записей проходят.
+        vernye = [
+            ("posle-chisla", "Взыскать 100 000 (сто тысяч) рублей задолженности."),
+            ("dve-vernye", "Взыскать 100 000 (сто тысяч) и 50 000 (пятьдесят тысяч) "
+                           "рублей."),
+            ("data-i-statya", "Договор от 01.02.2026, ст. 333 ГК РФ, дело "
+                              "№ А65-12345/2026, п. 71 постановления."),
+        ]
+        for name, telo in vernye:
+            doc = _sobrat_isk(td, telo, f"verno_{name}.docx")
+            if not doc.is_file():
+                continue
+            code, out = py(dg, str(doc))
+            if "пропись" in out or "прописью" in out:
+                fails.append((f"lozh-summy:trevoga-{name}", f"верная запись забракована "
+                              f"({name}): {out.strip()[-160:]}"))
+    return fails
+
+
+def check_font_atributy_i_stili():
+    """9.17: гарнитура читается на всех уровнях и во всех атрибутах rFonts.
+
+    Круг 6, доказано запуском. Сторож смотрит `run.font.name`, то есть один
+    атрибут `w:ascii` на самом ране. Мимо проходят:
+      · `w:hAnsi` — а КИРИЛЛИЦУ Word берёт именно оттуда: ascii=PT Serif,
+        hAnsi=Times New Roman даёт весь русский текст чужой гарнитурой при
+        зелёном вердикте;
+      · свой стиль абзаца (не Normal) — вместе с кеглем 18;
+      · гарнитура через тему (`asciiTheme`/`hAnsiTheme`).
+    """
+    dg = tool("document_guard.py")
+    if not dg.is_file():
+        return [("font-atr:missing", "scripts/document_guard.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-fontatr-") as tmp:
+        td = Path(tmp)
+        baza = _sobrat_isk(td, "Взыскать 100 000 (сто тысяч) рублей задолженности.",
+                           "baza.docx")
+        if not baza.is_file():
+            return [("font-atr:build", "иск не собрался")]
+        pravka = (
+            "import sys, docx\n"
+            "from docx.shared import Pt\n"
+            "from docx.oxml.ns import qn\n"
+            "d = docx.Document(sys.argv[1]); uroven = sys.argv[3]\n"
+            "def rfonts(r):\n"
+            "    rPr = r._element.get_or_add_rPr()\n"
+            "    rf = rPr.find(qn('w:rFonts'))\n"
+            "    if rf is None:\n"
+            "        rf = rPr.makeelement(qn('w:rFonts'), {}); rPr.append(rf)\n"
+            "    return rf\n"
+            "if uroven == 'hansi':\n"
+            "    for p in d.paragraphs:\n"
+            "        for r in p.runs:\n"
+            "            rf = rfonts(r)\n"
+            "            rf.set(qn('w:ascii'), 'PT Serif')\n"
+            "            rf.set(qn('w:hAnsi'), 'Times New Roman')\n"
+            "elif uroven == 'stil-abzatsa':\n"
+            "    st = d.styles.add_style('Osobyy', 1)\n"
+            "    st.font.name = 'Times New Roman'; st.font.size = Pt(18)\n"
+            "    for p in d.paragraphs[:2]:\n"
+            "        p.style = st\n"
+            "elif uroven == 'tema':\n"
+            "    for p in d.paragraphs:\n"
+            "        for r in p.runs:\n"
+            "            rf = rfonts(r)\n"
+            "            for a in ('ascii', 'hAnsi'):\n"
+            "                if rf.get(qn('w:' + a)): del rf.attrib[qn('w:' + a)]\n"
+            "            rf.set(qn('w:asciiTheme'), 'majorHAnsi')\n"
+            "            rf.set(qn('w:hAnsiTheme'), 'majorHAnsi')\n"
+            "d.save(sys.argv[2])\n"
+        )
+        formy = (("hansi", "гарнитура кириллицы в w:hAnsi"),
+                 ("stil-abzatsa", "гарнитура и кегль на своём стиле абзаца"),
+                 ("tema", "гарнитура через тему документа"))
+        for uroven, chto in formy:
+            out_doc = td / f"f_{uroven}.docx"
+            code, _ = run([sys.executable, "-c", pravka, str(baza), str(out_doc), uroven],
+                          cwd=td, timeout=300)
+            if code != 0 or not out_doc.is_file():
+                fails.append((f"font-atr:pravka-{uroven}", f"проба не собралась ({chto})"))
+                continue
+            code, out = py(dg, str(out_doc))
+            if code == 0:
+                fails.append((f"font-atr:{uroven}", f"{chto} сторожем не видна — "
+                              f"документ уходит в суд чужим оформлением при зелёном "
+                              f"вердикте"))
+    return fails
+
+
 def check_hooks_polnota():
     """9.17: гейт требует ВСЕ каналы, которые ставит установщик сторожа.
 
@@ -3109,6 +3233,8 @@ CHECKS = [
     ("9.16 регистрация сторожа покрывает двери", check_matcher_pokrytie),
     ("9.16 расход чужих CLI не выдан за полный", check_raskhod_chuzhih_cli),
     ("9.17 гейт требует все каналы сторожа", check_hooks_polnota),
+    ("9.17 ложь о сумме ловится во всех формах", check_dengi_formy_lzhi),
+    ("9.17 гарнитура видна во всех атрибутах", check_font_atributy_i_stili),
     ("9.17 сторож судит цель пути, не глагол", check_cel_a_ne_glagol),
     ("9.17 обиход первички не сломан", check_obihod_pervichki),
 ]
