@@ -1202,6 +1202,247 @@ def check_probe_hermetic():
                           "несуществующий CLI объявлен живым исполнителем"))
     return fails
 
+# ── 9.10 Денежный тракт и обходы приёмки (враждебная проба, круг 2) ──────────
+
+# Формы, в которых ложь о сумме проходила мимо гейта. Каждая проверена запуском
+# 20.08.2026: «руб.» с точкой — основная письменная форма в процессуальных
+# документах и в собственной шапке DocBuilder («Цена иска: 1 250 000 руб.»).
+LOZH_O_SUMME = [
+    ("rub-tochka", "Взыскать 1 000 (сто тысяч) руб. неустойки по договору."),
+    ("valuta-v-skobkah", "Взыскать 1 000 (сто тысяч рублей) по договору поставки."),
+    ("tochka-razryad", "Взыскать 100.000 (один рубль) рублей по договору."),
+    ("kopeyki-podstroka", "Взыскать 1 000,05 (одна тысяча рублей пятьдесят копеек) долга."),
+    ("rubli-prefiks", "Взыскать 1 000,50 (одна тысяча двести рублей пятьдесят копеек)."),
+]
+# Верные документы, которые сторож обязан пропускать молча. Ложная тревога здесь
+# опаснее пропуска: сторожа, красящего верный расчёт, выключают в первый день.
+VERNYE = [
+    ("citata-normy",
+     "Часть 1 ст. 20.1 КоАП РФ: «влечет наложение административного штрафа в "
+     "размере от 5 000 до 10 000 рублей». Правило проекта — цитировать дословно."),
+    ("summa-posle-punkta",
+     "Согласно п. 71 Пленума неустойка снижается.\n"
+     "Взыскать 100 000 (сто тысяч) рублей неустойки."),
+    ("rekvizity-scheta",
+     "Реквизиты счета: 40817810099910004312\n100 000 (сто тысяч) рублей."),
+]
+
+
+def _docx_with(td: Path, name: str, body: str, table=None) -> Path | None:
+    """Документ строится тем же DocBuilder, каким пользуется doc-drafter."""
+    out = td / f"{name}.docx"
+    snippet = (
+        "import sys, json; sys.path.insert(0, sys.argv[1])\n"
+        "from create_docx import DocBuilder\n"
+        "b = DocBuilder()\n"
+        "b.add_title('ХОДАТАЙСТВО')\n"
+        "tbl = json.loads(sys.argv[4])\n"
+        "if tbl: b.add_table(tbl[0], tbl[1])\n"
+        "for para in sys.argv[3].split(chr(10)):\n"
+        "    if para.strip(): b.add_body(para)\n"
+        "b.add_signature('Представитель по доверенности', '20.08.2026')\n"
+        "b.save(sys.argv[2])\n"
+    )
+    code, _ = run([sys.executable, "-c", snippet, str(SCRIPTS), str(out), body,
+                   json.dumps(table or [], ensure_ascii=False)], cwd=td, timeout=300)
+    return out if (code == 0 and out.is_file()) else None
+
+
+def check_money_forms():
+    """9.10: ложь о сумме ловится во всех письменных формах, верное — молчит."""
+    dg = tool("document_guard.py")
+    if not dg.is_file():
+        return [("money:missing", "scripts/document_guard.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-money-") as tmp:
+        td = Path(tmp)
+        for name, text in LOZH_O_SUMME:
+            docx = _docx_with(td, name, text)
+            if docx is None:
+                fails.append((f"money:build-{name}", f"фикстура «{name}» не собралась"))
+                continue
+            code, _ = py(dg, str(docx))
+            if code == 0:
+                fails.append((f"money:propusk-{name}", f"ложь о сумме прошла: «{text[:65]}» — "
+                              f"документ уходит в суд с расшифровкой, не равной числу"))
+        for name, text in VERNYE:
+            docx = _docx_with(td, name, text)
+            if docx is None:
+                fails.append((f"money:build-{name}", f"фикстура «{name}» не собралась"))
+                continue
+            code, out = py(dg, str(docx))
+            if code != 0:
+                fails.append((f"money:trevoga-{name}", f"верный документ забракован "
+                              f"(«{text[:50]}»): {out.strip()[-200:]}"))
+        # Расчёт таблицей: номер строки не склеивается с суммой соседней ячейки.
+        docx = _docx_with(td, "tablica", "Расчет задолженности приведен в таблице.",
+                          table=[["№", "Сумма"],
+                                 [["1", "100 000 (сто тысяч) рублей"],
+                                  ["2", "50 000 (пятьдесят тысяч) рублей"]]])
+        if docx is None:
+            fails.append(("money:build-tablica", "фикстура таблицы не собралась"))
+        else:
+            code, out = py(dg, str(docx))
+            if code != 0:
+                fails.append(("money:tablica", f"верный расчёт таблицей забракован — "
+                              f"ячейки склеены в одно число: {out.strip()[-200:]}"))
+        # Прибор не падает наружу: аварию видно строкой нарушения, а не трассой.
+        docx = _docx_with(td, "predel", "Счет 40817810099910004312\n"
+                                        "100 000 (сто тысяч) рублей.")
+        if docx is not None:
+            code, out = py(dg, str(docx))
+            if "Traceback" in out:
+                fails.append(("money:krah", "прибор упал трассой на длинном числе — "
+                              "документ остался НЕ проверенным ничем (поля, шрифты, "
+                              "нумерация страниц до проверки не дошли), а код 1 "
+                              "читается как «переделка»"))
+    return fails
+
+
+def check_md_full():
+    """9.10: парный .md проверяется целиком — он уходит доверителю тем же документом."""
+    dg = tool("document_guard.py")
+    if not dg.is_file():
+        return [("mdfull:missing", "scripts/document_guard.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-mdfull-") as tmp:
+        td = Path(tmp)
+        docx = _docx_with(td, "para", "Взыскать 100 000 (сто тысяч) рублей долга.")
+        if docx is None:
+            return [("mdfull:build", "фикстура не собралась")]
+        md = td / "para.md"
+        md.write_text("# Ходатайство\n\nПрошу рассмотреть в полном объёме.\n\n"
+                      "Представитель {{ФИО}}\n", encoding="utf-8")
+        code, out = py(dg, str(docx), "--md", str(md))
+        if code == 0:
+            fails.append(("mdfull:proverka", "в парном .md незаполненный плейсхолдер и "
+                          "запрещённая буква «ё», а гейт зелёный — .md уходит "
+                          "доверителю таким же документом"))
+        # Ось обихода: чистый .md проходит.
+        md.write_text("# Ходатайство\n\nПрошу рассмотреть в полном объеме.\n\n"
+                      "Взыскать 100 000 (сто тысяч) рублей долга.\n", encoding="utf-8")
+        code, out = py(dg, str(docx), "--md", str(md))
+        if code != 0:
+            fails.append(("mdfull:trevoga", f"чистый .md забракован: {out.strip()[-200:]}"))
+    return fails
+
+
+def check_anchor_failopen():
+    """9.10: пропавший якорь — признак подмены, а не «якоря не было»."""
+    lg = tool("loop_gate.py")
+    if not lg.is_file():
+        return [("failopen:missing", "scripts/loop_gate.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-failopen-") as tmp:
+        td = _gate_sandbox(Path(tmp))
+        gate = td / "scripts" / "loop_gate.py"
+        spec = td / "scripts" / "priemka.py"
+        spec.write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
+        for cmd in (["add", "-A"], ["-c", "user.email=t@t", "-c", "user.name=t",
+                     "commit", "-qm", "spec"]):
+            run(["git", *cmd], cwd=td)
+        py(gate, "--anchor-spec", "scripts/priemka.py", cwd=td)
+        spec.write_text("import sys\nsys.exit(0)\n# подгонка под результат\n",
+                        encoding="utf-8")
+        for cmd in (["add", "-A"], ["-c", "user.email=t@t", "-c", "user.name=t",
+                     "commit", "-qm", "podgonka"]):
+            run(["git", *cmd], cwd=td)
+        store = td / ".autoloop" / "spec-anchors.json"
+        if store.is_file():
+            store.unlink()
+        code, out = py(gate, "--spec", "scripts/priemka.py", "--spec-only", "--json", cwd=td)
+        if code == 0:
+            fails.append(("failopen:udalen", "якорь удалён — и вся внешняя приёмка "
+                          "обошлась двумя командами: журнал якорений помнит дайджест, "
+                          "а гейт молча откатился на подвижный HEAD"))
+        store.write_text("не json", encoding="utf-8")
+        code, out = py(gate, "--spec", "scripts/priemka.py", "--spec-only", "--json", cwd=td)
+        if code == 0:
+            fails.append(("failopen:porcha", "испорченный файл якорей принят за "
+                          "отсутствие якоря — подмена контракта прошла"))
+    return fails
+
+
+def check_hook_body():
+    """9.10: тело хука не принимается по подстроке — вызов до безусловного выхода."""
+    lg = tool("loop_gate.py")
+    if not lg.is_file():
+        return [("hookbody:missing", "scripts/loop_gate.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-hookbody-") as tmp:
+        td = _gate_sandbox(Path(tmp))
+        gate = td / "scripts" / "loop_gate.py"
+        hooks = td / ".git" / "hooks"
+        hooks.mkdir(parents=True, exist_ok=True)
+        cl = td / ".claude"
+        cl.mkdir(exist_ok=True)
+        (cl / "settings.json").write_text(json.dumps({"hooks": {"PreToolUse": [
+            {"matcher": "Write", "hooks": [{"type": "command",
+                                            "command": "python3 scripts/claude_guard.py"}]}]}}),
+            encoding="utf-8")
+        for name, arg in (("commit-msg", '--msg "$1"'),):
+            hp = hooks / name
+            hp.write_text(f"#!/bin/sh\nexec python3 scripts/pd_guard.py {arg}\n",
+                          encoding="utf-8")
+            hp.chmod(0o755)
+        mertvye = (
+            ("vyhod-do-vyzova", "#!/bin/sh\nexit 0\nexec python3 scripts/pd_guard.py --staged\n"),
+            ("upominanie-v-kommentarii", "#!/bin/sh\n# тут был scripts/pd_guard.py, выключил\nexit 0\n"),
+        )
+        for name, body in mertvye:
+            hp = hooks / "pre-commit"
+            hp.write_text(body, encoding="utf-8")
+            hp.chmod(0o755)
+            code, _ = py(gate, "--hooks-only", "--json", cwd=td)
+            if code == 0:
+                fails.append((f"hookbody:{name}", f"мёртвый хук принят за рабочий "
+                              f"({name}) — ПД-сторож выключается одной строкой при "
+                              f"зелёном гейте"))
+        # Ось обихода: канонный хук из pd_guard --install признаётся рабочим.
+        hp = hooks / "pre-commit"
+        hp.write_text("#!/bin/sh\n# Поставлен scripts/pd_guard.py --install.\n"
+                      'exec python3 "$(git rev-parse --show-toplevel)/scripts/pd_guard.py" --staged\n',
+                      encoding="utf-8")
+        hp.chmod(0o755)
+        code, out = py(gate, "--hooks-only", "--json", cwd=td)
+        if code != 0:
+            fails.append(("hookbody:kanon", f"канонный хук объявлен мёртвым: "
+                          f"{out.strip()[:200]}"))
+    return fails
+
+
+def check_quarantine():
+    """9.10: карантин вывоза не попадает в git и перенос обратим при сбое."""
+    fails = []
+    gc = tool("case_code_gc.py")
+    if not gc.is_file():
+        return [("karantin:missing", "scripts/case_code_gc.py не существует")]
+    # Карантин с путями-фамилиями обязан быть невидим для git.
+    code, out = run(["git", "check-ignore", "-q", "--",
+                     "cases_quarantine/klient/delo/gen.py"])
+    if code != 0:
+        code2, out2 = run(["git", "check-ignore", "-q", "--", "../cases_quarantine/x.py"])
+        if code2 != 0:
+            fails.append(("karantin:gitignore", "карантин вывоза не игнорируется git — "
+                          "пути с именами папок дел лягут в отслеживаемое дерево, а "
+                          "pd_guard --tree читает git ls-files и их не увидит"))
+    with tempfile.TemporaryDirectory(prefix="stage9-karantin-") as tmp:
+        td = Path(tmp)
+        cases = td / "cases" / "testfam-ab" / "delo-2026"
+        cases.mkdir(parents=True)
+        for i in range(3):
+            (cases / f"gen{i}.py").write_text(f"# генератор {i}\n", encoding="utf-8")
+        zakryt = cases / "zakryt"
+        zakryt.mkdir()
+        (zakryt / "gen_ro.py").write_text("# в закрытом каталоге\n", encoding="utf-8")
+        code, out = py(gc, "--apply", "--root", str(td / "cases"), timeout=300)
+        os.chmod(zakryt, 0o700)          # вернуть права до уборки каталога
+        manifests = list((td).rglob("*manifest*")) + list((td).rglob("*.json"))
+        if not manifests and code == 0:
+            fails.append(("karantin:manifest", "вывоз прошёл, а манифеста отката нет — "
+                          "перенос файлов дела необратим инструментом"))
+    return fails
+
 # ── Реестр проверок ──────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -1233,6 +1474,11 @@ CHECKS = [
     ("9.9 хук знает про чужие CLI", check_hook_knows_cli),
     ("9.9 цепочка pd — ровно claude", check_pd_chain_hard),
     ("9.9 проба герметична, кеш не подделать", check_probe_hermetic),
+    ("9.10 ложь о сумме ловится во всех формах", check_money_forms),
+    ("9.10 парный .md проверяется целиком", check_md_full),
+    ("9.10 пропавший якорь приёмки — подмена", check_anchor_failopen),
+    ("9.10 тело хука не принимается по подстроке", check_hook_body),
+    ("9.10 карантин вывоза вне git, перенос обратим", check_quarantine),
 ]
 
 
@@ -1258,7 +1504,10 @@ def selftest():
                              ("check_pii_both_axes", check_pii_both_axes),
                              ("check_foreign_no_bypass", check_foreign_no_bypass),
                              ("check_pd_chain_hard", check_pd_chain_hard),
-                             ("check_probe_hermetic", check_probe_hermetic)):
+                             ("check_probe_hermetic", check_probe_hermetic),
+                             ("check_money_forms", check_money_forms),
+                             ("check_md_full", check_md_full),
+                             ("check_quarantine", check_quarantine)):
                 assert fn(), f"{name}: пропавший прибор не пойман"
     finally:
         SCRIPTS, REGISTRY = saved_scripts, saved_registry
