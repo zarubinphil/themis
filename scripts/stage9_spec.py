@@ -4755,6 +4755,56 @@ def check_zolotoy_isk():
     return fails
 
 
+def check_pribory_ne_protivorechat():
+    """9.20: что выдал прибор проекта, то принимают вердикт и сторож формата.
+
+    Круг 8, доказано запуском координатора. `doc-drafter` предписано считать
+    проценты по ст. 395 ГК прибором `calc395.py --md`. Прибор выдаёт
+    «38 998,29 (тридцать восемь тысяч девятьсот девяносто восемь рублей
+    29 копеек)» — и эту же строку `verdict.py` отвергает:
+
+        · сумма «29  копеек» без прописи в круглых скобках…
+        · сумма «рублей29 » без прописи в круглых скобках
+
+    Сообщение называет несуществующую сумму «рублей29»: правило ищет пару
+    «валюта + число» ВНУТРИ уже опознанной прописи. Юрист не может понять, что
+    править, а проценты по 395-й почти всегда с копейками — значит встаёт
+    большинство денежных исков.
+
+    Приборы одного проекта обязаны говорить на одном языке: приёмка гоняет
+    фактический вывод `calc395` через оба гейта.
+    """
+    calc, vd, dg = tool("calc395.py"), tool("verdict.py"), tool("document_guard.py")
+    if not (calc.is_file() and vd.is_file()):
+        return [("pribory:missing", "calc395.py или verdict.py отсутствует")]
+    fails = []
+    code, propis = py(calc, "--propisyu", "38998.29")
+    stroka = propis.strip().splitlines()[-1] if propis.strip() else ""
+    if not stroka:
+        return [("pribory:calc", "calc395 --propisyu ничего не выдал")]
+    with tempfile.TemporaryDirectory(prefix="stage9-pribory-") as tmp:
+        td = Path(tmp)
+        md = td / "isk.md"
+        md.write_text(f"# ИСКОВОЕ ЗАЯВЛЕНИЕ\n\nВзыскать {stroka} процентов "
+                      f"(ст. 395 ГК РФ).\n", encoding="utf-8")
+        code, out = py(vd, str(md), "--record", "--verdict", "ГОТОВ К ПОДАЧЕ", cwd=td)
+        if "НЕ ЗАПИСАН" in out:
+            fails.append(("pribory:verdikt", f"вердикт отверг пропись, выданную прибором "
+                          f"проекта ({stroka[:60]}…): {out.strip()[-200:]} — расчёт по "
+                          f"ст. 395 ГК предписан агенту, и путь встаёт на большинстве "
+                          f"денежных исков"))
+        # Та же строка глазами сторожа формата — приборы обязаны судить одинаково.
+        if dg.is_file():
+            doc = _sobrat_isk(td, f"Взыскать {stroka} процентов (ст. 395 ГК РФ).",
+                              "calc.docx")
+            if doc.is_file():
+                code, out = py(dg, str(doc))
+                if "пропись" in out:
+                    fails.append(("pribory:guard", f"сторож формата отверг пропись "
+                                  f"прибора проекта: {out.strip()[-200:]}"))
+    return fails
+
+
 # ── Реестр проверок ──────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -4853,6 +4903,7 @@ CHECKS = [
     ("9.19 регистрация в живых формах", check_registraciya_zhivye_formy),
     ("9.19 заморозка не считает журналы системы", check_zamorozka_ne_schitaet_zhurnaly),
     ("9.20 золотой сценарий: настоящий иск", check_zolotoy_isk),
+    ("9.20 приборы проекта не противоречат", check_pribory_ne_protivorechat),
 ]
 
 
