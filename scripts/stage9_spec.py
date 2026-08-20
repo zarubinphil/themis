@@ -534,8 +534,17 @@ def check_hook_registration():
                           "лишь текстом, PreToolUse пуст — гейт принял слово за "
                           "регистрацию"))
     # Боевое дерево: сторожа реально зарегистрированы прямо сейчас.
-    pre = ROOT / ".git" / "hooks" / "pre-commit"
-    cmsg = ROOT / ".git" / "hooks" / "commit-msg"
+    # Каталог хуков спрашивается у git, а не берётся литералом: в рабочей копии
+    # роли `.git` — файл-указатель, и литерал ROOT/.git/hooks не существует вовсе.
+    # Та же ошибка, что чинилась в самом приборе — приёмка не вправе быть слабее
+    # правила, которое проверяет (находка роли, 20.08.2026).
+    code, hooks_out = run(["git", "rev-parse", "--git-path", "hooks"], cwd=ROOT)
+    hooks_dir = Path(hooks_out.strip()) if code == 0 and hooks_out.strip() \
+        else ROOT / ".git" / "hooks"
+    if not hooks_dir.is_absolute():
+        hooks_dir = ROOT / hooks_dir
+    pre = hooks_dir / "pre-commit"
+    cmsg = hooks_dir / "commit-msg"
     st = ROOT / ".claude" / "settings.json"
     for p, need, what in ((pre, "pd_guard", "pre-commit"), (cmsg, "pd_guard", "commit-msg"),
                           (st, "claude_guard", ".claude/settings.json")):
