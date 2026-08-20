@@ -4212,6 +4212,96 @@ def check_verdikt_ne_lomaet_isk():
     return fails
 
 
+def check_pii_obihod_yurteksta():
+    """9.19: обезличивание молчит на обиходе юридического текста.
+
+    Круг 7, доказано запуском координатора. После ужесточения морфологии
+    второй рубеж принимает за фамилию обычные слова с заглавной буквы:
+    «Госпошлина уплачена», «Ответчиков по делу двое», «Истцов трое»,
+    «Юридические услуги оказаны». Это не редкие формы, а обиход каждого
+    правового вопроса — значит охотник за практикой не отправит наружу
+    ничего, и работа встанет на первом же шаге.
+
+    Опора обязана держаться: настоящее ФИО ловится по-прежнему.
+    """
+    pg = tool("pii_gate.py")
+    if not pg.is_file():
+        return [("pii-yur:missing", "scripts/pii_gate.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-piiyur-") as tmp:
+        td = Path(tmp)
+        if _residual(td, "Свидетель Кузнецов пояснил обстоятельства дела.", "opora") != 1:
+            return [("pii-yur:opora", "прибор не ловит ФИО — проба недействительна")]
+        obihod = [
+            ("gosposhlina", "Госпошлина уплачена в размере 4 000 рублей."),
+            ("otvetchikov", "Ответчиков по делу двое, оба извещены надлежащим образом."),
+            ("istcov", "Истцов трое, требования солидарные."),
+            ("yuridicheskie", "Юридические услуги оказаны в полном объёме."),
+            ("sudov", "Практика судов округа единообразна."),
+            ("bankovskoy", "Согласно банковской выписке платёж не поступил."),
+        ]
+        for name, text in obihod:
+            if _residual(td, text, f"ob_{name}") == 1:
+                fails.append((f"pii-yur:{name}", f"обиход юридического текста принят за "
+                              f"персональные данные ({name}): правовой вопрос не уйдёт "
+                              f"охотнику, работа встанет на первом шаге"))
+    return fails
+
+
+def check_heredoc_home_i_intake():
+    """9.19: исполняемый heredoc и $HOME не снимают гейтов; интейк не сломан.
+
+    Круг 7, доказано запуском координатора.
+
+    ПРОПУСКИ. Тело heredoc вырезается как данные, и правило чужого CLI —
+    единственное, что его читает. Поэтому `bash <<EOF … EOF` проносит внутрь
+    удаление первички, запись кода в дело и документ мимо вердикта. Туда же
+    подстановка $HOME: путь остаётся литералом, строгая проверка «внутри
+    cases/» даёт ложь, и вместе с ней отключаются гейт кода, гейт растра и
+    гейт протокола. Однострочник perl пишет код в дело, потому что перечень
+    признаков записи знает питоновские идиомы и не знает прочих.
+
+    ЛОЖНЫЕ ТРЕВОГИ. Послабление для интейка требует ровно трёх токенов, и
+    любая живая форма его теряет: `mv -n … && ls` (а шаг 6 агента интейка
+    предписывает сверить ls сразу после переноса) и перенос циклом по файлам.
+    Резервный архив ИЗ дела наружу тоже блокируется — это увоз по букве и
+    сохранность по сути.
+    """
+    if not tool("claude_guard.py").is_file():
+        return [("heredoc-home:missing", "scripts/claude_guard.py отсутствует")]
+    case = os.path.join("cases", FAM_LAT, "delo-2026")
+    intake = f"{case}/00_intake"
+    fails = []
+    propuski = [
+        ("heredoc-rm", f"bash <<EOF\nrm -rf {intake}\nEOF"),
+        ("heredoc-kod", f"bash <<EOF\ncp /tmp/x.py {case}/gen.py\nEOF"),
+        ("heredoc-docx", f"bash <<EOF\ncp /tmp/isk.docx {case}/GOTOVO/isk.docx\nEOF"),
+        ("heredoc-python", f"python3 - <<EOF\nopen('{intake}/podmena.pdf','w').write('x')\nEOF"),
+        ("home-rm", f"rm -rf $HOME/Проекты/themis/{case}"),
+        ("home-kod", f"cp /tmp/x.py $HOME/Проекты/themis/{case}/gen.py"),
+        ("perl-zapis", f"perl -e 'open(F,\">\",\"{case}/gen.pl\"); print F \"code\"'"),
+    ]
+    for name, cmd in propuski:
+        if _bash(cmd) != 2:
+            fails.append((f"heredoc-home:{name}", f"цель в деле достигнута мимо сторожа "
+                          f"({name}): тело исполняемого heredoc и путь через переменную "
+                          f"окружения обязаны судиться так же, как обычная команда"))
+    obihod = [
+        ("intake-mv-i-ls", f'mv -n ~/Desktop/inbox/skan.pdf {intake}/ && ls -la {intake}/'),
+        ("intake-ciklom", f'for f in ~/Desktop/inbox/*.pdf; do mv -n "$f" {intake}/; done'),
+        ("rezervnyy-arhiv", f"tar -czf /tmp/rezerv.tgz -C {case} 00_intake"),
+        ("chtenie-v-tmp", f"python3 -c \"print(open('{intake}/skan.txt').read())\" "
+                          f"> /tmp/out.txt"),
+    ]
+    for name, cmd in obihod:
+        if _bash(cmd) == 2:
+            fails.append((f"heredoc-home:trevoga-{name}", f"штатная работа с первичкой "
+                          f"заблокирована ({name}): агент интейка предписывает сверять "
+                          f"ls сразу после переноса, а резервная копия наружу — это "
+                          f"сохранность, а не увоз"))
+    return fails
+
+
 # ── Реестр проверок ──────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -4301,6 +4391,8 @@ CHECKS = [
     ("9.18 обезличивание: отчество, дело, сеть", check_pii_eshchyo_formy),
     ("9.18 код, документ и распаковка в деле", check_storozh_putey_eshchyo),
     ("9.19 настоящий иск получает вердикт", check_verdikt_ne_lomaet_isk),
+    ("9.19 обезличивание молчит на юробиходе", check_pii_obihod_yurteksta),
+    ("9.19 heredoc, $HOME и целость интейка", check_heredoc_home_i_intake),
 ]
 
 
