@@ -2255,6 +2255,142 @@ def check_money_v_iske():
                               f"{out.strip()[-200:]}"))
     return fails
 
+def _sobrat_isk(td: Path, telo: str, name: str) -> Path:
+    """Собирает настоящий иск сборщиком: вход сторожа — документ, а не строка."""
+    snippet = (
+        "import sys; sys.path.insert(0, sys.argv[1])\n"
+        "from create_docx import DocBuilder\n"
+        "b = DocBuilder()\n"
+        "b.add_title('ИСКОВОЕ ЗАЯВЛЕНИЕ')\n"
+        f"b.add_body({telo!r})\n"
+        "b.add_signature('Представитель по доверенности', '20.08.2026')\n"
+        "b.save(sys.argv[2])\n"
+    )
+    out = td / name
+    run([sys.executable, "-c", snippet, str(SCRIPTS), str(out)], cwd=td, timeout=300)
+    return out
+
+
+def check_propis_padezhi():
+    """9.16: пропись сверяется во ВСЕХ падежах — просительная часть не брак.
+
+    Проба 20.08.2026: сверка звала propis() с падежом по умолчанию, поэтому
+    «Взыскать 1 000 (одну тысячу) рублей» — форма, которой кончается почти
+    каждый иск — объявлялась несовпадением. Свой конвертер шесть падежей
+    умеет с самого начала; знала о них только одна сторона. Сторож, бракующий
+    просительную часть, будет выключен в первый день, а выключенный не сторожит.
+    """
+    dg = tool("document_guard.py")
+    if not dg.is_file():
+        return [("padezhi:missing", "scripts/document_guard.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-padezhi-") as tmp:
+        td = Path(tmp)
+        # Ось обихода: живые падежи процессуального документа молчат.
+        obihod = [
+            ("vinitelnyy", "Взыскать с ответчика 1 000 (одну тысячу) рублей."),
+            ("roditelnyy", "На сумму 1 000 (одной тысячи) рублей начислены проценты."),
+            ("tvoritelnyy", "Задолженность погашена 1 000 (одной тысячей) рублей."),
+            ("datelnyy", "Проценты начислены к 1 000 (одной тысяче) рублей."),
+            ("imenitelnyy", "Сумма долга составляет 1 000 (одна тысяча) рублей."),
+        ]
+        for name, telo in obihod:
+            doc = _sobrat_isk(td, telo, f"ob_{name}.docx")
+            if not doc.is_file():
+                fails.append((f"padezhi:build-{name}", "иск не собрался"))
+                continue
+            code, out = py(dg, str(doc))
+            if "пропись" in out:
+                fails.append((f"padezhi:trevoga-{name}", f"верная пропись в падеже "
+                              f"({name}) объявлена несовпадением: {out.strip()[-200:]} "
+                              f"— это форма просительной части почти каждого иска"))
+        # Ось пропуска: ложь о сумме ловится в ЛЮБОМ падеже, а не только в им.
+        lozh = [
+            ("vin-drugoe-chislo", "Взыскать с ответчика 1 000 (сто тысяч) рублей."),
+            ("rod-drugoe-chislo", "На сумму 1 000 (двух тысяч) рублей начислены проценты."),
+            ("tvor-drugoe-chislo", "Долг погашен 1 000 (десятью тысячами) рублей."),
+            ("vin-vydumka", "Взыскать с ответчика 1 000 (одну сотню) рублей."),
+        ]
+        for name, telo in lozh:
+            doc = _sobrat_isk(td, telo, f"lozh_{name}.docx")
+            if not doc.is_file():
+                fails.append((f"padezhi:build-{name}", "иск не собрался"))
+                continue
+            code, out = py(dg, str(doc))
+            if "пропись" not in out:
+                fails.append((f"padezhi:propusk-{name}", f"ложь о сумме прошла в падеже "
+                              f"({name}): свобода падежа не должна превращаться в приём "
+                              f"любых слов — сумма прописью в судебном документе "
+                              f"контролирующая"))
+    return fails
+
+
+def check_font_nasledovanie():
+    """9.16: гарнитура и кегль читаются с НАСЛЕДОВАНИЯ, не только с ранов.
+
+    Проба 20.08.2026: Times New Roman, заданный на стиле Normal, сторож не
+    видит — у наследующего рана `r.font.name` равен None. Это ровно тот файл,
+    который доверитель открыл и правил в Word: Word пишет гарнитуру на стиль
+    и в docDefaults, а не на каждый ран. Документ уходит в суд чужим шрифтом
+    при зелёном сторожевом вердикте.
+    """
+    dg = tool("document_guard.py")
+    if not dg.is_file():
+        return [("nasled:missing", "scripts/document_guard.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-nasled-") as tmp:
+        td = Path(tmp)
+        baza = _sobrat_isk(td, "Взыскать с ответчика 1 000 (одну тысячу) рублей.",
+                           "baza.docx")
+        if not baza.is_file():
+            return [("nasled:build", "иск не собрался")]
+        # Правка «как в Word»: гарнитура и кегль переезжают на уровень стиля.
+        pravka = (
+            "import sys, docx\n"
+            "from docx.shared import Pt\n"
+            "d = docx.Document(sys.argv[1])\n"
+            "uroven = sys.argv[3]\n"
+            "if uroven == 'stil':\n"
+            "    st = d.styles['Normal']\n"
+            "    st.font.name = 'Times New Roman'\n"
+            "elif uroven == 'kegl':\n"
+            "    d.styles['Normal'].font.size = Pt(16)\n"
+            "elif uroven == 'defaults':\n"
+            "    el = d.styles.element\n"
+            "    ns = el.nsmap['w']\n"
+            "    for rf in el.findall('.//{%s}docDefaults//{%s}rFonts' % (ns, ns)):\n"
+            "        for a in ('ascii', 'hAnsi', 'cs'):\n"
+            "            rf.set('{%s}%s' % (ns, a), 'Times New Roman')\n"
+            "elif uroven == 'obihod':\n"
+            "    d.styles['Normal'].font.name = 'PT Serif'\n"
+            "d.save(sys.argv[2])\n"
+        )
+        for uroven, chto in (("stil", "гарнитура на стиле Normal"),
+                             ("defaults", "гарнитура в docDefaults"),
+                             ("kegl", "кегль на стиле Normal")):
+            out_doc = td / f"word_{uroven}.docx"
+            code, _ = run([sys.executable, "-c", pravka, str(baza), str(out_doc), uroven],
+                          cwd=td, timeout=300)
+            if code != 0 or not out_doc.is_file():
+                fails.append((f"nasled:pravka-{uroven}", f"проба не собралась ({chto})"))
+                continue
+            code, out = py(dg, str(out_doc))
+            slovo = "кегл" if uroven == "kegl" else "шрифт"
+            if slovo not in out.lower():
+                fails.append((f"nasled:{uroven}", f"{chto} сторожем не видна: документ "
+                              f"после правки в Word уходит в суд чужим оформлением при "
+                              f"зелёном вердикте (сторож читает только раны)"))
+        # Ось обихода: та же правка со СВОЕЙ гарнитурой претензий не вызывает.
+        ob = td / "word_obihod.docx"
+        run([sys.executable, "-c", pravka, str(baza), str(ob), "obihod"], cwd=td, timeout=300)
+        if ob.is_file():
+            code, out = py(dg, str(ob))
+            if "шрифт" in out.lower():
+                fails.append(("nasled:trevoga", f"PT Serif на стиле объявлен чужим: "
+                              f"{out.strip()[-200:]}"))
+    return fails
+
+
 # ── Реестр проверок ──────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -2312,6 +2448,8 @@ CHECKS = [
     ("9.14 маркеры незаполненности и валюты", check_verdict_markers),
     ("9.15 разметка не снимает обезличивание", check_pd_v_razmetke),
     ("9.15 суммы проверяются в реальном иске", check_money_v_iske),
+    ("9.16 пропись сверяется во всех падежах", check_propis_padezhi),
+    ("9.16 гарнитура и кегль видны с наследования", check_font_nasledovanie),
 ]
 
 
