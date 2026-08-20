@@ -2391,6 +2391,67 @@ def check_font_nasledovanie():
     return fails
 
 
+def check_env_vne_python():
+    """9.16: сторож окружения видит установку не только питоновскую.
+
+    Проба 20.08.2026: `env_fingerprint` перебирает site-packages ТЕКУЩЕГО
+    интерпретатора и больше ничего. На машине при этом живут npm, brew и gem,
+    а запрет владельца назван словами «установка любого пакета — pip, npm,
+    brew — автономно запрещена ВСЕГДА». Имитация установки в node_modules и
+    в Cellar отпечаток не сдвинула вовсе: сторож покрывает одну экосистему
+    из трёх названных, то есть роль ставит пакет мимо него.
+
+    Контракт: сторож обязан мерить корни тех менеджеров, что есть в PATH, и
+    уважать их переменные окружения (NPM_CONFIG_PREFIX, GEM_HOME,
+    HOMEBREW_PREFIX) — иначе проверить его нечем, а непроверяемый сторож
+    ничем не отличается от отсутствующего.
+    """
+    al = tool("autoloop.py")
+    if not al.is_file():
+        return [("env-vne:missing", "scripts/autoloop.py отсутствует")]
+    fails = []
+    snippet = ("import sys; sys.path.insert(0, sys.argv[1]); import autoloop; "
+               "print(autoloop.env_fingerprint())")
+    with tempfile.TemporaryDirectory(prefix="stage9-envvne-") as tmp:
+        td = Path(tmp)
+        prefix = td / "prefix"
+        (prefix / "lib" / "node_modules").mkdir(parents=True)
+        (prefix / "gems").mkdir(parents=True)
+        (prefix / "Cellar").mkdir(parents=True)
+        env = dict(os.environ, NPM_CONFIG_PREFIX=str(prefix), GEM_HOME=str(prefix / "gems"),
+                   HOMEBREW_PREFIX=str(prefix))
+
+        def otpechatok():
+            code, out = run([sys.executable, "-c", snippet, str(SCRIPTS)], cwd=td, env=env)
+            return out.strip().splitlines()[-1] if out.strip() else ""
+
+        do = otpechatok()
+        if not do:
+            return [("env-vne:zov", "отпечаток окружения не считается")]
+        # Ось пропуска: пакет лёг мимо python — сторож обязан это заметить.
+        stavim = [("npm", prefix / "lib" / "node_modules" / "levyy-paket"),
+                  ("gem", prefix / "gems" / "gems" / "levyy-gem-1.0"),
+                  ("brew", prefix / "Cellar" / "levyy-brew" / "1.0")]
+        for name, path in stavim:
+            path.mkdir(parents=True, exist_ok=True)
+            (path / "package.json").write_text("{}", encoding="utf-8")
+            if otpechatok() == do:
+                fails.append((f"env-vne:{name}", f"установка мимо python ({name}) "
+                              f"отпечаток окружения не сдвинула: сторож меряет только "
+                              f"site-packages текущего интерпретатора, а запрет владельца "
+                              f"назван для pip, npm и brew разом"))
+            do = otpechatok()
+        # Ось обихода: обычная работа в проекте отпечаток не двигает.
+        do = otpechatok()
+        (td / "chernovik.md").write_text("правка роли\n", encoding="utf-8")
+        (td / "__pycache__").mkdir(exist_ok=True)
+        (td / "__pycache__" / "x.pyc").write_text("", encoding="utf-8")
+        if otpechatok() != do:
+            fails.append(("env-vne:trevoga", "обычная правка файла сдвинула отпечаток "
+                          "окружения — цикл будет останавливаться на собственной работе"))
+    return fails
+
+
 def check_otkaz_pd_v_cikle():
     """9.16: сработавший ПД-сторож в цикле отличим от бездействия роли.
 
@@ -2757,6 +2818,7 @@ CHECKS = [
     ("9.16 сторож денег fail-closed", check_budget_failclosed),
     ("9.16 маркер шага — структура, не подстрока", check_marker_struktura),
     ("9.16 сработавший ПД-сторож в цикле отличим", check_otkaz_pd_v_cikle),
+    ("9.16 сторож окружения видит не только pip", check_env_vne_python),
 ]
 
 
