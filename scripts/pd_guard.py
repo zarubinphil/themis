@@ -207,7 +207,7 @@ def git(*args: str) -> str:
 
 
 def staged_files() -> list[str]:
-    return [f for f in git("diff", "--cached", "--name-only", "--diff-filter=ACMR").split("\n") if f]
+    return [f for f in git("diff", "--cached", "--name-only", "--diff-filter=ACMRT").split("\n") if f]
 
 
 def _is_test_fixture_code(path: str) -> bool:
@@ -230,6 +230,26 @@ def check_staged(pat: re.Pattern | None) -> list[str]:
             problems += scan_text(blob, pat, f)
             if not _is_test_fixture_code(f):
                 problems += scan_pii(blob, f)
+    return problems
+
+
+def check_push_refs(pat: re.Pattern | None, stdin: str | None = None) -> list[str]:
+    """pre-push канал: имя ветки/тега тоже публичная ссылка."""
+    text = sys.stdin.read() if stdin is None else stdin
+    problems = []
+    rows = [line.split() for line in text.splitlines() if line.strip()]
+    refs = []
+    for row in rows:
+        if row:
+            refs.append(row[0])
+        if len(row) >= 3:
+            refs.append(row[2])
+    if not refs:
+        branch = git("symbolic-ref", "--quiet", "--short", "HEAD").strip()
+        refs.extend([branch] if branch else [])
+        refs.extend(x for x in git("tag", "--points-at", "HEAD").splitlines() if x)
+    for ref in refs:
+        problems += scan_text(ref, pat, "имя ветки/тега")
     return problems
 
 
@@ -285,7 +305,9 @@ def install() -> int:
     hooks = git("rev-parse", "--git-path", "hooks").strip() or ".git/hooks"
     hooks = hooks if os.path.isabs(hooks) else os.path.join(ROOT, hooks)
     os.makedirs(hooks, exist_ok=True)
-    for name, arg in (("pre-commit", "--staged"), ("commit-msg", '--msg "$1"')):
+    for name, arg in (("pre-commit", "--staged"),
+                      ("commit-msg", '--msg "$1"'),
+                      ("pre-push", "--push")):
         path = os.path.join(hooks, name)
         with open(path, "w", encoding="utf-8") as f:
             f.write(HOOK % arg)
@@ -321,6 +343,7 @@ def main() -> int:
     ap.add_argument("--tree", action="store_true", help="проверить всё дерево git")
     ap.add_argument("--local-logs", action="store_true",
                     help="рабочие логи (audit.log, cases/_logs/) вне git")
+    ap.add_argument("--push", action="store_true", help="проверить имена веток/тегов pre-push")
     ap.add_argument("--install", action="store_true", help="поставить git-хуки")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
@@ -344,6 +367,8 @@ def main() -> int:
         return report(scan_text(text, pat, "сообщение коммита"), "сообщении коммита")
     if a.local_logs:
         return report(check_local_logs(), "рабочих логах")
+    if a.push:
+        return report(check_push_refs(pat), "имени ветки или тега")
     if a.tree:
         return report(check_tree(pat), "дереве git")
     if a.staged:
@@ -405,6 +430,11 @@ def selftest() -> int:
          len(scan_text("fix: развёл familiya-ab и её двойника", pat, "msg")) == 1),
         ("фамилия в пути файла ловится",
          len(scan_text("cases/familiya-ab/delo-2026/x.md", pat, "путь")) == 1),
+        ("фамилия в имени ветки ловится pre-push",
+         len(check_push_refs(pat, "refs/heads/autoloop/familiya-ab abc "
+                             "refs/heads/autoloop/familiya-ab abc\n")) == 2),
+        ("обычное имя ветки проходит pre-push",
+         check_push_refs(pat, "refs/heads/fix-guard abc refs/heads/fix-guard abc\n") == []),
         ("чистый текст проходит", scan_text("обычный комментарий про реестр", pat, "f") == []),
         # Границы: имя не должно ловиться внутри другого слова, иначе сторож
         # начнёт краснеть на ровном месте и его выключат.
