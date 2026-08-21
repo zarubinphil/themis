@@ -45,7 +45,15 @@ SCRIPTS = ROOT / "scripts"
 # Вымышленная фамилия для проб ПД-сторожа. Настоящие имена папок дел в этом файле
 # не появляются никогда: репозиторий публичный.
 FAM_LAT = "testfam-ab"
-FAM_KIR = "Тестфама"          # родительный падеж — как пишут в сообщении коммита
+FAM_KIR = "Тестфама"
+# Путь проекта относительно $HOME — СЧИТАЕТСЯ, а не пишется литералом. Литерал
+# «$HOME/Проекты/themis» делал проверку 9.19 непригодной всюду, кроме машины
+# координатора: из git worktree (штатная рабочая копия роли) и на чужой машине,
+# куда themis-setup обещает установку, она судила чужой каталог (проба круга 9).
+try:
+    HOME_HVOST = str(ROOT.relative_to(Path.home()))
+except ValueError:                     # проект вне $HOME — подстановка не проверяется
+    HOME_HVOST = None          # родительный падеж — как пишут в сообщении коммита
 
 # Пять приборов этапа 5, оплаченных разработкой и не подключённых ни к чему.
 ORPHANS = ("budget_preflight", "redline_diff", "lessons_supersede", "token_audit", "cadastre")
@@ -4277,10 +4285,12 @@ def check_heredoc_home_i_intake():
         ("heredoc-kod", f"bash <<EOF\ncp /tmp/x.py {case}/gen.py\nEOF"),
         ("heredoc-docx", f"bash <<EOF\ncp /tmp/isk.docx {case}/GOTOVO/isk.docx\nEOF"),
         ("heredoc-python", f"python3 - <<EOF\nopen('{intake}/podmena.pdf','w').write('x')\nEOF"),
-        ("home-rm", f"rm -rf $HOME/Проекты/themis/{case}"),
-        ("home-kod", f"cp /tmp/x.py $HOME/Проекты/themis/{case}/gen.py"),
+        ("home-rm", f"rm -rf $HOME/{HOME_HVOST}/{case}"),
+        ("home-kod", f"cp /tmp/x.py $HOME/{HOME_HVOST}/{case}/gen.py"),
         ("perl-zapis", f"perl -e 'open(F,\">\",\"{case}/gen.pl\"); print F \"code\"'"),
     ]
+    if HOME_HVOST is None:
+        propuski = [(n, c) for n, c in propuski if not n.startswith("home-")]
     for name, cmd in propuski:
         if _bash(cmd) != 2:
             fails.append((f"heredoc-home:{name}", f"цель в деле достигнута мимо сторожа "
@@ -4805,6 +4815,139 @@ def check_pribory_ne_protivorechat():
     return fails
 
 
+# ── 9.21 Круг 9: приборы приёмки и корень cases ──────────────────────────────
+
+def check_filtr_ne_zelenit():
+    """9.21: фильтр приёмки не выдаёт зелёный на пустой выборке.
+
+    Круг 9, доказано запуском координатора. Железное правило волны — перед
+    КАЖДЫМ коммитом гнать `stage9_spec.py --only 9.20`. Но фильтр, не совпавший
+    ни с одной проверкой, печатал «сдано проверок: 0/0 · ✓ ЭТАП 9 ПРИНЯТ» и
+    возвращал 0. Латинская «O» вместо нуля, переименованный блок, другая
+    раскладка — и роль получает зелёный свет на правку, ломающую работу юриста.
+    Ровно этот класс стоил проекту трёх волн починки.
+
+    Пустая выборка — не «всё сдано», а ошибка вызова: код возврата ненулевой.
+    Обратная ось: настоящий фильтр по-прежнему отбирает свои проверки и зелен.
+    """
+    me = Path(__file__).resolve()
+    fails = []
+    code, out = py(me, "--only", "нет-такого-блока-круг-9")
+    if code == 0:
+        fails.append(("filtr:pustoy-zelenyy", f"фильтр без совпадений вернул 0 и напечатал "
+                      f"{out.strip().splitlines()[-1] if out.strip() else '(пусто)'!r} — "
+                      f"опечатка в --only даёт роли зелёный свет на правку, ломающую "
+                      f"работу юриста"))
+    if "ПРИНЯТ" in out:
+        fails.append(("filtr:pustoy-prinyat", "пустая выборка объявлена принятой — "
+                      "«сдано 0/0» это ошибка вызова, а не сданный контракт"))
+    code, out = py(me, "--only", "9.20 приборы проекта")
+    if code != 0 or "сдано проверок: 1/1" not in out:
+        fails.append(("filtr:zhivoy", f"настоящий фильтр сломан ужесточением: "
+                      f"{out.strip()[-200:]}"))
+    return fails
+
+
+def check_koren_cases_pod_geytom():
+    """9.21: корень cases/ под гейтом удаления — не только пути ВНУТРИ него.
+
+    Круг 9, доказано запуском координатора. Гейт судил путь, лежащий ВНУТРИ
+    cases/, и сам корень под правило не попадал: `rm -rf cases/*` и
+    `rm -rf cases/{клиент}` блокировались, а `rm -rf cases` — самая
+    разрушительная команда проекта — проходила. Мимо гейта шли и увоз целиком
+    (`mv cases /tmp`), и `find cases -delete`, и `rsync --delete` в корень, и
+    рутинная уборка `git clean -xfd`: папки дел не отслеживаются git, поэтому
+    обычная уборка сносит ВСЕ материалы всех доверителей.
+
+    Показательна пара `rm -rf cases` (проходила) и `rm -rf "cases"` (ловилась):
+    один и тот же путь судили две ветки кода по-разному — признак того, что
+    правило держится формой строки, а не целью.
+
+    Обратная ось обязательна: чтение и обиход внутри cases/ не блокируются.
+    """
+    if not tool("claude_guard.py").is_file():
+        return [("koren:missing", "scripts/claude_guard.py отсутствует")]
+    fails = []
+    razrushenie = [
+        ("rm", "rm -rf cases"),
+        ("rm-slesh", "rm -rf cases/"),
+        ("rm-tochka", "rm -rf ./cases"),
+        ("rm-abs", f"rm -rf {ROOT}/cases"),
+        ("rm-home", "rm -rf $HOME/" + (HOME_HVOST or "themis") + "/cases"),
+        ("mv", "mv cases /tmp/uvezli"),
+        ("find", "find cases -delete"),
+        ("rsync", "rsync -a --delete /tmp/pusto/ cases/"),
+        ("git-clean", "git clean -xfd cases"),
+        ("git-clean-golyy", "git clean -xfd"),
+    ]
+    for name, cmd in razrushenie:
+        if _bash(cmd) != 2:
+            fails.append((f"koren:{name}", f"снос каталога дел прошёл мимо сторожа "
+                          f"({name}: {cmd}) — правило обязано держать САМ корень cases/, "
+                          f"а не только пути внутри него"))
+    obihod = [
+        ("chtenie", "cat cases/_index.md"),
+        ("spisok", "ls -la cases/"),
+        ("grep", "grep -n Активные cases/_index.md"),
+        ("status", "git status --porcelain cases/"),
+    ]
+    for name, cmd in obihod:
+        if _bash(cmd) == 2:
+            fails.append((f"koren:trevoga-{name}", f"обиход по каталогу дел заблокирован "
+                          f"({name}: {cmd}) — сторож обязан ловить снос, а не чтение"))
+    return fails
+
+
+def check_storozh_ne_slepnet_vne_proekta():
+    """9.21: сторож путей не слепнет, живя вне дерева проекта.
+
+    Круг 9, доказано запуском координатора. Родительский cases/ признавался
+    своим по ЛИТЕРАЛЬНОМУ куску пути «/.autoloop/worktrees/»: сторож в рабочей
+    копии, созданной где угодно ещё, переставал видеть настоящие дела, и разом
+    слепли четыре гейта — удаление дела, удаление папки клиента, запись кода в
+    дело, сборка документа мимо сборщика и запись артефакта вне протокола.
+
+    Тот же класс уже лечили кругом 6 у ПД-сторожа (9.17 «ПД-сторож не слепнет
+    в копии роли»), и вылечили правильно — фактом git (`git worktree list`).
+    Здесь осталась заплата литералом: закрыли одно место, класс остался.
+
+    Проверка держит КЛАСС: сторож, запущенный из каталога, не являющегося
+    деревом проекта вовсе, обязан судить абсолютный путь в дела проекта так же,
+    как судит его сторож на своём месте.
+    """
+    cg = tool("claude_guard.py")
+    if not cg.is_file():
+        return [("vne:missing", "scripts/claude_guard.py отсутствует")]
+    case = f"{ROOT}/cases/{FAM_LAT}/delo-2026"
+    celi = [
+        ("udalenie", f"rm -rf {case}"),
+        ("klient", f"rm -rf {ROOT}/cases/{FAM_LAT}"),
+        ("kod", f"cp /tmp/x.py {case}/gen.py"),
+        ("sborka", f"cp /tmp/isk.docx {case}/GOTOVO/isk.docx"),
+        ("protokol", f"cp /tmp/p.md {case}/.agent/context/practice.md"),
+    ]
+    fails = []
+    for name, cmd in celi:                     # на своём месте сторож обязан ловить
+        if _bash(cmd) != 2:
+            fails.append((f"vne:svoy-{name}", f"сторож на своём месте пропустил {name} — "
+                          f"проверка ниже теряет смысл: {cmd}"))
+    if fails:
+        return fails
+    with tempfile.TemporaryDirectory(prefix="stage9-vne-") as tmp:
+        chuzhoy = Path(tmp) / "scripts"
+        chuzhoy.mkdir(parents=True)
+        shutil.copy2(cg, chuzhoy / cg.name)
+        for name, cmd in celi:
+            code, _ = py(chuzhoy / cg.name, stdin=json.dumps(
+                {"tool_name": "Bash", "tool_input": {"command": cmd}}, ensure_ascii=False))
+            if code != 2:
+                fails.append((f"vne:{name}", f"сторож, живущий вне дерева проекта, "
+                              f"пропустил цель в настоящих делах ({name}: {cmd}) — "
+                              f"родителя надо узнавать фактом git, а не литеральным "
+                              f"куском пути «.autoloop/worktrees»"))
+    return fails
+
+
 # ── Реестр проверок ──────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -4904,6 +5047,9 @@ CHECKS = [
     ("9.19 заморозка не считает журналы системы", check_zamorozka_ne_schitaet_zhurnaly),
     ("9.20 золотой сценарий: настоящий иск", check_zolotoy_isk),
     ("9.20 приборы проекта не противоречат", check_pribory_ne_protivorechat),
+    ("9.21 фильтр приёмки не зеленит пустую выборку", check_filtr_ne_zelenit),
+    ("9.21 корень cases/ под гейтом удаления", check_koren_cases_pod_geytom),
+    ("9.21 сторож путей не слепнет вне дерева проекта", check_storozh_ne_slepnet_vne_proekta),
 ]
 
 
@@ -4979,6 +5125,13 @@ def main():
         return 0
 
     checks = [(t, f) for t, f in CHECKS if not a.only or a.only.lower() in t.lower()]
+    if a.only and not checks:
+        # Пустая выборка — ошибка вызова, а не сданный контракт. Роль гонит
+        # `--only 9.20` перед каждым коммитом; опечатка в фильтре не имеет права
+        # выглядеть как зелёная приёмка (проба круга 9).
+        print(f"фильтр --only {a.only!r} не совпал ни с одной проверкой из "
+              f"{len(CHECKS)}; список: --contracts", file=sys.stderr)
+        return 2
     all_fails, done = [], 0
     for title, fn in checks:
         try:
