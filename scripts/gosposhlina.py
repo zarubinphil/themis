@@ -26,6 +26,7 @@ import argparse
 import os
 import re
 import sys
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Путь переопределяем: без этого копия скрипта вне проекта (мутационная проверка,
@@ -33,6 +34,40 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # selftest зеленеет на сломанном коде.
 CORPUS = os.environ.get("THEMIS_NK_CORPUS") or os.path.join(
     ROOT, "knowledge", "kodeksy", "nk-rf-gosposhlina.md")
+
+
+def parse_cena(raw: str) -> Decimal:
+    """Цена иска — деньги, а не int: проценты по ст. 395 ГК почти всегда с
+    копейками, и это выход прибора проекта calc395 (этап 9.22, круг 9: цена
+    «643191.60» не принималась вовсе, юрист округлял руками вне протокола).
+
+    Decimal, запятая и точка — дробная часть, пробел и неразрывные пробелы
+    (U+00A0, U+202F) — разряды. Округление до рублей — ЯВНО внутри расчета
+    (cena_rubles) и называется в отчете."""
+    s = (raw.strip().replace("\u00a0", " ").replace("\u202f", " ")
+         .replace(" ", "").replace(",", "."))
+    try:
+        v = Decimal(s)
+    except InvalidOperation:
+        raise argparse.ArgumentTypeError(f"цена иска не число: {raw!r}")
+    if v <= 0:
+        raise argparse.ArgumentTypeError(
+            f"цена иска {raw} — не сумма требования. Пошлина считается от "
+            "положительной цены иска; неимущественный иск — --neimushchestvennyy.")
+    return v
+
+
+def cena_rubles(cena: Decimal) -> int:
+    """Округление цены иска до рублей — ЯВНОЕ, внутри расчета (пошлина
+    платится в рублях; копейки цены иска влияют только через округление)."""
+    return int(cena.to_integral_value(rounding=ROUND_HALF_UP))
+
+
+def fmt_money(v: Decimal) -> str:
+    """Деньги для отчета: разряды пробелом, копейки — если они ненулевые."""
+    if v == v.to_integral_value():
+        return f"{int(v):,}".replace(",", " ")
+    return f"{v:,.2f}".replace(",", " ").replace(".", ",")
 
 # Пошлина за жалобу — ФИКСИРОВАННАЯ ставка, а не доля от пошлины первой инстанции.
 # Подп. 19-21 п. 1 ст. 333.19 и ст. 333.21 НК РФ дают прямые суммы, одинаковые для
@@ -202,7 +237,8 @@ def duty_property(price: int, tiers: list[dict]) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Госпошлина по НК РФ из локального корпуса")
-    ap.add_argument("--cena", type=int, help="цена иска в рублях (имущественный иск)")
+    ap.add_argument("--cena", type=parse_cena,
+                    help="цена иска в рублях, копейки допустимы (выход calc395)")
     ap.add_argument("--neimushchestvennyy", action="store_true",
                     help="иск неимущественного характера или не подлежащий оценке")
     ap.add_argument("--status", choices=["fiz", "org"], help="заявитель: физлицо или организация")
@@ -217,13 +253,8 @@ def main() -> int:
     a = ap.parse_args()
     if a.selftest:
         return selftest()
-    # Отрицательная и нулевая цена иска раньше давала сырой traceback: пользователь
-    # видел стек питона вместо ответа и не понимал, посчиталось что-то или нет.
-    if a.cena is not None and a.cena <= 0:
-        print(f"цена иска {a.cena} — не сумма требования. Пошлина считается от "
-              "положительной цены иска; неимущественный иск — --neimushchestvennyy.",
-              file=sys.stderr)
-        return 1
+    # Отрицательная и нулевая цена отвергаются парсером (parse_cena): внятный
+    # отказ argparse без traceback, а не сырой стек питона.
 
     art_num = "333.19" if a.sud == "soyu" else "333.21"
     text = article(art_num)
@@ -253,8 +284,8 @@ def main() -> int:
         who = "физическое лицо" if a.status == "fiz" else "организация"
         print(f"{label}, {who}: " + f"{total:,}".replace(",", " ") + " руб.")
         if a.cena:
-            print(f"Цена иска {a.cena:,} руб. на пошлину за жалобу НЕ влияет: "
-                  "подп. 19-21 дают фиксированную сумму.".replace(",", " "))
+            print(f"Цена иска {fmt_money(a.cena)} руб. на пошлину за жалобу "
+                  "НЕ влияет: подп. 19-21 дают фиксированную сумму.")
         print(f"\nК УПЛАТЕ: {total:,} руб.".replace(",", " "))
         return 0
 
@@ -272,8 +303,8 @@ def main() -> int:
         print(f"{label} — подп. {item} п. 1 ст. {art_num}: "
               + f"{total:,}".replace(",", " ") + " руб.")
         if a.cena:
-            print(f"Цена иска {a.cena:,} руб. на эту пошлину НЕ влияет: подпункт "
-                  "даёт прямую сумму.".replace(",", " "))
+            print(f"Цена иска {fmt_money(a.cena)} руб. на эту пошлину НЕ влияет: "
+                  "подпункт даёт прямую сумму.")
         if a.vid == "alimenty":
             print("Внимание: если суд взыщет алименты и на детей, и на содержание "
                   "истца, размер удваивается (подп. 16 п. 1 ст. 333.19 НК РФ).")
@@ -302,7 +333,11 @@ def main() -> int:
     if not tiers:
         print("шкала не разобрана из текста статьи — проверить корпус", file=sys.stderr)
         return 1
-    base = duty_property(a.cena, tiers)
+    # Округление до рублей — ЯВНОЕ, внутри расчета, и называется в отчете:
+    # пошлина платится в рублях, копейки цены иска (выход calc395) влияют
+    # только через это округление (этап 9.22, круг 9).
+    rub = cena_rubles(a.cena)
+    base = duty_property(rub, tiers)
     total = base
     note = ""
     if a.prikaz:
@@ -315,7 +350,10 @@ def main() -> int:
             note += (f" Применён минимум подп. 3 п. 1 ст. {art_num}: "
                      f"{floor:,} руб. вместо {total:,} руб.".replace(",", " "))
             total = floor
-    print(f"Цена иска: {a.cena:,} руб.".replace(",", " "))
+    print(f"Цена иска: {fmt_money(a.cena)} руб.")
+    if a.cena != rub:
+        print(f"Расчет от цены, округленной до рублей: "
+              f"{fmt_money(Decimal(rub))} руб.")
     print(f"Пошлина по шкале (исковое заявление): {base:,} руб.".replace(",", " "))
     if note:
         print(note.strip())
@@ -432,6 +470,18 @@ def selftest() -> int:
              _cli_total(["--status", "fiz", "--instanciya", "apellyaciya", "--cena", "450000"]) == 3000),
             ("CLI: первая инстанция считает по шкале",
              _cli_total(["--cena", "450000"]) == 13750),
+            # Цена иска с копейками — выход calc395 (ст. 395 ГК): принимается,
+            # округление до рублей явное, внутри расчета (этап 9.22, круг 9).
+            ("парсер цены принимает копейки, запятую и разряды",
+             parse_cena("643191.60") == Decimal("643191.60")
+             and parse_cena("643 191,60") == Decimal("643191.60")),
+            ("округление до рублей явное", cena_rubles(Decimal("643191.60")) == 643192
+             and cena_rubles(Decimal("450000.49")) == 450000),
+            ("CLI: цена с копейками считается от округленной",
+             _cli_total(["--cena", "643191.60", "--status", "fiz"])
+             == _cli_total(["--cena", "643192", "--status", "fiz"])),
+            ("CLI: цена с копейками не отвергается",
+             _cli_total(["--cena", "643191.60", "--status", "fiz"]) is not None),
             ("CLI: арбитражный приказ не ниже минимума статьи",
              _cli_total(["--cena", "100000", "--sud", "arbitrazh", "--prikaz"]) == 8000),
             # Сквозные: маршрут --vid, отказ на отрицательной цене без traceback.

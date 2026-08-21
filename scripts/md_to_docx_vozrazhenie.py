@@ -3,13 +3,24 @@
 Конвертер vozrazhenie_na_isk.md → vozrazhenie_na_isk.docx
 
 Читает markdown, парсит структуру и создает DOCX через DocBuilder.
+
+    python3 scripts/md_to_docx_vozrazhenie.py [ВХОД.md [ВЫХОД.docx]]
+
+Без аргументов — пути по умолчанию (разовая сборка возражения). Сборка,
+как у каждого входа конвейера, стоит под вердиктом Кони: DocBuilder.save()
+откажет без одобренной редакции .md.
 """
 
 import re
 import os
 import sys
 from pathlib import Path
-from scripts.create_docx import DocBuilder
+
+# Та же строка, что в md_to_docx.py: без sys.path на корень репозитория
+# «from scripts.create_docx import …» падает с ModuleNotFoundError, и прибор
+# мертв — проверка отказа сборки без вердикта вакуумна (этап 9.19, круг 9).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from scripts.create_docx import DocBuilder  # noqa: E402
 
 def read_md(path: str) -> str:
     with open(path, 'r', encoding='utf-8') as f:
@@ -65,8 +76,12 @@ def process_court_header(text: str) -> dict:
     return {'court': court_name, 'case': case_number, 'parties': parties}
 
 def main():
-    md_path = "cases/example/case-2026/.agent/drafts/vozrazhenie_na_isk.md"
-    out_path = "cases/example/case-2026/.agent/drafts/vozrazhenie_na_isk.docx"
+    # Аргументы командной строки, как у остальных конвертеров конвейера:
+    # вход .md и выход .docx; без них — пути по умолчанию разовой сборки.
+    md_path = (sys.argv[1] if len(sys.argv) > 1 else
+               "cases/example/case-2026/.agent/drafts/vozrazhenie_na_isk.md")
+    out_path = (sys.argv[2] if len(sys.argv) > 2 else
+                "cases/example/case-2026/.agent/drafts/vozrazhenie_na_isk.docx")
 
     content = read_md(md_path)
 
@@ -101,37 +116,37 @@ def main():
         # Заголовок (# ВОЗРАЖЕНИЕ)
         if re.match(r'^# ', line):
             if current_body:
-                b.add_body(current_body)
+                b.add_body([(t, False) for t in current_body])
                 current_body = []
             b.add_title(line.replace('# ', '').strip())
 
         # Подзаголовок (## на административное...)
         elif re.match(r'^## ', line):
             if current_body:
-                b.add_body(current_body)
+                b.add_body([(t, False) for t in current_body])
                 current_body = []
             b.add_subtitle(line.replace('## ', '').strip())
 
         # Секция (### I. НАРУШЕНИЕ...)
         elif re.match(r'^### ', line):
             if current_body:
-                b.add_body(current_body)
+                b.add_body([(t, False) for t in current_body])
                 current_body = []
             b.add_section(line.replace('### ', '').strip())
 
         # Подсекция (#### Обстоятельства.)
         elif re.match(r'^#### ', line):
             if current_body:
-                b.add_body(current_body)
+                b.add_body([(t, False) for t in current_body])
                 current_body = []
-            b.add_body(('', False))  # разделитель
+            b.add_body([('', False)])  # разделитель
             label = line.replace('#### ', '').strip()
             b.add_body([(label, True)])
 
         # Полужирный параграф (**Обстоятельства.** текст...)
         elif '**' in line and line.startswith('**'):
             if current_body:
-                b.add_body(current_body)
+                b.add_body([(t, False) for t in current_body])
                 current_body = []
             # Парсить жирный текст + остаток
             parts = []
@@ -159,7 +174,7 @@ def main():
         # Маркированный список
         elif line.strip().startswith('- '):
             if current_body:
-                b.add_body(current_body)
+                b.add_body([(t, False) for t in current_body])
                 current_body = []
             item = line.strip()[2:]
             b.add_body(item)
@@ -171,7 +186,7 @@ def main():
         i += 1
 
     if current_body:
-        b.add_body(current_body)
+        b.add_body([(t, False) for t in current_body])
 
     # Подпись
     b.add_empty()
