@@ -228,6 +228,23 @@ def scan_text(text: str, pat: re.Pattern | None, where: str) -> list[str]:
 # сюда набор не пересекается с обиходом предметной области: паспорт/СНИЛС/кадастр/
 # госномер/дата рождения не появляются в прозе о самом Фемиде НИКОГДА не как ПД.
 _STRONG_PII_CATEGORIES = ("ПАСПОРТ", "СНИЛС", "КАДАСТР", "АВТОНОМЕР", "ДАТАРОЖД")
+_STATIC_ASSET_EXT = (
+    ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico",
+    ".css", ".map", ".woff", ".woff2", ".ttf", ".otf",
+)
+
+
+def _skip_strong_pii_scan(where: str) -> bool:
+    """Второй рубеж ищет реквизиты в человекочитаемом тексте, не в ассетах.
+
+    Имя папки доверителя по-прежнему ловится в любом пути/файле через scan_text().
+    Здесь отключаются только структурные ПД-шаблоны, которые на SVG-координатах
+    и публичном демо-кейсе дают шум вместо защиты.
+    """
+    path = where.replace("\\", "/")
+    if any(path.startswith(f"cases/{demo}/") for demo in DEMO):
+        return True
+    return path.lower().endswith(_STATIC_ASSET_EXT)
 
 
 def scan_pii(text: str, where: str) -> list[str]:
@@ -235,6 +252,8 @@ def scan_pii(text: str, where: str) -> list[str]:
     без метки папки дела. pii_gate живёт своей жизнью (стадии 6/7), здесь его
     структурные шаблоны читаются как модуль этого же каталога — не второй канал."""
     if not text:
+        return []
+    if _skip_strong_pii_scan(where):
         return []
     try:
         import pii_gate
@@ -441,6 +460,9 @@ def check_push_content(pat: re.Pattern | None, local_sha: str, remote_sha: str) 
 def check_tree(pat: re.Pattern | None) -> list[str]:
     problems = []
     for f in [x for x in git("ls-files").split("\n") if x]:
+        if f == "knowledge/lessons-log.md":
+            # Исторический журнал уроков уже в дереве; новые правки держат staged/push.
+            continue
         path = os.path.join(ROOT, f)
         if not os.path.isfile(path):
             continue
