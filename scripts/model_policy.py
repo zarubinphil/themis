@@ -35,6 +35,13 @@ POLICY = {
     # Охота: сбор перспектив, разнообразие углов важнее силы. На MICRO запрещена
     # триажем — тема уже покрыта practice_index.md.
     "hunt":          {"MICRO": "-", "L1": "sonnet", "L2": "sonnet", "L3": "sonnet"},
+    # Скептик-координатор (Карабчевский, practice-hunter-skeptic) — не рядовой
+    # охотник: его листья на Sonnet, а САМ он ведёт враждебный синтез на Opus
+    # (frontmatter агента запинен на opus, CLAUDE.md относит скептика-координатора
+    # к Opus). Общий шаг «hunt»=sonnet объявлял правдивый бриф перерасходом —
+    # две копии одной правды (пин и политика) расходились. Пин и политика обязаны
+    # совпадать: у скептика свой шаг, а не общий охотничий.
+    "hunt-skeptic":  {"MICRO": "-", "L1": "opus", "L2": "opus", "L3": "opus"},
     # Совет: роли спорят (Sonnet), председатель сводит и решает (Opus).
     "council-role":  {"MICRO": "-", "L1": "-", "L2": "sonnet", "L3": "sonnet"},
     "council-chair": {"MICRO": "-", "L1": "-", "L2": "opus", "L3": "opus"},
@@ -54,7 +61,7 @@ AGENT_STEP = {
     "кони": "review",
     "спасович": "hunt",
     "плевако": "hunt",
-    "карабчевский": "hunt",
+    "карабчевский": "hunt-skeptic",
     "урусов": "council-chair",
     "покровский": "read-text",
     "гольмстен": "read-scan",
@@ -62,7 +69,7 @@ AGENT_STEP = {
     "doc-drafter": "draft",
     "doc-reviewer": "review",
     "practice-hunter-classic": "hunt",
-    "practice-hunter-skeptic": "hunt",
+    "practice-hunter-skeptic": "hunt-skeptic",
     "practice-hunter-tactical": "hunt",
     "askacouncil": "council-role",
     "position-council": "council-role",
@@ -159,6 +166,11 @@ def selftest() -> int:
     assert model_for("L1", "draft") == "sonnet"
     assert model_for("L3", "draft") == "opus"
     assert model_for("MICRO", "hunt") == "-"
+    # Скептик-координатор — Opus и по политике, и по пину: конфликта нет.
+    assert model_for("L3", "hunt-skeptic") == "opus", "скептик на L3 не Opus — разошлись с пином"
+    assert model_for("MICRO", "hunt-skeptic") == "-", "охота-скептик на MICRO не запрещена триажем"
+    assert _step_of("practice-hunter-skeptic") == "hunt-skeptic"
+    assert _step_of("practice-hunter-classic") == "hunt", "рядовой охотник ушёл в шаг скептика"
     for step, by_level in POLICY.items():
         assert set(by_level) == set(LEVELS), f"{step}: политика не покрывает все уровни"
         for lvl, m in by_level.items():
