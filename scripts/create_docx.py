@@ -295,6 +295,12 @@ class DocBuilder:
         # Определения нумерации создаются при первом обращении: документ без
         # приложений не должен тащить лишние записи в numbering.xml.
         self._num = {}
+        # Служебная мебель документа: шапка суда, адресная шапка, блок подписи,
+        # поле номера страницы. Эти элементы строятся своими методами из
+        # параметров-реквизитов и в текст одобренного .md не входят — сверка
+        # с одобренной редакцией (_matches_approved) их не судит, всё остальное
+        # судит. Помечаются ЭЛЕМЕНТЫ XML (w:tbl / w:p), а не тексты.
+        self._service_elements = set()
 
     def _num_id(self, kind):
         if kind not in self._num:
@@ -616,6 +622,7 @@ class DocBuilder:
         _set_font(p.add_run(name), 12)
         _set_font(p.add_run(" " * gap_spaces), 12)
         _set_font(p.add_run(date), 12)
+        self._service_elements.add(p._p)
         return p
 
     def add_signature_table(self, role, name, date=None):
@@ -667,6 +674,8 @@ class DocBuilder:
             pd.paragraph_format.space_before = Pt(6)
             pd.paragraph_format.space_after  = Pt(6)
             _set_font(pd.add_run(date), 12)
+            self._service_elements.add(pd._p)
+        self._service_elements.add(table._tbl)
         return table
 
     def add_final_empty(self):
@@ -732,6 +741,7 @@ class DocBuilder:
                     p = rc.add_paragraph()
                 p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
                 _set_font(p.add_run(text), 12, bold=bold)
+        self._service_elements.add(table._tbl)
         return table
 
     def add_header_table(self, court_name, court_route, parties, case_number, instance=None):
@@ -828,6 +838,7 @@ class DocBuilder:
             p2.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             _set_font(p2.add_run(instance), 12)
 
+        self._service_elements.add(table._tbl)
         return table
 
     def add_page_numbers(self, hide_on_first=True):
@@ -856,7 +867,8 @@ class DocBuilder:
         # уже стоит, переиспользуем — иначе повторный вызов даст два номера.
         for cand in footer.paragraphs:
             if "PAGE" in cand._p.xml:
-                return cand          # номер уже стоит — второй не ставим
+                self._service_elements.add(cand._p)   # номер уже стоит — второй не ставим
+                return cand
         p = next((c for c in footer.paragraphs
                   if not c.text.strip() and not c.runs), None)
         if p is None:
@@ -876,6 +888,7 @@ class DocBuilder:
         r.append(text_el)
         fld.append(r)
         p._p.append(fld)
+        self._service_elements.add(p._p)
         return p
 
     def _strip_yo(self):
@@ -895,8 +908,59 @@ class DocBuilder:
         "L18 латиница в кириллице",
     )
 
+    def _body_items(self):
+        """Абзацы и таблицы ТЕЛА в порядке потока XML (w:body), а не «сперва все
+        абзацы, потом все таблицы». Шапка суда, таблица расчета и ГОСТ-подпись
+        живут в потоке на своих местах; сверка с одобренной редакцией читает
+        документ так, как его читает человек (этап 9.20, круг 8)."""
+        from docx.table import Table as _T
+        from docx.text.paragraph import Paragraph as _P
+        for child in self.doc.element.body.iterchildren():
+            if child.tag == qn("w:p"):
+                yield _P(child, self.doc)
+            elif child.tag == qn("w:tbl"):
+                yield _T(child, self.doc)
+
+    def _content_units(self):
+        """Единицы текста документа: (текст, служебный) — тело в порядке потока,
+        затем колонтитулы.
+
+        Таблица, помеченная служебной (шапка суда, адресная шапка, блок
+        подписи), целиком из сверки вылетает. Колонтитулы — часть документа:
+        требование, написанное в шапке страницы, уходило в суд мимо Кони
+        (этап 9.20, круг 8) — их текст судится наравне с телом, кроме
+        служебного поля номера страницы. Читаются по XML существующих part'ов,
+        чтобы доступ не создавал пустых колонтитулов в сохраняемом файле.
+        """
+        units = []
+        service = self._service_elements
+        for item in self._body_items():
+            el = item._tbl if hasattr(item, "rows") else item._p
+            if el in service:
+                continue
+            if hasattr(item, "rows"):                      # таблица
+                for row in item.rows:
+                    for cell in row.cells:
+                        units.extend((p.text, False) for p in cell.paragraphs)
+            else:                                          # абзац
+                units.append((item.text, False))
+        for part in self.doc.part.package.iter_parts():
+            name = str(part.partname)
+            if not (name.startswith("/word/header") or
+                    name.startswith("/word/footer")):
+                continue
+            root = getattr(part, "element", None)
+            if root is None:
+                continue
+            for p in root.iter(qn("w:p")):
+                if p in service:                           # поле номера страницы
+                    continue
+                text = "".join(t.text or "" for t in p.iter(qn("w:t")))
+                units.append((text, False))
+        return units
+
     def _document_text(self):
-        """Весь видимый текст документа: параграфы плюс ячейки таблиц.
+        """Весь видимый текст тела документа в порядке потока XML.
 
         Блок-цитаты отдаются с markdown-префиксом «> ». Без него гейт читает
         дословную норму закона как авторский текст и бракует документ за чужие
@@ -906,11 +970,14 @@ class DocBuilder:
         сохранялась, хотя тот же текст в .md проходил чисто.
         """
         quotes = getattr(self, "_quote_paragraphs", set())
-        parts = ["> " + p.text if p._p in quotes else p.text
-                 for p in self.doc.paragraphs]
-        for t in self.doc.tables:
-            for row in t.rows:
-                parts.extend(c.text for c in row.cells)
+        parts = []
+        for item in self._body_items():
+            if hasattr(item, "rows"):
+                for row in item.rows:
+                    for cell in row.cells:
+                        parts.extend(p.text for p in cell.paragraphs)
+            else:
+                parts.append("> " + item.text if item._p in quotes else item.text)
         # Абзацы разделяются пустой строкой: scan_legal.sh склеивает соседние
         # непустые строки в один абзац по правилам markdown, и цитата теряет
         # свой префикс «> », если предыдущий абзац стоит вплотную.
@@ -919,16 +986,27 @@ class DocBuilder:
     def _matches_approved(self, md_path):
         """Собранный текст обязан быть равен одобренной редакции .md — целиком.
 
-        Сравнение после нормализации: разметка markdown, регистр и «ё» (её
-        сборщик стрипает сам) на равенство не влияют. Одобренный текст обязан
-        войти в документ целиком и подряд — и документ обязан ИСЧЕРПЫВАТЬСЯ
-        одобренным текстом: «вхождение подстроки» позволяло ДОПИСАТЬ в конец
-        новое требование («обратить взыскание на квартиру ответчика»), и
-        сборка проходила — Кони видел меньше, чем уходило в суд (этап 9.19,
-        круг 7). После одобренного текста допустим только хвост-подпись
-        (роль/ФИО и дата сборки), до него — ничего. Вернет True/False.
+        Это КАНОНИЧЕСКАЯ копия правила «.docx равен одобренному .md»; вторая
+        (объемно-числовая прикидка в document_guard.check_md_vs_docx) обязана
+        ей подчиняться, а не судить сама — иначе на одной паре файлов два
+        прибора отвечают противоположно (этап 9.20, круг 8: сборка отказывала
+        там, где document_guard --md отвечал «в порядке»).
+
+        Сравнение — по единицам текста (абзац, ячейка) после нормализации:
+        разметка markdown, регистр, «ё» (её сборщик стрипает сам) и номер
+        пункта (его ставит Word, а не текст .md) на равенство не влияют.
+        Порядок прежний круг ломал дважды: «все абзацы, потом все таблицы»
+        уносило шапку суда, расчет и подпись в хвост, и совпадения не было
+        никогда; «вхождение подстроки» позволяло ДОПИСАТЬ в конец новое
+        требование («обратить взыскание на квартиру ответчика») — Кони видел
+        меньше, чем уходило в суд (этап 9.19, круг 7). Поэтому три условия:
+        каждая одобренная единица обязана войти (со счетом повторов), каждая
+        НЕслужебная единица документа обязана быть одобренной (служить хвостом-
+        подписью — роль/ФИО и дата — либо мебелью сборщика), а порядок
+        одобренных единиц в документе обязан совпадать с .md. Вернет True/False.
         """
         import re as _re
+        from collections import Counter
         from pathlib import Path as _Path
 
         def norm(s):
@@ -936,11 +1014,50 @@ class DocBuilder:
             s = s.replace("ё", "е").replace("Ё", "е")
             return _re.sub(r"\s+", " ", s).strip().lower()
 
-        def tolko_podpis(hvost):
-            """Хвост после одобренного текста — только подпись: несколько слов
-            (роль/ФИО) и дата ДД.ММ.ГГГГ. Дописанное требование подписью не
-            выглядит: оно длиннее и содержит сказуемое, а не только реквизит."""
-            hvost = hvost.strip()
+        def unit(s):
+            # Номер пункта, набранный руками («1. »), и маркер списка снимаются:
+            # в .docx номер ставит Word, а не текст .md, и текстовое расхождение
+            # номера — не правка смысла.
+            s = _MANUAL_NUM.sub("", s.strip(), count=1)
+            s = _re.sub(r"^[-*•—–]\s+", "", s)
+            return norm(s)
+
+        def units_of_md(text):
+            """Единицы .md: абзацы (блоки через пустую строку) и ячейки таблиц
+            (строка «| … | … |»), разделительная строка «| --- |» пропускается.
+            Строка-элемент списка («1. …», «- …») и заголовок — своя единица:
+            в .docx это отдельный абзац, и склейка с предыдущей строкой давала
+            ложное расхождение («ПРИЛОЖЕНИЯ: 1. Договор…» против двух абзацев)."""
+            out, block = [], []
+
+            def flush():
+                if block:
+                    out.append(" ".join(block))
+                    block.clear()
+
+            for line in text.splitlines():
+                s = line.strip()
+                if s.startswith("|") and s.endswith("|") and len(s) > 1:
+                    flush()
+                    cells = [c.strip() for c in s.strip("|").split("|")]
+                    if all(_re.fullmatch(r":?-{2,}:?", c) for c in cells if c):
+                        continue                # разделительная строка таблицы
+                    out.extend(c for c in cells if c)
+                elif not s:
+                    flush()
+                elif _MANUAL_NUM.match(s) or s.startswith(("#", "- ", "* ", "• ")):
+                    flush()
+                    out.append(s)
+                else:
+                    block.append(s)
+            flush()
+            return [u for u in (unit(x) for x in out) if u]
+
+        def tolko_podpis(edinicy):
+            """Лишнее в документе — только подпись: несколько слов (роль/ФИО)
+            и дата ДД.ММ.ГГГГ в конце. Дописанное требование подписью не
+            выглядит: оно длиннее и не кончается датой-реквизитом."""
+            hvost = " ".join(edinicy).strip()
             if not hvost:
                 return True
             if len(hvost.split()) > 6:
@@ -949,18 +1066,43 @@ class DocBuilder:
                 r"^[a-zа-яё\d\s.\-]*\d{1,2}\.\d{1,2}\.\d{4}$", hvost))
 
         try:
-            md_norm = norm(_Path(md_path).read_text(encoding="utf-8", errors="replace"))
+            md_units = units_of_md(
+                _Path(md_path).read_text(encoding="utf-8", errors="replace"))
         except OSError:
             return False
-        if not md_norm:
+        if not md_units:
             return True
-        doc_norm = norm(self._document_text())
-        idx = doc_norm.find(md_norm)
-        if idx < 0:
-            return False
-        if doc_norm[:idx].strip():
-            return False          # перед одобренным текстом что-то дописано
-        return tolko_podpis(doc_norm[idx + len(md_norm):])
+        doc_units = [(unit(t), s) for t, s in self._content_units()]
+        doc_units = [(u, s) for u, s in doc_units if u]
+
+        doc_counter = Counter(u for u, _ in doc_units)
+        if Counter(md_units) - doc_counter:
+            return False            # одобренный текст вошел не целиком
+        lishnie = [u for u, s in doc_units if not s]
+        ostatok = Counter(lishnie) - Counter(md_units)
+        if ostatok:
+            # Из лишнего допустим только хвост-подпись (и только в конце).
+            hvost = []
+            for u in reversed(lishnie):
+                if u in ostatok and ostatok[u] > 0:
+                    hvost.append(u)
+                    ostatok[u] -= 1
+                else:
+                    break
+            if any(v > 0 for v in ostatok.values()):
+                return False        # дописано в середину или начало документа
+            if not tolko_podpis(list(reversed(hvost))):
+                return False        # дописано требование, а не подпись
+        # Порядок: одобренные единицы идут в документе как в .md (служебная
+        # мебель между ними — шапка суда, подпись — на порядок не влияет).
+        potok = iter(u for u, _ in doc_units)
+        for wanted in md_units:
+            for u in potok:
+                if u == wanted:
+                    break
+            else:
+                return False        # единицы переставлены или потеряны
+        return True
 
     def _humanizer_gate(self):
         """Прогнать текст через scan_legal.sh. Вернуть список сработавших
