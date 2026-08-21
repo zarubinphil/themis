@@ -88,6 +88,14 @@ def _resolve(path: str, base: str) -> str:
     # раскрывался — раскрываем и через переменную, чтобы обе формы судились равно.
     _home = os.path.expanduser("~")
     p = p.replace("${HOME}", _home).replace("$HOME", _home)
+    # Подстановка команды в пути прячет цель так же, как $PWD: `rm -rf $(pwd)` и
+    # `rm -rf `pwd`` у корня дела сносят его целиком, а литерал $(pwd)/`pwd` оставался
+    # мусорным компонентом вне cases/, и гейт удаления был слеп (проба круга 8). Раскрываем
+    # pwd в накопленную базу, echo — в свой аргумент; обе формы ($(...) и бэктики) равно.
+    # Замена функцией, а не строкой: путь-база может содержать спецсимволы regexp.
+    p = re.sub(r"\$\(\s*pwd\s*\)|`\s*pwd\s*`", lambda _m: base, p)
+    p = re.sub(r"\$\(\s*echo\s+([^)]*?)\s*\)|`\s*echo\s+([^`]*?)\s*`",
+               lambda m: m.group(1) or m.group(2) or "", p)
     p = os.path.expanduser(p)
     if not os.path.isabs(p):
         p = os.path.join(base, p)
@@ -187,8 +195,18 @@ def _safe_intake_adds(cmd: str, base: str) -> set:
                 break
             cut.append(t)
         toks = cut
-        no_clobber = any(o in ("-n", "--no-clobber") for o in toks if o.startswith("-"))
-        srcs = [t for t in toks if not t.startswith("-")][:-1]     # последний позиционный — цель
+        # -n живёт и в склеенном коротком флаге: `-vn`, `-nv`, `-an` — тот же no-clobber,
+        # что и голый `-n`, а прежняя точная сверка их не узнавала и рубила штатный интейк
+        # (проба круга 8). Короткий кластер (одиночный `-`) содержит букву n → no-clobber.
+        no_clobber = any(o == "--no-clobber"
+                         or (o.startswith("-") and not o.startswith("--") and "n" in o[1:])
+                         for o in toks)
+        # Цель через -t DIR, источники — всё прочее позиционное (тот же разбор, что у
+        # _copy_move_targets): `mv -n -t DIR src` прежде принимал DIR за источник и,
+        # увидев первичку, объявлял увозом штатное пополнение (проба круга 8).
+        tdir = _target_dir_flag(toks)
+        pos = [t for t in toks if not t.startswith("-")]
+        srcs = [p for p in pos if p != tdir] if tdir is not None else pos[:-1]
         if any(_under_protected(_resolve(s, base)) for s in srcs):
             continue                       # источник из первички — увоз, не пополнение
         for t in _copy_move_targets(args, base):
@@ -403,12 +421,31 @@ _INPLACE_RE = re.compile(
 _VERB_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(" + "|".join(_VERB_LAST + _VERB_ALL)
                       + r")\s+([^;&|<>]+)", re.M)
 # Обнуляют/затирают файл-аргумент, не редиректом и не позицией cp: truncate -s 0 FILE,
-# gzip FILE (заменяет на .gz, удаляя оригинал), split (пишет по префиксу), cpio/zip
-# (сборка/разбор архива), shred (уничтожает). Цель — позиционный аргумент; блокируем
+# gzip FILE (заменяет на .gz, удаляя оригинал), split (пишет по префиксу), cpio
+# (разбор архива), shred (уничтожает). Цель — позиционный аргумент; блокируем
 # лишь когда он резолвится под наши cases/ или в 00_intake/_baselines.
+# zip сюда НЕ входит: в режиме упаковки он ЧИТАЕТ входные файлы и пишет ТОЛЬКО архив
+# (первый позиционный). Считать все его аргументы записью — ложная тревога: резервная
+# копия первички наружу (`zip -r /tmp/rezerv.zip …/00_intake`) блокировалась наравне с
+# tar/cp -R/ditto, которые проходят, а отказ советовал невозможную для упаковки распаковку
+# (проба круга 8). Архив разбирает _EXTRACT_VERB_RE (unzip); запись архива ВНУТРЬ дела
+# ловит _zip_archive_targets ниже.
 _FILE_VERB_RE = re.compile(
     r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?"
-    r"(?:truncate|gzip|gunzip|bzip2|bunzip2|xz|unxz|split|cpio|zip|shred)\s+([^;&|<>]+)", re.M)
+    r"(?:truncate|gzip|gunzip|bzip2|bunzip2|xz|unxz|split|cpio|shred)\s+([^;&|<>]+)", re.M)
+# zip пишет ТОЛЬКО архив — первый позиционный аргумент; остальное читает. Цель-запись —
+# сам архив: `zip дело/GOTOVO/out.zip …` кладёт файл в дело мимо конвейера (блок), а
+# чтение первички в архив наружу — нет.
+_ZIP_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?zip\b([^;&|<>]*)", re.M)
+
+
+def _zip_archive_targets(body: str, base: str) -> list:
+    out = []
+    for args in _ZIP_RE.findall(body):
+        pos = _split(args)
+        if pos:
+            out.append(_resolve(pos[0], base))     # первый позиционный — сам архив (запись)
+    return out
 # Загрузчики пишут в файл флагом, а не редиректом. `-o` многозначен: у unzip это
 # «перезаписать», а не «вывести в файл» (проба круга 6: `unzip -o {дело}/arch.zip`
 # читался как ЗАПИСЬ в arch.zip и блокировал законную распаковку ИЗ дела). Поэтому
@@ -505,9 +542,14 @@ def _copy_move_targets(args: str, base: str) -> list:
     return [dst_abs]
 
 
-def _write_targets(cmd: str, base: str) -> list:
+def _write_targets(cmd: str, base: str, drop_cpmv=frozenset()) -> list:
     """Абсолютные пути, КУДА команда пишет. Упоминание пути в аргументе чтения целью
-    не считается; относительные резолвятся от base (ведущий cd / cwd payload)."""
+    не считается; относительные резолвятся от base (ведущий cd / cwd payload).
+
+    drop_cpmv — цели cp/mv, признанные БЕЗОПАСНЫМ пополнением интейка; их исключаем
+    только из cp/mv-ветки. Прочие писатели (truncate/dd/редирект) остаются: один cp -n
+    на путь не должен легализовать по нему другой глагол (проба круга 8). Пустой набор —
+    поведение прежнее (полный список целей для гейтов кода/растра/протокола)."""
     body = _strip_heredocs(cmd)
     targets = [_resolve(t, base) for t in _REDIRECT_RE.findall(body)]
     targets += [_resolve(t, base) for t in _FETCH_RE.findall(body)]
@@ -516,11 +558,12 @@ def _write_targets(cmd: str, base: str) -> list:
     targets += _git_clone_targets(body, base)
     targets += _sed_write_targets(body, base)
     targets += [_resolve(t, base) for t in _DD_OF_RE.findall(body)]
+    targets += _zip_archive_targets(body, base)
     for verb, args in _VERB_RE.findall(body):
         if verb in _VERB_ALL:                       # tee, touch — каждый аргумент
             targets += [_resolve(t, base) for t in _split(args)]
         else:                                       # cp mv install rsync ditto ln
-            targets += _copy_move_targets(args, base)
+            targets += [t for t in _copy_move_targets(args, base) if t not in drop_cpmv]
     for args in _INPLACE_RE.findall(body):
         parts = _split(args)
         # первый позиционный — выражение sed/perl (s/a/b/), файл дальше
@@ -729,9 +772,24 @@ _MV_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(?:mv|scp|rsync)\s+([^;&|
 def _mv_sources(body: str) -> list:
     out = []
     for args in _MV_RE.findall(body):
-        parts = _split(args)
-        if len(parts) >= 2:
-            out += parts[:-1]
+        try:
+            import shlex
+            toks = shlex.split(args)
+        except ValueError:
+            toks = args.split()
+        cut = []
+        for t in toks:                     # инлайн-комментарий обрывает разбор
+            if t.startswith("#"):
+                break
+            cut.append(t)
+        # Цель через -t DIR (mv -n -t DIR src) — не источник: прежний parts[:-1] принимал
+        # DIR за увозимый файл и блокировал штатное пополнение интейка (проба круга 8).
+        tdir = _target_dir_flag(cut)
+        pos = [t for t in cut if not t.startswith("-")]
+        if tdir is not None:
+            out += [p for p in pos if p != tdir]
+        elif len(pos) >= 2:
+            out += pos[:-1]                # последний позиционный — цель, остальное — источники
     return out
 
 
@@ -991,7 +1049,16 @@ def _exec_heredoc_bodies(raw: str) -> list:
 # остаётся данными и его срежет _strip_heredocs (иначе вернулась бы ложная тревога
 # 19.08.2026 — cp/00_intake ВНУТРИ текста файла).
 _EXEC_HEREDOC_EXPAND_RE = re.compile(
-    r"(?:^|[;&|\n(]|\$\(|`)\s*(?:sudo\s+|env\s+[^\n<]*?\s)?"
+    r"(?:^|[;&|\n(]|\$\(|`)\s*"
+    # Командные префиксы и путь к бинарю прячут интерпретатор heredoc от разбора:
+    # `/bin/bash <<EOF`, `command bash <<EOF`, `env A=B bash <<EOF`, `\bash <<EOF`
+    # разворачивались лишь правилом чужого CLI (_EXEC_HEREDOC_RE ловит их через \b), а
+    # запись/удаление/распаковка в теле шли мимо всех гейтов (проба круга 8). Снимаем
+    # префикс, путь и обратный слэш здесь, чтобы интерпретатор встал в командную позицию —
+    # тем же приёмом, что _normalize делает с обычной командой.
+    r"(?:(?:sudo|env|command|builtin|exec|nohup|nice|stdbuf|time|ionice|setsid)\b[^\n<]*?\s"
+    r"|[A-Za-z_]\w*=[^\s;&|<]*\s+)*"
+    r"(?:[^\s;&|<>()`]*/)?\\?"
     r"(sh|bash|zsh|source|\.|python3?|ruby|perl|node|php)\b[^\n]*?"
     r"<<-?\s*['\"]?(\w+)['\"]?[^\n]*\n(.*?)^\s*\2\s*$",
     re.S | re.M)
@@ -1170,17 +1237,19 @@ def main() -> None:
         # что реально пишется, а не как это названо в командной строке.
         # Увоз/переименование родителя (`mv {дело} /tmp`, `mv {клиент} {клиент}-старое`)
         # уносит первичку и базу «ДО» целиком — mv-источник судим и как предок поддерева.
-        protected_targets = [t for t in targets if _under_protected(t)]
         removed_sources = [_resolve(s, base) for s in _mv_sources(cmd)]
         removed_sources = [s for s in removed_sources
                            if _under_protected(s) or _is_protected_ancestor(s)]
-        # Блок лишь по защищённой цели, которую НЕ покрывает безопасное пополнение
-        # (cp/mv -n или с датой в имени), либо по увозу источника из первички. Судим
-        # цели тождеством с safe_adds, а не «вся строка — один cp/mv»: компаунд обихода
-        # интейка (`mv -n … 00_intake/ && ls`, цикл по инбоксу) — не ложная тревога.
+        # Опасная запись в первичку — защищённая цель, к которой пишет ЛЮБАЯ операция,
+        # КРОМЕ безопасного пополнения cp/mv (-n/--no-clobber или свежее имя со штампом
+        # даты). drop_cpmv убирает из счёта только эти безопасные добавления; редирект,
+        # truncate, dd, sed -i по тому же пути остаются — один cp -n больше не легализует
+        # по пути другой глагол (проба круга 8). Небезопасный cp/mv (поверх существующего,
+        # без -n) в drop_cpmv не попадает, значит его цель остаётся и даёт блок как прежде.
         safe_adds = _safe_intake_adds(cmd, base)
-        unsafe_targets = [t for t in protected_targets if t not in safe_adds]
-        if unsafe_targets or removed_sources:
+        dangerous_protected = [t for t in _write_targets(cmd, base, drop_cpmv=safe_adds)
+                               if _under_protected(t)]
+        if dangerous_protected or removed_sources:
             block(
                 "БЛОК: перезапись или увоз 00_intake/ или _baselines/ (в т.ч. как "
                 "поддерево переносимой папки дела/клиента) запрещены — исходники клиента "
