@@ -54,9 +54,13 @@ NO_QUOTA = ("quota", "usage limit", "rate limit", "too many requests", "limit re
 
 def _cache_read(path: Path) -> dict:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
+    # Кеш — ускорение, а не условие работы: посторонний файл верного JSON, но чужой
+    # формы (список вместо словаря) не должен ронять пробу исключением `.get` и
+    # останавливать весь ПД-конвейер. Не словарь — считаем «кеша нет».
+    return data if isinstance(data, dict) else {}
 
 
 def _cache_write(path: Path, data: dict) -> None:
@@ -233,6 +237,12 @@ def selftest() -> int:
         _cache_write(poison, {"ghost": {"outcome": "ok", "until": 9999999999}})
         assert check("ghost", str(td / "netu.sh"), str(work), cache=poison)["outcome"] == "no_binary", \
             "поддельный ok из кеша принят без пробы"
+        # Посторонний файл верного JSON, но чужой формы (список) — не условие работы:
+        # проба идёт, а не падает `.get`-исключением.
+        chuzhoy = td / "chuzhoy.json"
+        chuzhoy.write_text(json.dumps(["посторонний", "но валидный json"]), encoding="utf-8")
+        assert check("t", ok, str(work), cache=chuzhoy)["outcome"] == "ok", \
+            "чужая форма кеша уронила пробу"
         envdump = td / "env.txt"
         spy = sh("spy.sh", f"env > {envdump}\n")
         assert check("spy", spy, str(work), cache=cache,
