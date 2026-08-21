@@ -272,7 +272,7 @@ def main() -> int:
     # Ареопага («СОГЛАСОВАНО СОВЕТОМ»), FAST — синтез Фемидой («## FAST-ПОЗИЦИЯ
     # ФЕМИДЫ»). Без второго маркера FAST-прогон упирался в шаг 3 навсегда: совета
     # на нём не бывает, а ставить «СОГЛАСОВАНО СОВЕТОМ» без совета — врать прибору.
-    s3 = has_marker(pos, r"СОГЛАСОВАНО СОВЕТОМ") or has_marker(pos, r"## FAST-ПОЗИЦИЯ ФЕМИДЫ")
+    s3 = has_marker(pos, r"#{0,3}\s*СОГЛАСОВАНО СОВЕТОМ") or has_marker(pos, r"## FAST-ПОЗИЦИЯ ФЕМИДЫ")
     s3_skip = has_marker(case_md, r"position-council пропущен", anchored=False)
 
     level = "?"
@@ -332,7 +332,7 @@ def main() -> int:
     elif s3_skip:
         print("Шаг 3 Позиция:   ✓  пропуск зафиксирован в _case.md")
     else:
-        s3_how = ("СОГЛАСОВАНО СОВЕТОМ" if has_marker(pos, r"СОГЛАСОВАНО СОВЕТОМ")
+        s3_how = ("СОГЛАСОВАНО СОВЕТОМ" if has_marker(pos, r"#{0,3}\s*СОГЛАСОВАНО СОВЕТОМ")
                   else "FAST-ПОЗИЦИЯ ФЕМИДЫ" if s3 else "— нет маркера")
         print(f"Шаг 3 Позиция:   {mark(s3)}  positions.md {s3_how}")
     print(f"Шаг 4 Черновики: {mark(bool(drafts))}  {len(drafts)} файл(ов) в .agent/drafts")
