@@ -33,6 +33,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import case_paths as cp  # noqa: E402
 from create_docx import DocBuilder  # noqa: E402
 
+try:
+    import money_rule as _mr  # noqa: E402  единый денежный разбор проекта
+except ImportError:
+    _mr = None
+
 READY = "ГОТОВ К ПОДАЧЕ"
 SCAN = Path.home() / ".claude/skills/humanizer-legal/scripts/scan_legal.sh"
 # Категории scan_legal.sh, при которых документ не выпускается. Источник один:
@@ -95,8 +100,11 @@ def scan(md):
 # и словом валюты стояло слово (проба 20.08.2026).
 _RAZRYAD = r"(?:\s*(?:тыс|млн|млрд|тысяч\w*|миллион\w*|миллиард\w*)\.?)?"
 _NUM = r"\d[\d  .]*(?:[,.]\d{1,2})?" + _RAZRYAD
-_CUR = r"(?:руб(?:\.|л\w*)?|\u20bd|₽|коп(?:\.|е\w*)?|доллар\w*|долл\.?|usd|\$|р\.|евро|eur|€)"
-_CUR_END = r"(?![A-Za-zА-Яа-яЁё])"
+# Словарь валют — ОДИН на проект, из scripts/money_rule.py (копии в вердикте
+# и стороже формата разошлись, этап 9.22, круг 9).
+_CUR = _mr.CUR_RE if _mr is not None else (
+    r"руб(?:\.|л\w*)?|₽|коп(?:\.|е\w*)?|доллар\w*|долл\.?|usd|\$|р\.|евро|eur|€")
+_CUR_END = _mr.CUR_END if _mr is not None else r"(?![A-Za-zА-Яа-яЁё])"
 _MONEY_AFTER_RE = re.compile(rf"(?<!\d)({_NUM})\s*(\([^()]*\))?\s*({_CUR}){_CUR_END}", re.I)
 _MONEY_PREFIX_RE = re.compile(rf"(?<!\w)({_CUR})\s*({_NUM})\s*(\([^()]*\))?", re.I)
 _MONEY_PARENS_RE = re.compile(rf"(?<!\d)({_NUM})\s*(\([^()]*{_CUR}[^()]*\))", re.I)
@@ -112,14 +120,10 @@ _PROPIS_WORD_RE = re.compile(
     r"\b(?:ноль|один|одна|два|две|три|четыр|пят|шест|сем|восем|девят|десят|"
     r"сто|ста|сот|тысяч|миллион|миллиард|рубл|копе)\w*",
     re.I)
-# Одно числительное ЦЕЛИКОМ (для проверки «последнее слово перед скобками»):
-# шире _PROPIS_WORD_RE — «тридцать», «сорок», «пятьдесят» тоже пропись, иначе
-# верная форма «сто тридцать (130) рублей» браковалась бы (этап 9.20, круг 8).
-_NUMERAL_WORD_RE = re.compile(
-    r"(?:ноль?|нул|оди?н|одна|одной|дв[ауе]|три|четыр|пят|шест|сем|восем|восьм|"
-    r"девят|десят|[а-яё]*надцат|[а-яё]*дцат|[а-яё]*десят|сорок|"
-    r"ст[аоие]|сот|тысяч|миллион|миллиард|рубл|копе)\w*",
-    re.I)
+# Одно числительное ЦЕЛИКОМ (для проверки «последнее слово перед скобками») —
+# словарь словоформ propis.py из scripts/money_rule.py, а не префикс со
+# свободным хвостом: прежняя форма принимала «однако» за числительное, и
+# сумма «однако (100 000) рублей» получала вердикт (этап 9.22, круг 9).
 # Незаполненная вставка живёт не только в скобках. После запрета квадратных
 # скобок в проекте составители перешли на подчёркивание, ёлочки и угловые
 # скобки — форма сменилась, брак остался (проба 20.08.2026: документ с
@@ -204,7 +208,11 @@ def format_problems(md):
 
     Точное СОВПАДЕНИЕ прописи с числом — отдельная, более глубокая проверка
     scripts/document_guard.py (этап 9.8); здесь — что расшифровка вообще есть,
-    без неё документ уже брак и до сверки дело можно не доводить.
+    без неё документ уже брак и до сверки дело можно не доводить. Денежный
+    разбор — единый, scripts/money_rule.py: дословная цитата в елочках
+    (норма, судебный акт) прописи не требует — цитировать обязаны дословно,
+    и возражение, цитирующее обжалуемый акт с суммой, обязано получать
+    вердикт (этап 9.22, круг 9).
     """
     text = Path(md).read_text(encoding="utf-8", errors="replace")
     problems = []
@@ -217,37 +225,46 @@ def format_problems(md):
     for m in _BRACKET_SPAN_RE.finditer(text):
         if _empty_slot(m.group(1)):
             problems.append(f"незаполненная вставка «{m.group(0)}»")
-    covered = [m.span() for m in _PROPIS_BLOCK_RE.finditer(text)]
+    if _mr is None:
+        problems.append("scripts/money_rule.py недоступен — денежная проверка "
+                        "не выполнена (fail-closed)")
+        return problems
+    # Деньги судятся БЕЗ цитат в елочках: цитата акта с суммой («суд указал:
+    # «взыскать 100 000 рублей»») — дословное воспроизведение, а не сумма
+    # документа. Совпадение прописи внутри цитаты сверяет document_guard.
+    money_text, _quotes = _mr.split_quotes(text)
+    covered = [m.span() for m in _PROPIS_BLOCK_RE.finditer(money_text)]
 
     def in_covered(pos):
         return any(a <= pos < b for a, b in covered)
 
     before_nums = set()
-    for m in _MONEY_BEFORE_RE.finditer(text):
+    for m in _MONEY_BEFORE_RE.finditer(money_text):
         # Пропись ПЕРЕД числом — «двести тысяч (200 000) рублей» — верная
         # форма, только зеркальная. Но слово перед скобками обязано быть
-        # ЧИСЛИТЕЛЬНЫМ: «взыскать (100 000) рублей» — сумма в круглых
-        # скобках вообще без прописи, и оба прибора её пропускали
-        # (этап 9.20, круг 8). Судит ПОСЛЕДНЕЕ слово перед скобками: проверка
+        # ЧИСЛИТЕЛЬНЫМ из словаря propis.py: «взыскать (100 000) рублей» —
+        # сумма в круглых скобках вообще без прописи (этап 9.20, круг 8), а
+        # «однако (100 000) рублей» проходило за счет префиксного опознания
+        # (этап 9.22, круг 9). Судит ПОСЛЕДНЕЕ слово перед скобками: проверка
         # вхождением по всему префиксу давала обход — в «сто тысяч (100 000)
         # рублей и (5 000) руб.» вторая сумма проходила за счёт слова «рублей»
         # от первой (та же дыра, круг 8, вторая половина оси).
         if in_covered(m.start()):
             continue          # внутри уже опознанной прописи — не судим второй раз
-        tail = re.findall(r"[A-Za-zА-Яа-яЁё-]+", text[:m.start()])
-        if tail and _NUMERAL_WORD_RE.fullmatch(tail[-1]):
+        tail = re.findall(r"[A-Za-zА-Яа-яЁё-]+", money_text[:m.start()])
+        if tail and _mr.is_numeral(tail[-1]):
             before_nums.add(m.group(1))
         else:
             problems.append(f"сумма «({m.group(1)}) {m.group(2)}» в круглых скобках "
                             f"без прописи перед ними — пропись обязана стоять перед "
                             f"скобками: «сто тысяч (100 000) рублей»")
-    for m in _MONEY_AFTER_RE.finditer(text):
+    for m in _MONEY_AFTER_RE.finditer(money_text):
         num, parens, currency = m.groups()
         if in_covered(m.start()):
             continue          # внутри уже опознанной прописи — не судим второй раз
         if num in before_nums:
             continue
-        if _has_propis_before_number(text, m.start()):
+        if _has_propis_before_number(money_text, m.start()):
             continue
         # «… рублей 00 копеек» — нулевые копейки цифрами после суммы, обиходная
         # форма, а не вторая сумма без прописи (проба круга 6, 20.08.2026).
@@ -257,7 +274,7 @@ def format_problems(md):
         if not parens or not re.search(r"[а-яёА-ЯЁ]", parens):
             problems.append(f"сумма «{num} {currency}» без прописи в круглых скобках "
                             f"между числом и словом валюты")
-    for m in _MONEY_PREFIX_RE.finditer(text):
+    for m in _MONEY_PREFIX_RE.finditer(money_text):
         currency, num, parens = m.groups()
         if in_covered(m.start()):
             continue          # «рублей 29» внутри прописи — не вторая сумма
@@ -267,7 +284,7 @@ def format_problems(md):
             continue
         if not parens or not re.search(r"[а-яёА-ЯЁ]", parens):
             problems.append(f"сумма «{currency}{num}» без прописи в круглых скобках")
-    for m in _MONEY_PARENS_RE.finditer(text):
+    for m in _MONEY_PARENS_RE.finditer(money_text):
         num, parens = m.groups()
         if in_covered(m.start()):
             continue
@@ -472,6 +489,21 @@ def selftest():
                           "и (5 000) руб. процентов.\n", encoding="utf-8")
         assert format_problems(vtorym), \
             "вторая сумма в скобках без прописи прошла за счет чужой прописи"
+
+        # Этап 9.22, круг 9: дословная цитата судебного акта с суммой вердикту
+        # не мешает (возражения и жалобы почти всегда цитируют обжалуемый акт);
+        # «однако» — не числительное, сумма в скобках без прописи остается браком.
+        citata = d / "citata.md"
+        citata.write_text("# Возражения\n\nСуд первой инстанции указал: «взыскать "
+                          "с ответчика 100 000 рублей неосновательного обогащения», "
+                          "не установив факт приобретения имущества (ст. 1102 ГК РФ).\n",
+                          encoding="utf-8")
+        assert format_problems(citata) == [], format_problems(citata)
+        odnako = d / "odnako.md"
+        odnako.write_text("# Заявление\n\nОтветчик оплатил часть поставки, однако "
+                          "(100 000) рублей остались невыплаченными.\n",
+                          encoding="utf-8")
+        assert format_problems(odnako), "слово «однако» принято за числительное"
 
         # «р.» с точкой и евро/EUR — тоже валюты (проба 20.08.2026, круг 5).
         rtochka = d / "rtochka.md"
