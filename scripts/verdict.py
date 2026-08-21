@@ -124,14 +124,21 @@ _PLACEHOLDER_RE = re.compile(
 # организации не давало выдать вердикт вовсе).
 _BRACKET_SPAN_RE = re.compile(r"[\[(<«]\s*([^)\]>»]{1,80}?)\s*[\])>»]")
 _PLACEHOLDER_KEY_RE = re.compile(
-    r"указать|вставить|заполнить|фио|сумм[ауеы]?|дата|дату|адрес|инн|огрн|"
+    r"указать|укажите|вставить|вписать|заполнить|прописать|подставить|фио|"
+    r"сумм[ауеы]?|дата|дату|адрес|инн|огрн|"
     r"наименование|номер|реквизиты|паспорт",
     re.I)
 # Слова, из которых состоит подсказка «что вписать» — и ничего больше.
+# Связки («и», «от») и слова-наполнители («сюда», «нужное») дыру не
+# заполняют: «(вставить сюда наименование суда)» — та же дыра, что
+# «(наименование суда)» (этап 9.20, круг 8).
 _PLACEHOLDER_VOCAB = frozenset(
-    "указать вставить заполнить фио ф и о сумма сумму суммы дата дату даты "
+    "указать укажите вставить вписать заполнить прописать подставить фио ф и о "
+    "сумма сумму суммы дата дату даты "
     "адрес инн огрн наименование номер реквизиты паспорт суда дела истца "
-    "ответчика стороны организации заявителя подписанта г".split())
+    "ответчика стороны организации заявителя подписанта г "
+    "и или а от по в на со без для при сюда нужное нужную необходимое данные "
+    "значение текст".split())
 
 
 def _empty_slot(content):
@@ -144,16 +151,30 @@ def _empty_slot(content):
     «(ст. 309 ГК РФ)». Отличие: вставка состоит ТОЛЬКО из слов-подсказок —
     короткая, без цифр и двоеточия; как только в скобках появилось значение
     (цифра реквизита, двоеточие с адресом), скобка перестаёт быть дырой.
+    Токены без единой буквы («…», «—», «...») словами не считаются: иначе
+    «(указать …)» проходило вердикт, и документ из одних таких скобок уходил
+    в суд (этап 9.20, круг 8).
     """
     # Точки не учитываются: «(Ф.И.О.)» — та же дыра, что «(ФИО)».
     if not _PLACEHOLDER_KEY_RE.search(content.lower().replace(".", "")):
         return False
     if re.search(r"\d", content) or ":" in content:
         return False          # значение вписано — это реквизит, а не дыра
-    words = content.split()
-    if not 1 <= len(words) <= 5:
+    words = [w for w in content.split()
+             if re.search(r"[A-Za-zА-Яа-яЁё]", w)]
+    if not 1 <= len(words) <= 6:
         return False
     return all(w.lower().replace(".", "") in _PLACEHOLDER_VOCAB for w in words)
+
+
+# Опознанная пропись целиком: число + круглые скобки с кириллической
+# расшифровкой (валюта может жить внутри скобок — форма прибора calc395
+# «38 998,29 (тридцать восемь тысяч … рублей 29 копеек)»). Всё внутри такого
+# блока — часть прописи, второй раз не судится: иначе правило ищет пару
+# «валюта + число» ВНУТРИ уже опознанной прописи и печатает несуществующую
+# сумму «рублей29», по которой юрист не поймет, что править (этап 9.20,
+# круг 8).
+_PROPIS_BLOCK_RE = re.compile(rf"(?<!\d){_NUM}\s*\([^()]*[а-яёА-ЯЁ][^()]*\)")
 
 
 def _has_propis_before_number(text, start):
@@ -182,9 +203,29 @@ def format_problems(md):
     for m in _BRACKET_SPAN_RE.finditer(text):
         if _empty_slot(m.group(1)):
             problems.append(f"незаполненная вставка «{m.group(0)}»")
-    before_nums = {m.group(1) for m in _MONEY_BEFORE_RE.finditer(text)}
+    covered = [m.span() for m in _PROPIS_BLOCK_RE.finditer(text)]
+
+    def in_covered(pos):
+        return any(a <= pos < b for a, b in covered)
+
+    before_nums = set()
+    for m in _MONEY_BEFORE_RE.finditer(text):
+        # Пропись ПЕРЕД числом — «двести тысяч (200 000) рублей» — верная
+        # форма, только зеркальная. Но слова перед скобками обязаны быть
+        # ЧИСЛИТЕЛЬНЫМИ: «взыскать (100 000) рублей» — сумма в круглых
+        # скобках вообще без прописи, и оба прибора её пропускали
+        # (этап 9.20, круг 8).
+        prefix = m.group(0)[:m.group(0).index("(")]
+        if _PROPIS_WORD_RE.search(prefix):
+            before_nums.add(m.group(1))
+        else:
+            problems.append(f"сумма «({m.group(1)}) {m.group(2)}» в круглых скобках "
+                            f"без прописи перед ними — пропись обязана стоять перед "
+                            f"скобками: «сто тысяч (100 000) рублей»")
     for m in _MONEY_AFTER_RE.finditer(text):
         num, parens, currency = m.groups()
+        if in_covered(m.start()):
+            continue          # внутри уже опознанной прописи — не судим второй раз
         if num in before_nums:
             continue
         if _has_propis_before_number(text, m.start()):
@@ -197,14 +238,20 @@ def format_problems(md):
         if not parens or not re.search(r"[а-яёА-ЯЁ]", parens):
             problems.append(f"сумма «{num} {currency}» без прописи в круглых скобках "
                             f"между числом и словом валюты")
-    for currency, num, parens in _MONEY_PREFIX_RE.findall(text):
+    for m in _MONEY_PREFIX_RE.finditer(text):
+        currency, num, parens = m.groups()
+        if in_covered(m.start()):
+            continue          # «рублей 29» внутри прописи — не вторая сумма
         # «рублей 00 копеек» — тот же хвост нулевых копеек в зеркальной форме.
         if re.fullmatch(r"0+", num.strip()) and \
                 currency.lower().startswith(("руб", "коп")):
             continue
         if not parens or not re.search(r"[а-яёА-ЯЁ]", parens):
             problems.append(f"сумма «{currency}{num}» без прописи в круглых скобках")
-    for num, parens in _MONEY_PARENS_RE.findall(text):
+    for m in _MONEY_PARENS_RE.finditer(text):
+        num, parens = m.groups()
+        if in_covered(m.start()):
+            continue
         if not re.search(r"[а-яёА-ЯЁ]", parens):
             problems.append(f"сумма «{num}» без прописи в круглых скобках")
     return problems
