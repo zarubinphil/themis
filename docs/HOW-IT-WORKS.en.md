@@ -428,9 +428,10 @@ Total: critical 1, warnings 0, checks 17.
 SYSTEM NOT READY.
 ```
 
-That is real output from a real machine, not an illustration. The corpus of statutes
-has to be fetched once, by hand. Without it verbatim quotation of code provisions is
-unavailable, and the court-fee calculator — which reads its rates from chapter 25.3
+That is real output from a real machine on 21 August 2026, not an illustration: the
+statute corpus was genuinely empty at that moment. Fetching it is one command, done
+once, after which it refreshes itself monthly. Until then verbatim quotation of code
+provisions is unavailable, and the court-fee calculator — which reads its rates from chapter 25.3
 of the Tax Code — honestly answers "article 333.19 is not in the corpus" instead of
 computing from memory.
 
