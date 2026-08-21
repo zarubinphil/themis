@@ -22,8 +22,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import shutil
 import sys
+import tempfile
 
 # Прибор лежит рядом с token_ledger в scripts/ — его каталог первым в sys.path,
 # поэтому прямой импорт работает без возни с путями.
@@ -35,6 +38,11 @@ import token_ledger
 # считается с диска и сам себя калибрует.
 # ponytail: одна калибровочная константа; путь апгрейда — уже основной (тариф с диска).
 DEFAULT_BLEND_PER_MTOK = 1.87
+
+# Умолчание лимита — в ОДНОМ месте политики. Без --limit гейт не отключается («трек
+# всегда зелёный»), а стережёт по этому потолку: дорогой трек без явного лимита-
+# разрешения не стартует при крупном уже-потраченном. Явный --limit его перебивает.
+DEFAULT_LIMIT = 500.0
 
 
 def track_estimate(track: str, blend_per_mtok: float) -> float:
@@ -53,17 +61,59 @@ def decide(track: str, limit: float, spent: float, blend_per_mtok: float) -> int
     return 0 if remaining >= track_estimate(track, blend_per_mtok) else 3
 
 
-def disk_spend_and_blend(cwd: str) -> tuple[float, float]:
-    """С диска: (уже потрачено $, смешанный тариф $/млн ток). Нет данных → (0, запас)."""
+def _collect_resilient(path: str) -> dict:
+    """token_ledger.collect, но одна битая ЗАПИСЬ не обнуляет весь файл.
+
+    collect падает на строке-не-объекте (валидный JSON чужой формы, напр. список):
+    `entry.get(...)` бросает AttributeError. Фолбэк — пересобрать по копии без битых
+    строк, сохранив сайдкар субагентов симлинком (счёт роя остаётся полным). Так
+    разбор пропускает битую ЗАПИСЬ, а не весь файл: неизвестный расход хуже
+    известного большого."""
+    try:
+        return token_ledger.collect(path)
+    except Exception:
+        pass
+    good = []
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue          # оборванная строка — не считаем и не падаем
+            if isinstance(obj, dict):
+                good.append(line)
+    base = os.path.basename(path)
+    sidecar = os.path.join(os.path.dirname(path), base[: -len(".jsonl")])
+    with tempfile.TemporaryDirectory(prefix="budget-resilient-") as td:
+        dst = os.path.join(td, base)
+        with open(dst, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(good) + "\n")
+        if os.path.isdir(sidecar):
+            try:
+                os.symlink(sidecar, os.path.join(td, base[: -len(".jsonl")]))
+            except OSError:
+                pass              # без сайдкара счёт роя неполон, но не нулевой
+        return token_ledger.collect(dst)
+
+
+def disk_spend_and_blend(cwd: str) -> tuple[float | None, float]:
+    """С диска: (уже потрачено $, смешанный тариф $/млн ток).
+
+    Нет файла сессии → (0, запас): первый запуск, расход честный ноль. Файл есть,
+    но не разбирается даже после отсева битых записей → (None, запас): расход
+    НЕИЗВЕСТЕН, а неизвестный расход — стоп (fail-closed), не молчаливый ноль."""
     path = token_ledger.latest_session(cwd)
     if not path or not os.path.isfile(path):
         return 0.0, DEFAULT_BLEND_PER_MTOK
     try:
-        rep = token_ledger.collect(path)
-    except Exception as e:  # живой jsonl может быть оборван на полустроке — не падать
-        print(f"budget_preflight: не удалось разобрать {os.path.basename(path)}: {e}; "
-              "считаю потраченное = 0", file=sys.stderr)
-        return 0.0, DEFAULT_BLEND_PER_MTOK
+        rep = _collect_resilient(path)
+    except Exception as e:
+        print(f"budget_preflight: расход по {os.path.basename(path)} не измерен: {e}",
+              file=sys.stderr)
+        return None, DEFAULT_BLEND_PER_MTOK
     tok = token_ledger.tokens(rep["total"])
     blend = (rep["money"] / tok * 1e6) if tok > 0 else DEFAULT_BLEND_PER_MTOK
     return rep["money"], blend
@@ -72,11 +122,17 @@ def disk_spend_and_blend(cwd: str) -> tuple[float, float]:
 def run(track: str, limit: float | None, cwd: str) -> int:
     spent, blend = disk_spend_and_blend(cwd)
     est = track_estimate(track, blend)
+    if spent is None:
+        # Расход этой сессии не измерен — стоп: неизвестный расход хуже известного
+        # большого, «$700 остатка → хватает» на пустом месте проезжает потолок.
+        print(f"budget_preflight: трек {track} ≈ ${est:.2f}; расход этой сессии не "
+              "измерен (журнал не разобран) — трек не стартует, разобрать расход и "
+              "доложить владельцу.", file=sys.stderr)
+        return 3
     if limit is None:
-        # Лимита нет — гейту нечего стеречь; печатаем оценку и не блокируем.
-        print(f"budget_preflight: трек {track} ≈ ${est:.2f}, уже потрачено ${spent:.2f}. "
-              "Лимит не задан (--limit) — оценка без гейта.")
-        return 0
+        # Лимита нет — берём умолчание политики (в одном месте): гейт не отключается
+        # отсутствием флага, иначе документированная форма зелена при любом расходе.
+        limit = DEFAULT_LIMIT
     rc = decide(track, limit, spent, blend)
     remaining = limit - spent
     verdict = ("хватает" if rc == 0 else "НЕ ХВАТАЕТ — трек не стартует, доложить владельцу")
@@ -113,6 +169,25 @@ def selftest() -> int:
         blend = rep["money"] / tok * 1e6
         # sonnet input $3/млн → 1000 ток = $0.003, тариф = $3/млн.
         checks.append(("тариф считается с диска", abs(blend - 3.0) < 1e-6))
+
+        # Битая ЗАПИСЬ (валидный JSON чужой формы) не обнуляет весь файл: разбор
+        # пропускает её, а не падает и не считает потраченное нулём.
+        bityy = os.path.join(tmp, "b.jsonl")
+        good_line = json.dumps({"type": "assistant", "requestId": "r1", "message": {
+            "model": "claude-sonnet-5",
+            "usage": {"input_tokens": 1000, "output_tokens": 0,
+                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}})
+        with open(bityy, "w", encoding="utf-8") as fh:
+            fh.write(good_line + "\n" + json.dumps(["битая", "запись"]) + "\n")
+        rep_b = _collect_resilient(bityy)
+        checks.append(("битая запись не обнуляет расход",
+                       token_ledger.tokens(rep_b["total"]) == 1000))
+
+    # Без --limit гейт не отключается: умолчание политики стережёт перерасход.
+    checks.append(("умолчание лимита гейтит перерасход",
+                   decide("FULL", DEFAULT_LIMIT, DEFAULT_LIMIT + 9999.0, d) == 3))
+    checks.append(("умолчание лимита пропускает свежий прогон",
+                   decide("MICRO", DEFAULT_LIMIT, 0.0, 0.1) == 0))
 
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:

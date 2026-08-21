@@ -5,10 +5,18 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import unicodedata
 from pathlib import Path
+
+# Имя записи реестра — только ASCII [a-z0-9._-]. Греческая «α» в «clαude», как и
+# любой не-латинский символ, в журнале неотличима от настоящего имени, а работал бы
+# чужой invoke: тождество инструмента описано перечнем подмен, а перечень всех
+# гомоглифов не закрыть. Всё, что не из разрешённого класса, — отказ (запись молча
+# выкидывается, как двойник харнесса).
+_ASCII_NAME_RE = re.compile(r"^[a-z0-9._-]+$")
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_REGISTRY = HERE / "cli_registry.json"
@@ -82,6 +90,10 @@ ROLE_CLASSES = {
     "hunter-leaf": "text", "council-reviewer": "text", "areopag-role": "text",
     "second-opinion": "text", "norm-lookup": "public", "infra-review": "infra",
 }
+# Классы данных допуска. Роль, названная прямо классом («text»), объявляет этот
+# класс сама — так вызывающий указывает данные напрямую, не заводя роль-синоним.
+# Всё, что не роль и не класс, остаётся pd (fail-closed).
+DATA_CLASSES = ("pd", "text", "public", "infra")
 
 
 def _entry_ok(name: str, entry: object) -> dict:
@@ -115,9 +127,13 @@ def load_registry(path: Path) -> dict:
         raise ValueError(f"оверлей не прочитан: {e}") from e
     if not isinstance(base, dict) or not isinstance(extra, dict):
         raise ValueError("реестр и оверлей должны быть объектами")
-    if HARNESS not in base:
-        raise ValueError("в базовом реестре нет полного claude")
-    _entry_ok(HARNESS, base[HARNESS])
+    # Реестр БЕЗ claude валиден: pd-роль тогда остаётся без исполнителя (fail-closed
+    # в decide), а text/public/infra идут на объявленных провайдерах. Харнесс не
+    # обязан жить в переданном реестре — он берётся из эталона (ниже). Требовать
+    # его в base значило бы, что вызов с реестром одного провайдера обязан
+    # переобъявлять claude, а он этого не делает (проба круга 9, --role text).
+    if HARNESS in base:
+        _entry_ok(HARNESS, base[HARNESS])
     for name, entry in extra.items():
         if not isinstance(entry, dict):
             raise ValueError(f"{name}: оверлей должен быть объектом")
@@ -134,23 +150,38 @@ def load_registry(path: Path) -> dict:
                 if not merged["data_classes"]:
                     continue
         base[name] = merged
+    # Имя не из ASCII [a-z0-9._-] — отказ: не-латинский символ (греческая «α»)
+    # неотличим в журнале, а перечень гомоглифов не закрыть. Судим по классу имени,
+    # а не по таблице подмен. Отбрасываем молча — имя нельзя повторять в журнале.
+    for name in [n for n in base if not (isinstance(n, str) and _ASCII_NAME_RE.match(n))]:
+        del base[name]
     # Двойник харнесса по регистру или гомоглифу отбрасывается молча: имя
     # нельзя даже повторять в журнале — человек примет его за настоящий claude.
     for name in [n for n in base if isinstance(n, str) and _is_harness_double(n)]:
         del base[name]
     # Харнесс (invoke и классы) — из эталона рядом со скриптом: что бы ни
     # лежало в реестре из произвольного пути и в оверлее, pd исполняет только
-    # эталонный invoke, и журнал не лжёт.
-    harness = _canonical_harness()
-    for key in HARNESS_CANONICAL:
-        base[HARNESS][key] = harness[key]
+    # эталонный invoke, и журнал не лжёт. Только если реестр вообще объявил claude:
+    # харнесс не привносится в реестр, который его не называл (иначе чужой claude
+    # из оверлея нельзя было бы отличить от эталонного — оверлей его и не объявит,
+    # это проверено выше).
+    if HARNESS in base:
+        harness = _canonical_harness()
+        for key in HARNESS_CANONICAL:
+            base[HARNESS][key] = harness[key]
     for name, entry in base.items():
         _entry_ok(name, entry)
     return base
 
 
 def role_class(role: str) -> str:
-    return "pd" if role in PD_ROLES else ROLE_CLASSES.get(role, "pd")
+    if role in PD_ROLES:
+        return "pd"
+    if role in ROLE_CLASSES:
+        return ROLE_CLASSES[role]
+    if role in DATA_CLASSES:
+        return role          # роль названа прямо классом данных
+    return "pd"              # неизвестная роль — fail-closed
 
 
 def probe(name: str, entry: dict, cache: str | None) -> tuple[bool, str]:
@@ -168,8 +199,8 @@ def probe(name: str, entry: dict, cache: str | None) -> tuple[bool, str]:
 
 def decide(role: str, registry: dict, cache: str | None) -> dict:
     data_class = role_class(role)
-    if "claude" not in registry:
-        raise ValueError("в реестре нет claude")
+    # claude может отсутствовать: тогда pd-роль остаётся без исполнителя (ниже
+    # selected=None — fail-closed), а не-pd идут на объявленных провайдерах.
     skipped, available = [], []
     for name, entry in registry.items():
         missing = [key for key in REQUIRED_KEYS if key not in entry]
@@ -208,6 +239,8 @@ def selftest() -> int:
     assert role_class("case-mapper") == "pd"
     assert role_class("hunter-leaf") == "text"
     assert role_class("not-described") == "pd", "неизвестная роль не выходит за границу"
+    assert role_class("text") == "text", "класс данных, названный ролью, не распознан"
+    assert role_class("infra") == "infra" and role_class("public") == "public"
 
     # Оверлей ~/.themis/ не пересаживает харнесс: invoke и классы claude берутся
     # из эталонного реестра рядом со скриптом, проба — из реестра, что бы ни
@@ -274,6 +307,17 @@ def selftest() -> int:
         assert not _is_harness_double("claude-fast"), "легитимный claude-fast принят за двойника"
         assert not _is_harness_double("claude-code"), "легитимный claude-code принят за двойника"
 
+        # Имя с не-ASCII символом (греческая «α») — отказ по классу имени, а не по
+        # таблице подмен: гомоглиф-двойник харнесса не попадает в реестр вовсе.
+        (home / ".themis" / "cli_registry.json").write_text(json.dumps({
+            "clαude": {"probe": ["z"], "invoke": ["z"], "model": "z", "effort": "max",
+                            "data_classes": ["text"]}}, ensure_ascii=False), encoding="utf-8")
+        reg = load_registry(base)
+        assert "clαude" not in reg, "имя с греческой «α» принято в реестр"
+        assert HARNESS in reg, "настоящий харнесс потерян при отсеве не-ASCII имени"
+        assert _ASCII_NAME_RE.match("claude-fast") and not _ASCII_NAME_RE.match("clαude"), \
+            "класс имени судит не по ASCII"
+
         (home / ".themis" / "cli_registry.json").write_text(json.dumps({
             "zloy": {"probe": ["z"], "invoke": ["z"], "model": "z", "effort": "max",
                      "data_classes": ["pd"]}}), encoding="utf-8")
@@ -287,18 +331,35 @@ def selftest() -> int:
             assert "объект" in str(e), e
         else:
             raise AssertionError("поврежденный реестр принят")
+        # Реестр БЕЗ claude валиден: харнесс не привносится в реестр, который его
+        # не называл; pd-роль тогда остаётся без исполнителя (fail-closed), а не-pd
+        # идут на объявленных провайдерах. HOME ведём к пустому оверлею явно —
+        # иначе читался бы боевой ~/.themis.
         base.write_text(json.dumps({"alpha": {
             "probe": ["a"], "invoke": ["a"], "model": "a", "effort": "max",
             "data_classes": ["text"]}}), encoding="utf-8")
-        (home / ".themis" / "cli_registry.json").write_text(json.dumps({"claude": {
-            "probe": ["evil"], "invoke": ["evil"], "model": "c", "effort": "max",
-            "data_classes": ["pd"]}}), encoding="utf-8")
+        (home / ".themis" / "cli_registry.json").write_text("{}", encoding="utf-8")
+        old = os.environ.get("HOME")
+        os.environ["HOME"] = str(home)
         try:
-            load_registry(base)
-        except ValueError as e:
-            assert "claude" in str(e), e
-        else:
-            raise AssertionError("оверлей объявил харнесс без базы")
+            reg = load_registry(base)
+            assert "claude" not in reg, "claude привнесён в реестр, где его не объявляли"
+            assert "alpha" in reg, "провайдер без claude потерян"
+            # Оверлей НЕ вправе объявить харнесс, когда база его не определяет.
+            (home / ".themis" / "cli_registry.json").write_text(json.dumps({"claude": {
+                "probe": ["evil"], "invoke": ["evil"], "model": "c", "effort": "max",
+                "data_classes": ["pd"]}}), encoding="utf-8")
+            try:
+                load_registry(base)
+            except ValueError as e:
+                assert "claude" in str(e), e
+            else:
+                raise AssertionError("оверлей объявил харнесс без базы")
+        finally:
+            if old is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = old
     print("selftest пройден: классы ролей fail-closed, харнесс не пересаживается оверлеем")
     return 0
 

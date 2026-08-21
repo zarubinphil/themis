@@ -48,6 +48,19 @@ SAFE_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 SECRET_RE = re.compile(r"THEMIS|TOKEN|SECRET|API_?KEY|PASSWORD|CREDENTIAL|ANTHROPIC|OPENAI",
                        re.I)
 OTKAZ_MARKERY = ("error:", "ошибка:", "rate limit", "quota", "not logged", "unauthorized")
+
+
+def _otkaz_v_strukture(otvet: str, oshibka: str) -> bool:
+    """Отказ провайдера — СТРУКТУРА, а не подстрока в теле. Провайдер, отказавший в
+    работе, ставит маркер В НАЧАЛЕ строки («error: rate limit», «Ошибка: …»), а не
+    прячет его в середине содержательного вывода. Строка «1. Судебная ошибка: суд не
+    применил ст. 333 ГК РФ» — правовой ВЫВОД, а не отказ: маркер «ошибка:» стоит в
+    середине, строка начинается с «1.». Судим по началу строки в обоих потоках."""
+    for raw in (otvet + "\n" + oshibka).splitlines():
+        s = raw.strip().lower()
+        if any(s.startswith(m) for m in OTKAZ_MARKERY):
+            return True
+    return False
 # Реестр объявляет старшую модель и усилие (model/effort), коннектор доносит их
 # до команды универсальными флагами `--model`/`--effort` — БЕЗ имени конкретного
 # CLI: подключение нового CLI остаётся строкой реестра, а не правкой кода (инвариант
@@ -204,10 +217,10 @@ def call(provider: str, prompt: Path, cmd=None, timeout: int = 300,
         if not otvet.strip():
             zapisat_zhurnal(log, provider, len(text), otpechatok, "отказ: пустой ответ")
             return _otkaz(f"{provider} ответил пустотой — код 0 сам по себе не сигнал")
-        nizhniy = (otvet + oshibka).lower()
-        if any(m in nizhniy for m in OTKAZ_MARKERY):
-            zapisat_zhurnal(log, provider, len(text), otpechatok, "отказ: маркер в ответе")
-            return _otkaz(f"{provider} вернул отказ в теле ответа: {otvet.strip()[:150]}")
+        if _otkaz_v_strukture(otvet, oshibka):
+            zapisat_zhurnal(log, provider, len(text), otpechatok, "отказ: маркер в начале строки")
+            return _otkaz(f"{provider} вернул отказ (маркер в начале строки): "
+                          f"{otvet.strip()[:150]}")
 
         zapisat_zhurnal(log, provider, len(text), otpechatok, "ok")
         if out:
@@ -279,6 +292,17 @@ def selftest() -> int:
             o = td / f"o_{name}.txt"
             assert call("proba", pd, sh(name, body), out=o, log=log) == 1, f"{why} принято за успех"
             assert not o.exists(), f"{why}: файл ответа создан"
+
+        # Ложная тревога: правовой вывод со словами «Судебная ошибка:» в СЕРЕДИНЕ
+        # строки — не отказ провайдера. Отказ судится по началу строки, не подстрокой.
+        legal = td / "legal.txt"
+        legal_sh = sh("legal.sh",
+                      'echo "1. Судебная ошибка: суд не применил ст. 333 ГК РФ."\n'
+                      'echo "2. Вывод: неустойка подлежит снижению."\n')
+        assert call("proba", chistyy, legal_sh, out=legal) == 0, \
+            "правовой вывод со словами «Судебная ошибка:» объявлен отказом"
+        assert legal.is_file() and "333" in legal.read_text(encoding="utf-8"), \
+            "содержательный ответ выброшен как отказ"
 
         # Модель и усилие из реестра доезжают до команды флагами.
         me_out = td / "me.txt"

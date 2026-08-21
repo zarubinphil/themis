@@ -453,7 +453,13 @@ def gate(base="HEAD", root=ROOT, every=False, spec=None, spec_only=False,
         return check_hooks(root)
     fails = []
     fails += check_compile(root)
-    fails += check_selftests(base, root, every)
+    # Селфтесты гоняются ВСЕ, а не только «затронутые от base»: база по умолчанию
+    # HEAD, а HEAD двигает сам исполнитель атомарным коммитом — `touched_scripts`
+    # тогда пуст, и сломанный прибор, закоммиченный ролью, гейт не красит. «Кто
+    # менялся, тот и доказывает» держится якорем приёмки (вне HEAD), но у селфтестов
+    # такого якоря нет: значит гоняем все — герметично и дёшево (та же болезнь, от
+    # которой --selftests-only уже герметичен).
+    fails += check_selftests(base, root, every=True)
     fails += check_smoke(root)
     fails += check_prompts(root)
     fails += check_pd(root)

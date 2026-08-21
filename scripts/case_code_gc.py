@@ -33,8 +33,15 @@ import tempfile
 import time
 from pathlib import Path
 
-CODE_EXT = {".py", ".sh", ".js", ".mjs", ".ts", ".swift", ".rb", ".pl",
-            ".ps1", ".applescript"}
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import claude_guard
+
+# Перечень расширений кода — ОДИН на проект. Сторож (claude_guard) не пускает эти
+# файлы под cases/, а уборщик обязан видеть уже лежащие в дереве: две копии списка
+# круг за кругом давали полузакрытые дыры (.php/.lua/.go/.rs/.bat сторож блокировал,
+# уборщик к вывозу не брал). Импортируем эталон, а не переписываем — с ведущей точкой,
+# как отдаёт Path.suffix.
+CODE_EXT = {"." + e for e in claude_guard.CODE_EXT}
 PRACTICE_CONTEXT = "practice_context.md"
 INTAKE = "00_intake"          # неприкосновенная первичка
 
