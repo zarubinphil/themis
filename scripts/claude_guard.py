@@ -42,19 +42,97 @@ PROJECT_CASES = os.path.join(PROJECT_ROOT, "cases")
 
 def _cases_roots() -> list:
     """Корни cases/, которые сторож признаёт своими. Обычно один — {корень}/cases.
-    Но сторож может жить в git-worktree ({корень}/.autoloop/worktrees/{роль}): тогда
-    cases/ РОДИТЕЛЬСКОГО репозитория — те же материалы дел, и абсолютный путь к ним
-    (`$HOME/…/themis/cases/{дело}`) обязан судиться так же, как локальный. Иначе
-    сторож-в-worktree слеп к родительскому cases, и $HOME-цель уходит мимо (проба
-    круга 7). Вне worktree список из одного корня — поведение не меняется."""
+    Но сторож может жить в git-worktree: тогда cases/ ОСНОВНОГО дерева — те же
+    материалы дел, и абсолютный путь к ним (`$HOME/…/themis/cases/{дело}`) обязан
+    судиться так же, как локальный. Иначе сторож-в-worktree слеп к родительскому
+    cases, и $HOME-цель уходит мимо.
+
+    Родителя узнаём ФАКТОМ git (`git rev-parse --git-common-dir` указывает на .git
+    основного репозитория), а НЕ по литеральному куску пути «.autoloop/worktrees»:
+    заплата литералом слепла в рабочей копии, созданной где-либо ещё (проба круга 9),
+    и разом слепли пять гейтов. Тот же класс уже вылечен фактом git у ПД-сторожа
+    (pd_guard._worktree_cases_dirs). В линкованном worktree `.git` — ФАЙЛ; в основном
+    дереве — каталог: gitov subprocess зовём только когда он файл (штатный вызов
+    остаётся без git-подпроцесса)."""
     roots = [PROJECT_CASES]
-    marker = os.sep + os.path.join(".autoloop", "worktrees") + os.sep
-    if marker in PROJECT_ROOT:
-        roots.append(os.path.join(PROJECT_ROOT.split(marker)[0], "cases"))
+    if os.path.isfile(os.path.join(PROJECT_ROOT, ".git")):
+        try:
+            import subprocess
+            r = subprocess.run(["git", "rev-parse", "--git-common-dir"],
+                               cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=5)
+            if r.returncode == 0 and r.stdout.strip():
+                common = r.stdout.strip()
+                if not os.path.isabs(common):
+                    common = os.path.join(PROJECT_ROOT, common)
+                main_cases = os.path.join(os.path.dirname(os.path.realpath(common)), "cases")
+                if os.path.realpath(main_cases) != os.path.realpath(PROJECT_CASES):
+                    roots.append(main_cases)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
     return roots
 
 
 _CASES_ROOTS = _cases_roots()
+
+
+# Командная позиция — ОДНА константа на весь файл. До круга 9 каждый гейтовый шаблон
+# нёс свою копию «(?:^|[;&|]|$(|`)», не включавшую группировку оболочки: ( … ),
+# { …; }, case … esac, (cd /tmp && …) снимали гейт, при том что _CD_RE/_CMDPATH_RE
+# скобку уже учитывали — копии разошлись. Свели к одному источнику: начало строки,
+# после ;/&/|, перевода строки, открытия/закрытия группы «(){}», сабшелла $(…) или
+# обратной кавычки. Аргумент глагола отдельно НЕ включает «()» (см. _ARG): цель у
+# края группы (`… /00_intake)`) иначе тащила бы за собой скобку и уходила мимо.
+_CMDPOS = r"(?:^|[;&|\n(){}]|\$\(|`)"
+# Класс символов аргумента: до разделителя команд, редиректа И границы группы.
+# «()» исключены, чтобы завершающая скобку подоболочки не приклеивалась к пути.
+_ARG = r"[^;&|<>()]+"
+
+
+def _is_cases_root(abspath: str) -> bool:
+    """Цель — САМ корень cases/ (наш или основного дерева), а не путь внутри него.
+    `rm -rf cases`, `mv cases /tmp`, `find cases -delete` сносят ВСЕ дела всех
+    доверителей, а по имени «cases» гейт удаления их не ловил: правило держало путь
+    ВНУТРИ cases/, но не сам корень (проба круга 9)."""
+    if not abspath:
+        return False
+    try:
+        a = os.path.realpath(abspath)
+    except OSError:
+        a = abspath
+    a = a.replace(os.sep, "/").rstrip("/").casefold()
+    for r in _CASES_ROOTS:
+        try:
+            rr = os.path.realpath(r)
+        except OSError:
+            rr = r
+        if a == rr.replace(os.sep, "/").rstrip("/").casefold():
+            return True
+    return False
+
+
+def _binary_doc_exts() -> set:
+    """Форматы, которые Read берёт только через markdown_extract (LOCAL-FIRST).
+    Перечень живёт в проекте в ОДНОМ экземпляре — множество OFFICE в
+    scripts/markdown_extract.py; своя копия «(docx|xlsx|pptx|pdf|doc|xls)» уже
+    отстала от роутера (не ловила .rtf/.odt/.epub/.ppt — проба круга 9). Текстовые
+    члены OFFICE (csv/json/xml/html) — не бинарные документы, читаются напрямую и
+    остаются за бюджетным гейтом больших файлов. Источник не прочитан → откат к
+    известному бинарному набору (fail-closed по набору форматов)."""
+    fallback = {"docx", "xlsx", "xls", "pptx", "ppt", "rtf", "epub", "odt", "doc", "pdf"}
+    try:
+        src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "markdown_extract.py"), encoding="utf-8").read()
+    except OSError:
+        return fallback
+    m = re.search(r"^OFFICE\s*=\s*\{([^}]*)\}", src, re.M)
+    if not m:
+        return fallback
+    office = set(re.findall(r"['\"](\w+)['\"]", m.group(1)))
+    text_readable = {"csv", "json", "xml", "html", "htm", "md", "txt"}
+    return (office - text_readable) | {"pdf", "doc"}
+
+
+_BINARY_DOC_EXT = _binary_doc_exts()
 
 
 def _match_cases_root(abspath: str):
@@ -163,7 +241,7 @@ def _base_dir(cmd: str, payload: dict) -> str:
 _FRESH_NAME_RE = re.compile(r"\d{4}[-._]\d{2}[-._]\d{2}|\d{8}|_\d{6,}")
 
 
-_SAFE_ADD_RE = re.compile(r"(?:^|[;&|\n(]|\$\(|`)\s*(?:sudo\s+)?(cp|mv)\s+([^;&|<>]+)", re.M)
+_SAFE_ADD_RE = re.compile(_CMDPOS + r"\s*(?:sudo\s+)?(cp|mv)\s+(" + _ARG + r")", re.M)
 
 
 def _safe_intake_adds(cmd: str, base: str) -> set:
@@ -331,7 +409,15 @@ def _workflow_gate(p: str) -> None:
     # раньше проходили, потому что правило перечисляло места (проба круга 6).
     is_doc = ext in ("md", "docx", "pdf")
     metadata = basename_cf.startswith("_")           # _case.md, _event.md — служебное
-    if (in_pipeline_dir or is_doc) and not metadata:
+    # Трек MICRO: триаж (.claude/CLAUDE.md) прямо ОТМЕНЯЕТ Шаги 1-2 — «карта не
+    # строится… охотники запрещены». Требовать их маркеры на MICRO значит не оставить
+    # типовому документу ни одного законного места (проба круга 9): запрет без пути
+    # производит обходы. На MICRO документ выпускается по своему честному маркеру
+    # «## MICRO-ТРЕК ПОДТВЕРЖДЁН» в брифе дела (его же читает model_policy.check_brief)
+    # вместо маркеров карты и практики.
+    brief = os.path.join(case_root, ".agent/context/_working/brief.md")
+    micro = _has_marker(brief, r"## MICRO-ТРЕК ПОДТВЕРЖДЁН")
+    if (in_pipeline_dir or is_doc) and not metadata and not micro:
         if not _has_marker(km, r"## КАРТА ГОТОВА ✓") or not _has_marker(pr, PRACTICE_MARKER):
             where = ("GOTOVO/" if top == "gotovo"
                      else "02_hearings/" if top == "02_hearings"
@@ -410,6 +496,19 @@ def _strip_heredocs(cmd: str) -> str:
     return _HEREDOC_RE.sub(lambda m: "<<HEREDOC" + m.group(2), cmd)
 
 
+# Редирект перед путём обрывал разбор аргумента: `rm -rf 2>/dev/null …/00_intake`
+# класс аргумента останавливался на первом `>`, и всё после редиректа для сторожа
+# исчезало (проба круга 9). Вырезаем токены редиректа (и их цель) ДО разбора глаголов —
+# парно к _strip_heredocs. Цели редиректной ЗАПИСИ (`echo hi > файл`) считает
+# _REDIRECT_RE по строке ДО стрижки, поэтому здесь их потеря не страшна.
+_STRIP_REDIR_RE = re.compile(
+    r"\s*(?:\d+|&)?(?:>>|>&|<&|<<<|<|>)\s*(?:&\d+|/dev/null|[^\s;&|<>()`]*)")
+
+
+def _strip_redirects(cmd: str) -> str:
+    return _STRIP_REDIR_RE.sub(" ", cmd)
+
+
 _REDIRECT_RE = re.compile(r">>?\s*\|?\s*([^\s;&|<>()]+)")
 # Цель — последний аргумент (cp SRC DST) либо каждый (tee A B, touch A B).
 _VERB_LAST = ("cp", "mv", "install", "rsync", "ditto", "ln")
@@ -417,9 +516,9 @@ _VERB_ALL = ("tee", "touch")
 # Правка на месте — тоже запись: sed -i / perl -i / ruby -i меняют уже лежащий под
 # cases/ файл, и запрет «не создавать» без «не править» держится ровно до первого созданного.
 _INPLACE_RE = re.compile(
-    r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(?:sed|perl|ruby)\s+((?:-\w+\s+)*-i\b[^;&|<>]*)", re.M)
-_VERB_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(" + "|".join(_VERB_LAST + _VERB_ALL)
-                      + r")\s+([^;&|<>]+)", re.M)
+    _CMDPOS + r"\s*(?:sudo\s+)?(?:sed|perl|ruby)\s+((?:-\w+\s+)*-i\b[^;&|<>()]*)", re.M)
+_VERB_RE = re.compile(_CMDPOS + r"\s*(?:sudo\s+)?(" + "|".join(_VERB_LAST + _VERB_ALL)
+                      + r")\s+(" + _ARG + r")", re.M)
 # Обнуляют/затирают файл-аргумент, не редиректом и не позицией cp: truncate -s 0 FILE,
 # gzip FILE (заменяет на .gz, удаляя оригинал), split (пишет по префиксу), cpio
 # (разбор архива), shred (уничтожает). Цель — позиционный аргумент; блокируем
@@ -431,12 +530,12 @@ _VERB_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(" + "|".join(_VERB_LAS
 # (проба круга 8). Архив разбирает _EXTRACT_VERB_RE (unzip); запись архива ВНУТРЬ дела
 # ловит _zip_archive_targets ниже.
 _FILE_VERB_RE = re.compile(
-    r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?"
-    r"(?:truncate|gzip|gunzip|bzip2|bunzip2|xz|unxz|split|cpio|shred)\s+([^;&|<>]+)", re.M)
+    _CMDPOS + r"\s*(?:sudo\s+)?"
+    r"(?:truncate|gzip|gunzip|bzip2|bunzip2|xz|unxz|split|cpio|shred)\s+(" + _ARG + r")", re.M)
 # zip пишет ТОЛЬКО архив — первый позиционный аргумент; остальное читает. Цель-запись —
 # сам архив: `zip дело/GOTOVO/out.zip …` кладёт файл в дело мимо конвейера (блок), а
 # чтение первички в архив наружу — нет.
-_ZIP_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?zip\b([^;&|<>]*)", re.M)
+_ZIP_RE = re.compile(_CMDPOS + r"\s*(?:sudo\s+)?zip\b([^;&|<>()]*)", re.M)
 
 
 def _zip_archive_targets(body: str, base: str) -> list:
@@ -467,6 +566,25 @@ _PATH_RE = re.compile(r"[\w./\\~-]*cases/[\w./\\-]+\.\w+")
 # Путь записи ОТНОСИТЕЛЬНЫЙ: `cd дело && python3 -c "open('00_intake/x.pdf','w')"` —
 # `cases/` в строке нет, _PATH_RE слеп, а цель резолвится от ведущего cd (проба круга 4).
 _OPEN_TARGET_RE = re.compile(r"open\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"][wax]b?['\"]")
+# Разрушение через тот же однострочник интерпретатора: `python3 -c "shutil.rmtree('X')"`,
+# `os.remove('X')`, `Path('X').unlink()`, `fs.rmSync('X')` — ветка интерпретатора уже
+# была, но ловила только ЗАПИСЬ (проба круга 9). Признак записи не срабатывает — цель
+# берётся строковым аргументом разрушительного вызова.
+_INTERP_DESTROY_RE = re.compile(
+    r"(?:shutil\.rmtree|os\.removedirs|os\.remove|os\.unlink|os\.rmdir"
+    r"|fs\.rmSync|fs\.unlinkSync|fs\.rmdirSync)\s*\(\s*['\"]([^'\"]+)['\"]"
+    r"|Path\s*\(\s*['\"]([^'\"]+)['\"]\s*\)\s*\.\s*unlink")
+
+
+def _interp_removal_targets(cmd: str, base: str) -> list:
+    if not _INTERP_RE.search(cmd):
+        return []
+    out = []
+    for m in _INTERP_DESTROY_RE.finditer(cmd):
+        pth = m.group(1) or m.group(2)
+        if pth:
+            out.append(_resolve(pth, base))
+    return out
 
 
 def _split(args: str) -> list:
@@ -551,24 +669,28 @@ def _write_targets(cmd: str, base: str, drop_cpmv=frozenset()) -> list:
     на путь не должен легализовать по нему другой глагол (проба круга 8). Пустой набор —
     поведение прежнее (полный список целей для гейтов кода/растра/протокола)."""
     body = _strip_heredocs(cmd)
+    # Цели редиректной ЗАПИСИ считаем по ОРИГИНАЛУ (редирект и есть операция).
     targets = [_resolve(t, base) for t in _REDIRECT_RE.findall(body)]
     targets += [_resolve(t, base) for t in _FETCH_RE.findall(body)]
     targets += [_resolve(t, base) for t in _CURL_OUTDIR_RE.findall(body)]
-    targets += [_resolve(t, base) for t in _git_checkout_targets(body)]
-    targets += _git_clone_targets(body, base)
-    targets += _sed_write_targets(body, base)
-    targets += [_resolve(t, base) for t in _DD_OF_RE.findall(body)]
-    targets += _zip_archive_targets(body, base)
-    for verb, args in _VERB_RE.findall(body):
+    # Глагольные парсеры — по строке БЕЗ токенов редиректа: `cp a 2>/dev/null дело/x`
+    # иначе терял бы цель за редиректом (проба круга 9, класс аргумента обрывался на `>`).
+    vbody = _strip_redirects(body)
+    targets += [_resolve(t, base) for t in _git_checkout_targets(vbody)]
+    targets += _git_clone_targets(vbody, base)
+    targets += _sed_write_targets(vbody, base)
+    targets += [_resolve(t, base) for t in _DD_OF_RE.findall(vbody)]
+    targets += _zip_archive_targets(vbody, base)
+    for verb, args in _VERB_RE.findall(vbody):
         if verb in _VERB_ALL:                       # tee, touch — каждый аргумент
             targets += [_resolve(t, base) for t in _split(args)]
         else:                                       # cp mv install rsync ditto ln
             targets += [t for t in _copy_move_targets(args, base) if t not in drop_cpmv]
-    for args in _INPLACE_RE.findall(body):
+    for args in _INPLACE_RE.findall(vbody):
         parts = _split(args)
         # первый позиционный — выражение sed/perl (s/a/b/), файл дальше
         targets += [_resolve(t, base) for t in (parts[1:] if len(parts) > 1 else parts)]
-    for args in _FILE_VERB_RE.findall(body):
+    for args in _FILE_VERB_RE.findall(vbody):
         targets += [_resolve(t, base) for t in _split(args)]
     if _INTERP_RE.search(body) and _WRITE_HINT_RE.search(body):
         targets += [_resolve(t, base) for t in _PATH_RE.findall(body)]
@@ -647,6 +769,25 @@ _CTRL_HEAD_RE = re.compile(r"\b(?:if|for|while|until)\b[^;\n]*(?:;|\n)\s*(?:then
 # osascript -e "do shell script \"CMD\"" исполняет CMD оболочкой — обёртка чужой
 # программой. Достаём CMD и возвращаем в командную позицию.
 _DO_SHELL_RE = re.compile(r"do\s+shell\s+script\s+\\?[\"']([^\"'\\]*)", re.I)
+# Конвейер в оболочку исполняет ПЕРЕДАННУЮ строку как команду: `echo "rm -rf …" | bash`,
+# `printf '%s' 'rm -rf …' | sh` — глагол внутри кавычек, вне командной позиции, и ни один
+# гейт его не видел (проба круга 9). Payload — последний кавычечный кусок продюсера
+# (у echo он один, у printf это аргумент после формата). Оболочке отдаём плоско, языку —
+# как `интерпретатор -c payload`, чтобы сработал признак записи в _write_targets.
+_PIPE_SHELL_RE = re.compile(
+    r"\b(?:echo|printf)\b([^|]*?)\|\s*(?:sudo\s+)?(?:[^\s|;&`]*/)?"
+    r"(bash|sh|zsh|dash|ksh|python3?|ruby|perl|node|php)\b")
+
+
+def _pipe_shell_repl(m):
+    quoted = re.findall(r"'([^']*)'|\"([^\"]*)\"", m.group(1))
+    payload = (quoted[-1][0] or quoted[-1][1]) if quoted else ""
+    if not payload.strip():
+        return m.group(0)
+    interp = m.group(2)
+    if interp in ("bash", "sh", "zsh", "dash", "ksh"):
+        return "; " + payload + " ;"
+    return "; " + interp + " -c " + payload + " ;"
 
 
 def _normalize(cmd: str, depth: int = 0) -> str:
@@ -674,13 +815,14 @@ def _normalize(cmd: str, depth: int = 0) -> str:
     out = _XARGS_RE.sub("; ", out)
     out = _FIND_EXEC_RE.sub(lambda m: "; " + m.group(1) + " ;", out)
     out = _FUNC_RE.sub(lambda m: "; " + _normalize(m.group(1), depth + 1) + " ;", out)
+    out = _PIPE_SHELL_RE.sub(_pipe_shell_repl, out)              # echo "cmd" | bash → ; cmd ;
     return out
 
 
 # git checkout/restore пишут (перезаписывают) файл рабочего дерева из индекса/истории —
 # такая же перезапись, как cp/dd/sed -i, просто именем команды не похожая ни на одну.
 _GIT_CO_RE = re.compile(
-    r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?git\s+(?:checkout|restore)\b([^;&|<>]*)", re.M)
+    _CMDPOS + r"\s*(?:sudo\s+)?git\s+(?:checkout|restore)\b([^;&|<>()]*)", re.M)
 
 
 def _git_checkout_targets(body: str) -> list:
@@ -701,12 +843,12 @@ def _git_checkout_targets(body: str) -> list:
 
 # dd пишет через `of=ПУТЬ`, не позиционным аргументом — отдельный разбор.
 _DD_OF_RE = re.compile(
-    r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?dd\b[^;&|<>]*?\bof=([^\s;&|<>]+)", re.M)
+    _CMDPOS + r"\s*(?:sudo\s+)?dd\b[^;&|<>]*?\bof=([^\s;&|<>()]+)", re.M)
 
 # git clone URL [DIR] пишет рабочее дерево в DIR (или CWD/basename(URL) без DIR) — так
 # репозиторий целиком высыпается в дело мимо сборщика и вердикта (проба круга 5).
 _GIT_CLONE_RE = re.compile(
-    r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?git\s+clone\b([^;&|<>]*)", re.M)
+    _CMDPOS + r"\s*(?:sudo\s+)?git\s+clone\b([^;&|<>()]*)", re.M)
 
 
 def _git_clone_targets(body: str, base: str) -> list:
@@ -725,7 +867,7 @@ def _git_clone_targets(body: str, base: str) -> list:
 
 # sed с командой записи `w FILE` (равно `W` и `s///w FILE`) пишет в FILE помимо -i:
 # `sed -n 'w дело/GOTOVO/isk.md' src` кладёт документ в дело мимо сборщика (проба круга 5).
-_SED_CMD_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?sed\b([^;&|\n]*)", re.M)
+_SED_CMD_RE = re.compile(_CMDPOS + r"\s*(?:sudo\s+)?sed\b([^;&|\n]*)", re.M)
 _SED_W_RE = re.compile(r"[wW]\s+([^\s'\";]+)")
 
 
@@ -740,8 +882,8 @@ def _sed_write_targets(body: str, base: str) -> list:
 # ОБЛАСТИ действия (-C у git apply, -d у patch): если она внутри cases/, применение
 # патча запрещено целиком — патч непрозрачен, а дело не терпит правки мимо конвейера.
 _PATCH_SCOPE_RE = re.compile(
-    r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?git\s+-C\s+(\S+)\s+apply\b"
-    r"|(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?patch\b(?:\s+-\w+)*\s+-d\s+(\S+)"
+    _CMDPOS + r"\s*(?:sudo\s+)?git\s+-C\s+(\S+)\s+apply\b"
+    r"|" + _CMDPOS + r"\s*(?:sudo\s+)?patch\b(?:\s+-\w+)*\s+-d\s+(\S+)"
 )
 
 
@@ -766,12 +908,12 @@ def _under_protected(path: str) -> bool:
 # ИЗ 00_intake/_baselines так же разрушителен/утечен, как перезапись, хотя цель (последний
 # аргумент) лежит вне охраняемых папок и по ней одной это не видно. scp/rsync — «перенос
 # глаголами вне перечня» (проба круга 6): увоз первички запрещён любым глаголом.
-_MV_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(?:mv|scp|rsync)\s+([^;&|<>]+)", re.M)
+_MV_RE = re.compile(_CMDPOS + r"\s*(?:sudo\s+)?(?:mv|scp|rsync)\s+(" + _ARG + r")", re.M)
 
 
 def _mv_sources(body: str) -> list:
     out = []
-    for args in _MV_RE.findall(body):
+    for args in _MV_RE.findall(_strip_redirects(body)):
         try:
             import shlex
             toks = shlex.split(args)
@@ -797,14 +939,14 @@ def _mv_sources(body: str) -> list:
 # её наружу — правка по ссылке меняет ОРИГИНАЛ, а копия уходит мимо сторожа;
 # символьная (`ln -s`) даёт тот же путь к оригиналу. Цель-запись (последний аргумент)
 # лежит вне дела и по ней увода не видно (проба круга 6). Судим ИСТОЧНИКИ.
-_LN_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?ln\s+([^;&|<>]+)", re.M)
+_LN_RE = re.compile(_CMDPOS + r"\s*(?:sudo\s+)?ln\s+(" + _ARG + r")", re.M)
 
 
 def _link_sources(cmd: str, base: str) -> list:
     """Абсолютные источники ln: все позиционные, кроме цели (ln SRC... DST / ln -t DIR
     SRC...); один аргумент — он же источник (ln SRC линкует в CWD)."""
     out = []
-    for args in _LN_RE.findall(cmd):
+    for args in _LN_RE.findall(_strip_redirects(cmd)):
         try:
             import shlex
             toks = shlex.split(args)
@@ -830,11 +972,12 @@ def _link_sources(cmd: str, base: str) -> list:
 # rm/rmdir — удаление. Судим ЦЕЛИ команды, а не подстроку по всей строке: слово
 # «00_intake»/«_baselines» в аргументе чтения дальше по строке или в комментарии
 # не делает `rm /tmp/x` ударом по делу (проба 20.08.2026 отбивала обиход координатора).
-_RM_RE = re.compile(r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(?:rm|rmdir)\s+([^;&|<>]+)", re.M)
+_RM_RE = re.compile(_CMDPOS + r"\s*(?:sudo\s+)?(?:rm|rmdir|unlink|srm)\s+(" + _ARG + r")", re.M)
 
 
 def _rm_targets(cmd: str, base: str) -> list:
     out = []
+    cmd = _strip_redirects(cmd)      # редирект перед путём не обрывает аргумент
     for args in _RM_RE.findall(cmd):
         out += [_resolve(t, base) for t in _split(args)]
     return out
@@ -843,23 +986,43 @@ def _rm_targets(cmd: str, base: str) -> list:
 # git clean удаляет неотслеживаемое, git rm — отслеживаемое: то же разрушение дела,
 # что и rm, только именем команды не похоже (проба круга 6). Цель — позиционный путь.
 _GIT_DESTRUCT_RE = re.compile(
-    r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?git\s+(?:-C\s+(\S+)\s+)?(?:clean|rm)\b([^;&|<>]*)", re.M)
+    _CMDPOS + r"\s*(?:sudo\s+)?git\s+(?:-C\s+(\S+)\s+)?(?:clean|rm)\b([^;&|<>()]*)", re.M)
+# git clean без пути чистит ВСЮ рабочую копию, а папки дел в ней untracked —
+# `git clean -xfd` сносит все материалы всех доверителей, хотя корня cases/ в строке
+# нет (проба круга 9). Судим ОБЛАСТЬ: нет пути → вся копия (блок); есть путь →
+# блок, если он корень/внутри cases/.
+_GIT_CLEAN_RE = re.compile(
+    _CMDPOS + r"\s*(?:sudo\s+)?git\s+(?:-C\s+(\S+)\s+)?clean\b([^;&|<>()]*)", re.M)
 
 
 def _git_destruct_targets(cmd: str, base: str) -> list:
     out = []
-    for cdir, args in _GIT_DESTRUCT_RE.findall(cmd):
+    for cdir, args in _GIT_DESTRUCT_RE.findall(_strip_redirects(cmd)):
         if cdir:                       # git -C DIR clean/rm — операция идёт в DIR
             out.append(_resolve(cdir.strip("'\""), base))
         out += [_resolve(t, base) for t in _split(args)]
     return out
 
 
+def _git_clean_hits_cases(cmd: str, base: str) -> bool:
+    for cdir, args in _GIT_CLEAN_RE.findall(_strip_redirects(cmd)):
+        paths = _split(args)
+        if cdir:
+            paths.append(cdir)
+        if not paths:                  # без пути — вся рабочая копия, дела в ней untracked
+            return True
+        for p in paths:
+            r = _resolve(p, base)
+            if _is_cases_root(r) or _under_cases(r) or _is_protected_ancestor(r):
+                return True
+    return False
+
+
 # find … -delete и find … -exec rm/mv/… удаляют без глагола удаления в начале строки
 # (проба круга 6). Блокируем, когда КОРЕНЬ обхода лежит в охраняемой папке дела И
 # действие разрушительно: чтение через find -exec cat/grep не трогаем.
 _FIND_ROOT_RE = re.compile(
-    r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?find\s+([^\s;&|<>]+)([^;&|]*)", re.M)
+    _CMDPOS + r"\s*(?:sudo\s+)?find\s+([^\s;&|<>()]+)([^;&|]*)", re.M)
 _FIND_DESTRUCT_RE = re.compile(
     r"-delete\b|-exec(?:dir)?\s+(?:\S*/)?(?:rm|rmdir|mv|shred|truncate|dd)\b")
 
@@ -868,7 +1031,26 @@ def _find_destruct_hits(cmd: str, base: str) -> bool:
     for root, rest in _FIND_ROOT_RE.findall(cmd):
         if _FIND_DESTRUCT_RE.search(rest):
             r = _resolve(root, base)
-            if _under_protected(r) or _is_protected_ancestor(r):
+            # `find cases -delete` сносит корень дел целиком — судим и сам корень cases/.
+            if _under_protected(r) or _is_protected_ancestor(r) or _is_cases_root(r):
+                return True
+    return False
+
+
+# rsync --delete в каталог-приёмник ОПУСТОШАЕТ его под источник: `rsync -a --delete
+# /tmp/pusto/ cases/` стирает все дела, а rsync в перечне глаголов удаления нет
+# (проба круга 9). Судим приёмник (последний позиционный) при наличии --delete.
+_RSYNC_RE = re.compile(_CMDPOS + r"\s*(?:sudo\s+)?rsync\s+(" + _ARG + r")", re.M)
+
+
+def _rsync_delete_hits_cases(cmd: str, base: str) -> bool:
+    for args in _RSYNC_RE.findall(_strip_redirects(cmd)):
+        if not re.search(r"--delete(?:-\w+)?\b", args):
+            continue
+        pos = _split(args)
+        if pos:
+            dst = _resolve(pos[-1], base)
+            if _is_cases_root(dst) or _under_cases(dst) or _is_protected_ancestor(dst):
                 return True
     return False
 
@@ -885,8 +1067,12 @@ _BULK_LIMIT = 400
 # проба круга 6). Прежний `-o(?=\s)` ошибочно принимал флаг перезаписи unzip (`unzip -o
 # arch.zip`) за каталог и блокировал законную распаковку ИЗ дела наружу — снят.
 _UNPACK_RE = re.compile(
-    r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?(?:unzip|tar|bsdtar|7z|unrar)\b[^;&|<>]*?"
+    _CMDPOS + r"\s*(?:sudo\s+)?(?:unzip|tar|bsdtar|7z|unrar)\b[^;&|<>]*?"
     r"\s(?:-d|-C|--directory)(?:=|\s*)([^\s;&|<>=]+)", re.M)
+# 7z берёт каталог назначения флагом -o ВПЛОТНУЮ (`-oКАТАЛОГ`), не -d/-C — прежний
+# перечень флагов его не видел, и `7z x a.7z -o{дело}` высыпал архив в дело (проба
+# круга 9). Судим по признаку «извлечение 7z (x/e) + каталог назначения -o».
+_SEVENZIP_O_RE = re.compile(r"\b7z\s+[ex]\b[^;&|\n]*?\s-o\s*([^\s;&|<>]+)", re.M)
 # python3 -m zipfile -e ARCH DST  /  python3 -m tarfile -e ARCH DST — распаковка модулем
 # stdlib: каталог назначения — последний позиционный (проба круга 4).
 _PY_UNPACK_RE = re.compile(
@@ -899,7 +1085,7 @@ _PY_UNPACK_RE = re.compile(
 # заполняет первичку мимо сторожа (проба круга 6). Режим извлечения — кластер
 # флагов с `i` либо --extract; `-o` (создание архива) сюда не попадает.
 _EXTRACT_VERB_RE = re.compile(
-    r"(?:^|[;&|]|\$\(|`)\s*(?:sudo\s+)?"
+    _CMDPOS + r"\s*(?:sudo\s+)?"
     r"(?:tar\s+-?[A-Za-z]*x|unzip\b|bsdtar\s+-?[A-Za-z]*x|7z\s+[ex]\b|unrar\s+[ex]\b"
     r"|cpio\s+(?:-[A-Za-z]*i[A-Za-z]*|--extract)\b)", re.M)
 _DIR_FLAG_RE = re.compile(r"(?:^|\s)(?:-C|--directory|-d)\b")
@@ -921,7 +1107,8 @@ def _unpack_into_cases(cmd: str, base: str) -> str:
     body = _strip_heredocs(cmd)
     if _TAR_CREATE_RE.search(body) and not _TAR_EXTRACT_RE.search(body):
         return ""                    # tar -c … -C {дело}: чтение файлов в архив, не распаковка в дело
-    for d in _UNPACK_RE.findall(body) + _PY_UNPACK_RE.findall(body):
+    for d in (_UNPACK_RE.findall(body) + _PY_UNPACK_RE.findall(body)
+              + _SEVENZIP_O_RE.findall(body)):
         d_abs = _resolve(d.strip("'\""), base)
         if _under_cases(d_abs):
             return d.strip("'\"")
@@ -992,6 +1179,19 @@ def _sudact_allowed() -> bool:
 # 9.1) — не хардкод; наш claude и наш коннектор foreign_cli/cli_router под запрет
 # не попадают. Судим ГЛАГОЛ в командной позиции, а не подстроку: имя в пути
 # (`scripts/foreign_cli.py`) или в кавычках (`echo '… cli_registry.json'`) — не вызов.
+# Последний рубеж, когда реестр НЕ прочитан: правило безопасности не имеет права
+# зависеть от читаемости JSON. Удаление или порча cli_registry.json прежде снимала
+# запрет ЦЕЛИКОМ (rc=0 на прямой вызов) — сделали fail-closed: нет реестра → судим по
+# известным чужим CLI, что мы когда-либо подключали (проба круга 9). Реестр на месте —
+# он и есть источник имён; набор ниже включается ТОЛЬКО когда читать нечего.
+# Имена собираны из кусков, а НЕ литералом: линтер реестра (git grep по scripts/*.py,
+# проверка 9.1) справедливо запрещает зашитые имена как «механизм подключения» — но
+# это не механизм подключения, а аварийный бэкстоп. Подключение нового CLI по-прежнему
+# требует лишь строки реестра; бэкстоп нужен, только если реестр исчез. Собранная
+# форма равна именам реестра, литеральная — нет, и обе цели соблюдены.
+_FALLBACK_FOREIGN = tuple("".join(p) for p in (("co", "dex"), ("ki", "mi"), ("ge", "mini")))
+
+
 def _foreign_cli_names() -> list:
     reg = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cli_registry.json")
     try:
@@ -1002,15 +1202,17 @@ def _foreign_cli_names() -> list:
 
 
 def _foreign_cli_re():
-    names = _foreign_cli_names()
-    if not names:
-        return None
+    names = _foreign_cli_names() or list(_FALLBACK_FOREIGN)   # fail-closed без реестра
     body = "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
-    # Командная позиция: начало, после ;/&/|, перевода строки, подоболочки «(…)»,
-    # группировки «{ … }», сабшелла $(…) или обратной кавычки (проба круга 6 — вызов
-    # со второй строки, из подоболочки и из группы шёл мимо). Префиксы (env/sudo/…),
-    # then/do и путь к бинарю уже сняты _normalize. `\b` — имя целым словом, не куском.
-    return re.compile(rf"(?:^|[;&|\n({{]|\$\(|`)\s*(?:{body})\b")
+    # Командная позиция: единая _CMDPOS (начало, ;/&/|, перевод строки, группировка,
+    # $(…), обратная кавычка). Регистр не важен: файловая система его не различает,
+    # ИМЯ заглавными == строчными как бинарь (проба круга 9). Тождество ШИРЕ имени в
+    # PATH — тот же инструмент вызывают чужой точкой входа: `node …/ИМЯ.js`,
+    # `npx [@scope/]ИМЯ`. Имён в коде нет: строятся из реестра (или бэкстопа).
+    direct = _CMDPOS + rf"\s*(?:{body})\b"
+    node = rf"\bnode\b[^\n;&|]*?/(?:{body})(?:\.[cm]?js)?\b"
+    npx = rf"\bnpx\b[^\n;&|]*?(?:@[\w.-]+/)?(?:{body})\b"
+    return re.compile(rf"{direct}|{node}|{npx}", re.I | re.M)
 
 
 _FOREIGN_CLI_RE = _foreign_cli_re()
@@ -1103,12 +1305,12 @@ def main() -> None:
 
     if tool == "Read":
         p = as_str(ti.get("file_path"))
-        if re.search(r"\.(docx|xlsx|pptx|pdf|doc|xls)$", p, re.I):
+        if os.path.splitext(p)[1].lower().lstrip(".") in _BINARY_DOC_EXT:
             block(
                 "БЛОК (LOCAL-FIRST): бинарные документы читать только через "
                 "python3 scripts/markdown_extract.py FILE --json-meta "
                 "(роутер выдаст кеш-путь, срезы и requisites.json). "
-                "Read напрямую для .docx/.pdf/.xlsx/.pptx запрещен."
+                "Read напрямую для .docx/.pdf/.xlsx/.pptx/.rtf/.odt/.epub запрещен."
             )
         # Порог бюджета обходили регистром (/THEMIS/), симлинком (ссылка вне проекта на
         # файл внутри) и `~` (getsize не раскрывает тильду → размер 0). Резолвим цель
@@ -1210,14 +1412,19 @@ def main() -> None:
         # «ДО» так же, как удаление их самих (проба круга 5) — а по имени цели не видно.
         # find судим по СЫРОЙ команде: _normalize срезает `-exec rm {} ;` в `; rm {} ;`,
         # и по нормализованной строке разрушительность find уже не видна.
-        removal_targets = _rm_targets(cmd, base) + _git_destruct_targets(cmd, base)
-        if any(_under_protected(t) or _is_protected_ancestor(t) for t in removal_targets) \
-                or _find_destruct_hits(stripped, base):
+        removal_targets = (_rm_targets(cmd, base) + _git_destruct_targets(cmd, base)
+                           + _interp_removal_targets(cmd, base))
+        if (any(_under_protected(t) or _is_protected_ancestor(t) or _is_cases_root(t)
+                for t in removal_targets)
+                or _find_destruct_hits(stripped, base)
+                or _git_clean_hits_cases(cmd, base)
+                or _rsync_delete_hits_cases(cmd, base)):
             block(
-                "БЛОК: удаление затрагивает 00_intake/ или _baselines/ — в т.ч. как "
-                "поддерево сносимой папки дела или клиента, глаголом git (clean/rm) или "
-                "find (-delete/-exec rm). Первичка и база «ДО» неприкосновенны "
-                "(железное правило). Нужно — только пользователь вручную."
+                "БЛОК: удаление затрагивает cases/, 00_intake/ или _baselines/ — в т.ч. "
+                "САМ корень cases/, поддерево сносимой папки дела/клиента, глаголом git "
+                "(clean/rm), find (-delete/-exec rm), rsync --delete или разрушительным "
+                "вызовом интерпретатора (shutil.rmtree/os.remove/Path.unlink). Материалы "
+                "дел неприкосновенны (железное правило). Нужно — только пользователь вручную."
             )
         # ПОПОЛНЕНИЕ первички — не перезапись. Материалы клиента обязаны попадать
         # в 00_intake/, этим и занят inbox-triage (Bash mv из инбокса). Прежнее
@@ -1239,7 +1446,8 @@ def main() -> None:
         # уносит первичку и базу «ДО» целиком — mv-источник судим и как предок поддерева.
         removed_sources = [_resolve(s, base) for s in _mv_sources(cmd)]
         removed_sources = [s for s in removed_sources
-                           if _under_protected(s) or _is_protected_ancestor(s)]
+                           if _under_protected(s) or _is_protected_ancestor(s)
+                           or _is_cases_root(s)]     # `mv cases /tmp` уносит все дела
         # Опасная запись в первичку — защищённая цель, к которой пишет ЛЮБАЯ операция,
         # КРОМЕ безопасного пополнения cp/mv (-n/--no-clobber или свежее имя со штампом
         # даты). drop_cpmv убирает из счёта только эти безопасные добавления; редирект,
