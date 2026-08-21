@@ -1670,6 +1670,68 @@ def selftest() -> int:
          run({"tool_name": "Read", "tool_input": {"file_path": ext_big}}), 0),
         ("симлинк вне проекта на большой файл внутри — блок",
          run({"tool_name": "Read", "tool_input": {"file_path": ext_link}}) if ext_link else 2, 2),
+        # ── Круг 8: тело ИСПОЛНЯЕМОГО heredoc судится ВСЕМИ гейтами, не только чужим CLI ──
+        # `bash <<EOF … EOF` исполняет тело: rm первички, распаковка в дело и запись кода
+        # обязаны блокироваться так же, как в обычной команде (не только вызов чужого CLI).
+        ("тело bash <<EOF: rm первички — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "bash <<EOF\nrm " + shlex_quote(existing_intake) + "\nEOF"}}), 2),
+        ("тело bash <<EOF: распаковка в первичку — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "bash <<EOF\ntar xf /tmp/a.tar -C cases/klient/delo-2026/00_intake\nEOF"}}), 2),
+        ("тело bash <<EOF: cp кода в дело — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "bash <<EOF\ncp /tmp/x.py cases/klient/delo-2026/gen.py\nEOF"}}), 2),
+        ("тело python3 - <<EOF: запись кода в дело — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "python3 - <<EOF\nopen('cases/klient/delo-2026/g.py','w')\nEOF"}}), 2),
+        ("тело bash <<EOF во временный каталог пропускается",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "bash <<EOF\ncp /tmp/a.md /tmp/b.md\nEOF"}}), 0),
+        # ── Круг 8: один cp -n на путь НЕ легализует другой глагол по тому же пути ──────
+        ("cp -n свежего + truncate существующей первички — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": f"cp -n /tmp/a.pdf {shlex_quote(new_intake)} && "
+                        f"truncate -s 0 {shlex_quote(existing_intake)}"}}), 2),
+        ("cp -n свежего + редирект поверх существующей первички — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": f"cp -n /tmp/a.pdf {shlex_quote(new_intake)}; "
+                        f"echo x > {shlex_quote(existing_intake)}"}}), 2),
+        ("два cp -n подряд, обе цели свежие — пропуск",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": f"cp -n /tmp/a.pdf {shlex_quote(new_intake)} && "
+                        f"cp -n /tmp/b.pdf {shlex_quote(intake + '/drug-2026-08-20.pdf')}"}}), 0),
+        # ── Круг 8: путь подстановкой команды ($(…)/бэктики) не уходит мимо гейта удаления ──
+        ("rm $(echo …) первички — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": f"rm -rf $(echo {shlex_quote(intake)})"}}), 2),
+        ("rm `pwd` после cd в первичку — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": f"cd {shlex_quote(intake)} && rm -rf `pwd`"}}), 2),
+        ("rm $(echo /tmp/…) вне дела — пропуск",
+         run({"tool_name": "Bash", "tool_input": {"command": "rm -rf $(echo /tmp/scratch)"}}), 0),
+        # ── Круг 8: ложные тревоги пополнения — склеенные флаги, -t, zip-резерв наружу ──
+        ("mv -vn свежего файла в 00_intake пропускается",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": f"mv -vn /tmp/a.pdf {shlex_quote(new_intake)}"}}), 0),
+        ("mv -nv свежего файла в 00_intake пропускается",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": f"mv -nv /tmp/a.pdf {shlex_quote(intake + '/drug2.pdf')}"}}), 0),
+        ("cp -an свежего файла в 00_intake пропускается",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": f"cp -an /tmp/a.pdf {shlex_quote(intake + '/drug3.pdf')}"}}), 0),
+        ("mv -n -t 00_intake пополнение пропускается",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": f"mv -n -t {shlex_quote(intake)} /tmp/a.pdf"}}), 0),
+        ("mv БЕЗ -n поверх канонического имени первички — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": f"mv /tmp/a.pdf {shlex_quote(intake + '/skan.pdf')}"}}), 2),
+        ("zip-резерв первички наружу пропускается",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": f"zip -r /tmp/rezerv.zip {shlex_quote(intake)}"}}), 0),
+        ("zip-архив ВНУТРЬ дела мимо конвейера — блок",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "zip -r cases/klient/delo-2026/GOTOVO/out.zip /tmp/x"}}), 2),
     ]
     bad = [name for name, got, want in cases if got != want]
     for name, got, want in cases:
