@@ -155,6 +155,29 @@ def _translit_to_cyrillic(latin: str) -> str:
     return "".join(out)
 
 
+def _owner_latin_stems() -> set[str]:
+    """Латинская фамилия ВЛАДЕЛЬЦА — из публичного адреса самого репозитория.
+
+    Докстринг `_owner_stems` уже объявляет принцип: фамилия владельца это
+    публичный бренд фирмы (README, титул, подпись документов), а не тайна
+    доверителя. Но исключение было заведено только для кириллицы, и латинская
+    форма продолжала красить дерево. Прецедент 21.08.2026: приветствие
+    установщика подписано именем автора, и сторож остановил коммит — при том,
+    что то же имя стоит в `git clone https://github.com/<handle>/…` двумя
+    экранами ниже и опубликовано с первого дня.
+
+    Источник — адрес `origin`, а не отдельный список: список разошёлся бы с
+    действительностью, а адрес и есть та публичность, ради которой делается
+    исключение. Снимается ТОЛЬКО голый стем: полное имя папки дела
+    (`familiya-ab`) ловится по-прежнему, потому что фамилия плюс инициалы это
+    уже конкретное дело конкретного человека.
+    """
+    r = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True,
+                       text=True, cwd=ROOT)
+    url = (r.stdout or "").strip().lower()
+    return {url} if url else set()
+
+
 def _owner_stems() -> set[str]:
     """Кириллические стемы фамилии владельца из git config — его фамилия это
     публичный бренд фирмы (README, титул, подпись документов), не тайна доверителя.
@@ -170,7 +193,8 @@ def _owner_stems() -> set[str]:
     return stems
 
 
-def name_pattern(names: list[str], cyrillic: bool = False) -> re.Pattern | None:
+def name_pattern(names: list[str], cyrillic: bool = False,
+                 owner_url_probe: str | None = None) -> re.Pattern | None:
     """Один шаблон на все имена. Границы — чтобы `ivan` не ловился внутри `ivanov`.
 
     Регистронезависим, разделители `-`/`_`/пробел взаимозаменяемы (04.08.2026 —
@@ -184,6 +208,7 @@ def name_pattern(names: list[str], cyrillic: bool = False) -> re.Pattern | None:
     if not names:
         return None
     owner = _owner_stems()
+    owner_url = {owner_url_probe} if owner_url_probe is not None else _owner_latin_stems()
     lat_bodies, cyr_bodies = [], []
     for n in sorted(names, key=len, reverse=True):
         parts = [p for p in re.split(r"[-_ ]+", n) if p]
@@ -192,7 +217,7 @@ def name_pattern(names: list[str], cyrillic: bool = False) -> re.Pattern | None:
         norm_parts = [normalize_public_scan(p) for p in parts]
         lat_bodies.append(r"[-_ ]".join(re.escape(p) for p in norm_parts))
         fam_norm = norm_parts[0]
-        if len(fam_norm) >= MIN_NAME:
+        if len(fam_norm) >= MIN_NAME and not any(fam_norm in u for u in owner_url):
             lat_bodies.append(re.escape(fam_norm) + r"(?![-_][A-Za-zА-Яа-яЁё])")
         # Транслитерируется только ФАМИЛЬНАЯ часть (первая): вторая — имя или
         # инициалы, их кириллические стемы коротки и совпадают с обиходом.
@@ -796,6 +821,22 @@ def selftest() -> int:
          check_ref_txn(pat, "prepared", "0 0 refs/heads/familiya-ab\n") == []),
         ("чистый тег в prepared проходит",
          check_ref_txn(pat, "prepared", "0 0 refs/tags/v2.0\n") == []),
+        # Фамилия ВЛАДЕЛЬЦА в латинице — публичный бренд (она в адресе
+        # репозитория и в README), голый стем под замок не идёт. Но полное имя
+        # папки дела с ней ловится по-прежнему: фамилия плюс инициалы — это уже
+        # конкретное дело конкретного человека.
+        ("голая фамилия владельца из адреса репозитория не красит",
+         scan_text("Собрал Familiya, практикующий юрист",
+                   name_pattern(names, owner_url_probe="github.com/familiyaphil/x"),
+                   "проба") == []),
+        ("полное имя дела владельца ловится и при снятом стеме",
+         scan_text("cases/familiya-ab/delo-2026",
+                   name_pattern(names, owner_url_probe="github.com/familiyaphil/x"),
+                   "проба") != []),
+        ("фамилия ПОСТОРОННЕГО доверителя ловится и голой",
+         scan_text("файл drugoy.md",
+                   name_pattern(names, owner_url_probe="github.com/familiyaphil/x"),
+                   "проба") != []),
     ]
     for name, ok in checks:
         print(f"  {'✓' if ok else '✗'} {name}")
