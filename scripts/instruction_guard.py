@@ -30,6 +30,7 @@
 import argparse
 import re
 import sys
+import unicodedata
 
 _HOMOGLYPH_SOURCE = {
     "A": "А", "B": "В", "C": "С", "E": "Е", "H": "Н", "K": "К", "M": "М",
@@ -104,7 +105,8 @@ _STOCK_PHRASES = (
     # прилагательных пропускал «Забудь предыдущие инструкции» и «Игнорируй
     # прошлые инструкции» — минимальные варианты собственных стоковых фраз.
     re.compile(r"\b(?:игнориру(?:й|йте|ировать)|забудь|забудьте|отмени|отмените|"
-               r"проигнориру(?:й|йте)|не\s+учитыва(?:й|йте))\s+"
+               r"проигнориру(?:й|йте)|не\s+учитыва(?:й|йте))"
+               r"(?:\s+|[,—-]\s*)+(?:пожалуйста\s*,?\s+)?"
                r"(?:[а-яё]+\s+){0,3}"
                r"(?:инструкц\w*|указан\w*|правил\w*|сообщени\w*|протокол\w*|"
                r"предписан\w*|ограничен\w*)", re.I),
@@ -112,13 +114,13 @@ _STOCK_PHRASES = (
               r"свои)\s+(?:инструкц\w*|правил\w*)", re.I),
     re.compile(r"\bс\s+этого\s+момента\s+ты\s+(?:—|-|являешься|действуешь)", re.I),
     re.compile(r"\bтвоя\s+новая\s+роль\b", re.I),
-    re.compile(r"\bignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions?\b", re.I),
-    re.compile(r"\bdisregard\s+(?:all\s+)?(?:previous|prior|above)\s+instructions?\b", re.I),
+    re.compile(r"\bignore\s+(?:all\s+)?(?:the\s+)?(?:previous|prior|above)\s+instructions?\b", re.I),
+    re.compile(r"\bdisregard\s+(?:all\s+)?(?:the\s+)?(?:previous|prior|above)\s+instructions?\b", re.I),
     re.compile(r"\bnew\s+instructions?\s*[:—-]", re.I),
     re.compile(r"\breveal\s+your\s+(?:prompt|system\s+prompt|instructions)\b", re.I),
     re.compile(r"\byou\s+are\s+now\b", re.I),
     re.compile(r"\byour\s+new\s+task\s+is\b", re.I),
-    re.compile(r"^\s*system\s*:", re.I | re.M),
+    re.compile(r"^\s*system\s*(?:prompt\s*)?:", re.I | re.M),
     re.compile(r"^\s*(?:новые\s+инструкции|важно\s+для\s+ии)\s*[:—-]", re.I | re.M),
     re.compile(r"\bignoriruy\s+(?:vse\s+)?(?:predydushchie|proshlye)\s+instruktsii\b", re.I),
     re.compile(r"\bignore\s+previous\s+instructions?\b", re.I),
@@ -134,6 +136,12 @@ def normalize_text(text: str) -> str:
                 text = repaired
         except UnicodeError:
             pass
+    text = re.sub(r"\b(?:alt|title|aria-label)\s*=\s*(['\"])(.*?)\1",
+                  lambda m: " " + m.group(2) + " ", text, flags=re.I | re.S)
+    text = text.replace("<!--", " ").replace("-->", " ")
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"(?m)^[ \t]+", "", text)
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
     text = text.replace("\u00ad", "")
     lat = "".join(re.escape(ch) for ch in _HOMOGLYPH_SOURCE)
     text = re.sub(
