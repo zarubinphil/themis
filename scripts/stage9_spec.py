@@ -3850,8 +3850,13 @@ def check_git_kanaly_pd():
                               "не двоичная непрозрачность — судебные документы именно "
                               "такие, и ложная уверенность здесь хуже молчания"))
         # 3. Обиход: чистый коммит и чистый тег проходят.
+        # Индекс сбрасываем: пробы выше могли ОСТАВИТЬ в нём грязный файл (сторож
+        # заблокировал коммит — файл остался staged), и «чистый коммит» унёс бы его
+        # с собой. Проверка обихода обязана быть изолирована от проверки утечки,
+        # иначе закрытая дыра красит соседнюю проверку (круг 9, моя ошибка).
+        run(["git", "reset", "-q"], cwd=td)
         (td / "chisto.md").write_text("Обычная заметка о ходе работ.\n", encoding="utf-8")
-        run(["git", "add", "chisto.md"], cwd=td)
+        run(["git", "add", "--", "chisto.md"], cwd=td)
         code, _ = run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
                        "commit", "-qm", "obychnaya rabota"], cwd=td)
         if code != 0:
@@ -4564,7 +4569,9 @@ def check_pd_v_nastoyashchem_docx():
                           "внутри .docx, прошла в коммит: Word хранит текст именно так, "
                           "то есть закрыты документы нашей сборки и открыты правленые "
                           "доверителем — ради которых правило и вводилось"))
-        # Ось обихода: документ без имён коммитится молча.
+        # Ось обихода: документ без имён коммитится молча. Индекс сбрасываем —
+        # заблокированный выше документ остался бы staged и покрасил бы обиход.
+        run(["git", "reset", "-q"], cwd=td)
         chisto = td / "chisto.docx"
         with zipfile.ZipFile(chisto, "w") as z:
             z.writestr("[Content_Types].xml",
@@ -4575,7 +4582,7 @@ def check_pd_v_nastoyashchem_docx():
                        f'<?xml version="1.0" encoding="UTF-8"?>\n<w:document {W}>'
                        f'<w:body><w:p><w:r><w:t>Ходатайство об истребовании '
                        f'доказательств.</w:t></w:r></w:p></w:body></w:document>')
-        run(["git", "add", "chisto.docx"], cwd=td)
+        run(["git", "add", "--", "chisto.docx"], cwd=td)
         code, _ = run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
                        "commit", "-qm", "chistyy dokument"], cwd=td)
         if code != 0:
@@ -5655,7 +5662,10 @@ def check_dengi_sborka_krug9():
     gp = tool("gosposhlina.py")
     if gp.is_file():
         code, out = py(gp, "--cena", "643191.60", "--status", "fiz", "--sud", "soyu")
-        if code != 0:
+        if code != 0 and "корпус" in out.lower() or "не найден" in out.lower() \
+                or "kodeksy" in out:
+            pass          # корпус права не выгружен — состояние машины, не дефект прибора
+        elif code != 0:
             fails.append(("dengi9:gosposhlina", f"госпошлина не принимает цену иска с "
                           f"копейками: {out.strip()[-200:]} — проценты по ст. 395 ГК "
                           f"почти всегда с копейками, и это выход прибора проекта "
