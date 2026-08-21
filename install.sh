@@ -43,11 +43,32 @@ echo "      ✓ медиа:      openai-whisper (расшифровка ауди
 
 # ── 2. Apple Vision OCR (сборка из исходника) ────────────────────────────────
 echo ""
+# Гейт humanizer-legal стоит перед вердиктом «ГОТОВ К ПОДАЧЕ» и работает
+# fail-closed: нет скрипта скилла — документ не выпускается вовсе. Скилл живёт
+# вне репозитория, поэтому установка обязана о нём сказать вслух (проба круга 9:
+# свежая машина по README не выпускала ни одного документа).
+if [ ! -x "$HOME/.claude/skills/humanizer-legal/scripts/scan_legal.sh" ]; then
+  echo "[!] Скилл humanizer-legal не найден:"
+  echo "    ~/.claude/skills/humanizer-legal/scripts/scan_legal.sh"
+  echo "    Без него гейт стиля закрыт и ни один судебный документ не выпустится."
+  echo "    Поставить скилл humanizer-legal до первой работы по делу."
+fi
+
 echo "[2/7] Apple Vision OCR…"
 if [ "$(uname)" = "Darwin" ] && command -v swiftc >/dev/null 2>&1; then
   mkdir -p bin
   swiftc -O bin/vision-ocr.swift -o bin/vision-ocr && chmod +x bin/vision-ocr
-  echo "      ✓ собран bin/vision-ocr (локальный OCR, \$0)"
+  echo "      ✓ собран bin/vision-ocr (строковый резерв, \$0)"
+  # ОСНОВНОЙ движок — структурный vision-doc (текст + таблицы ячейками):
+  # роутер зовёт именно его, а собирался только резерв, и роутер молча
+  # деградировал вместо предписанной остановки (проба круга 9).
+  if swiftc -O bin/vision-doc.swift -o bin/vision-doc 2>/dev/null; then
+    chmod +x bin/vision-doc
+    echo "      ✓ собран bin/vision-doc (основной, структурный OCR, \$0)"
+  else
+    echo "      ⚠ bin/vision-doc не собран (нужен macOS 26+): роутер пойдёт"
+    echo "        строковым резервом, таблицы ячейками размечены не будут"
+  fi
 else
   echo "      ⚠ swiftc не найден — поставь Xcode CLT: xcode-select --install"
   echo "        затем: swiftc -O bin/vision-ocr.swift -o bin/vision-ocr"

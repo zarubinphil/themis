@@ -901,7 +901,12 @@ def _under_protected(path: str) -> bool:
     первичка, и блокировать её нельзя (проба круга 6: сторож с такой тревогой снимают
     в первый день)."""
     norm = path.replace(os.sep, "/").strip("'\"")
-    return bool(re.search(r"/cases/.+/(?:00_intake|_baselines)(?:/|$)", norm, re.I))
+    # 02_hearings — ПОДАННЫЕ документы: «не редактировать поданные документы»
+    # объявлено железным правилом и до круга 9 не держалось ничем (запись была
+    # закрыта, удаление проходило свободно). Поданный пакет неприкосновенен так
+    # же, как первичка: подшитое в суд назад не переподшить.
+    return bool(re.search(r"/cases/.+/(?:00_intake|_baselines|02_hearings)(?:/|$)",
+                          norm, re.I))
 
 
 # mv УДАЛЯЕТ источник, scp/rsync УВОЗЯТ его за границу — перенос СУЩЕСТВУЮЩЕГО файла
@@ -1303,9 +1308,41 @@ def main() -> None:
     def as_str(v) -> str:
         return v if isinstance(v, str) else ""
 
+    if tool in ("WebFetch", "WebSearch") and tool == "WebFetch":
+        url = as_str(ti.get("url"))
+        m = re.match(r"[a-z]+://([^/?#]+)", url, re.I)
+        host = (m.group(1) if m else "").split("@")[-1].split(":")[0].lower()
+        if host:
+            spisok = os.path.join(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))), "knowledge", "allowed-services.md")
+            try:
+                reestr = open(spisok, encoding="utf-8").read().lower()
+            except OSError:
+                block(
+                    "БЛОК: белый список внешних сервисов "
+                    "(knowledge/allowed-services.md) не прочитан — проверить "
+                    "разрешение нечем. Обращаться наружу вслепую запрещено."
+                )
+                reestr = ""
+            # Достаточно упоминания хоста или его корневого домена: реестр —
+            # человеческий документ, а не машинный конфиг, и придирчивый разбор
+            # здесь дал бы ложные тревоги на работе юриста.
+            chasti = host.split(".")
+            koren = ".".join(chasti[-2:]) if len(chasti) >= 2 else host
+            if host not in reestr and koren not in reestr:
+                block(
+                    f"БЛОК: сервис {host} не значится в белом списке "
+                    f"knowledge/allowed-services.md. Правило: «сервиса нет в "
+                    f"списке — не запускать, а спросить владельца и внести сюда "
+                    f"после согласия». Практику искать порядком: "
+                    f"knowledge/practice_index.md → scripts/practice_search.py → "
+                    f"WebSearch → официальные публикаторы."
+                )
+
     if tool == "Read":
         p = as_str(ti.get("file_path"))
-        if os.path.splitext(p)[1].lower().lstrip(".") in _BINARY_DOC_EXT:
+        _ext = os.path.splitext(p)[1].lower().lstrip(".")
+        if _ext in _BINARY_DOC_EXT:
             block(
                 "БЛОК (LOCAL-FIRST): бинарные документы читать только через "
                 "python3 scripts/markdown_extract.py FILE --json-meta "

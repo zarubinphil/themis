@@ -32,7 +32,11 @@ EXTRACT_CACHE = Path(os.environ.get(
     "THEMIS_EXTRACT_CACHE", Path.home() / ".cache" / "legal_extract"))
 SCAN_EXT = {".pdf", ".jpg", ".jpeg", ".png", ".tiff", ".tif", ".heic", ".bmp"}
 TEXT_EXT = {".docx", ".xlsx", ".pptx", ".rtf", ".txt", ".md", ".html", ".csv"}
-FLAGS = ("[ОБНОВИТЬ КЛИЕНТА]", "[ОБНОВИТЬ ИНДЕКС]")
+# Флаг предписан документами параметризованным — «[ОБНОВИТЬ КЛИЕНТА: поле: значение]»,
+# и параметр это и есть его полезная нагрузка. Перечень подстрок с закрывающей
+# скобкой сразу за словом не ловил ни одного реального флага (проба круга 9).
+FLAG_RE = re.compile(r"\[ОБНОВИТЬ\s+(?:КЛИЕНТА|ИНДЕКС)(?::[^\]]*)?\]", re.I)
+FLAGS = ("[ОБНОВИТЬ КЛИЕНТА]", "[ОБНОВИТЬ ИНДЕКС]")   # для селфтестов
 
 
 # Маркер, названный в отрицании, — не маркер. Прежняя проверка искала вхождение
@@ -121,6 +125,9 @@ def check_frontmatter() -> list[str]:
             continue
         m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
         if not m:
+            # Шапки нет вовсе — из реестра агент выпадает ровно так же, как со
+            # сломанным YAML, а молчаливый continue это скрывал (проба круга 9).
+            bad.append(f"{f.name}: frontmatter отсутствует — файл не попадёт в реестр")
             continue
         try:
             data = yaml.safe_load(m.group(1))
@@ -190,7 +197,7 @@ def brief(case: Path, level: str) -> None:
     for f in list(case.rglob("*.md")) + sorted(
             (case.parents[1] / "_logs").glob("session_*.md"), reverse=True)[:1]:
         t = read(f)
-        if any(flag in t for flag in FLAGS):
+        if FLAG_RE.search(t):
             flagged.append(f.name)
     if flagged:
         print(f"  ⚠ необработанные флаги в: {', '.join(sorted(set(flagged))[:4])}")
@@ -286,10 +293,23 @@ def main() -> int:
     # его куда придётся: на диске «ГОТОВ К ПОДАЧЕ» встречается в 14 файлах, из них
     # по каноническому пути — 2. Из-за этого машина печатала «Шаг 5 ✗» примерно в
     # 95% дел и приучала оператора себя игнорировать. Ищем везде, где он бывает.
-    candidates = [case / ".agent/drafts" / "_working" / "review_log.md"]
-    if (case / ".agent/drafts").is_dir():
-        candidates += sorted((case / ".agent/drafts").rglob("*.md"))
-    candidates += [case / "_case.md", ctx / "review_log.md"]
+    # Вердикт — ОТДЕЛЬНЫЙ артефакт рецензента, а не подстрока где угодно.
+    # Прежний glob по всему дереву черновиков брал под сканирование САМ
+    # проверяемый документ: фраза «думаю, он уже ГОТОВ К ПОДАЧЕ» в теле
+    # черновика закрывала шаг 5 и открывала подачу, хотя Кони не запускалась
+    # (проба круга 9). Ищем в файлах ОТЧЁТА: review_log.md на любом уровне
+    # дела плюс *_review*.md — и в _case.md, куда вердикт заносят вручную.
+    candidates = [case / ".agent/drafts" / "_working" / "review_log.md",
+                  ctx / "review_log.md", case / "_case.md"]
+    for korn in (case / ".agent", case / "02_hearings"):
+        if korn.is_dir():
+            candidates += sorted(q for q in korn.rglob("*.md")
+                                 if q.name == "review_log.md" or "_review" in q.name
+                                 or q.name.startswith("review"))
+    # Черновики из списка исключены явно: документ не одобряет сам себя.
+    drafts_dir = (case / ".agent" / "drafts").resolve()
+    candidates = [q for q in candidates
+                  if not (q.resolve().parent == drafts_dir and q.name != "review_log.md")]
     # Подстрока «ГОТОВ К ПОДАЧЕ» входит в отрицательный вердикт «НЕ ГОТОВ К ПОДАЧЕ»
     # и в «документ пока НЕ готов к подаче» — машина принимала отказ Кони за приёмку
     # и пускала протокол на шаг вперёд. Отрицание отсекаем явно.
