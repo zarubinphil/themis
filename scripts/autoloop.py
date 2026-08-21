@@ -109,13 +109,21 @@ MUSOR_OS = (".DS_Store", ".localized", ".Spotlight-V100", ".fseventsd", ".Tempor
 # снимков 11 669 файлов дало ровно один изменённый — _session_history.txt,
 # 20032 -> 20064 байта. Сторож, кричащий без причины, учит игнорировать себя,
 # а охраняет он 20 ГБ первички.
-# Исключение УЗКОЕ и поимённое: прочие файлы с подчёркивания (_client.md,
-# _case.md) — настоящие данные дела и отпечаток двигают по-прежнему.
+# Исключение УЗКОЕ и по МЕСТУ, не по имени: журнал признаётся служебным только
+# там, где его пишет Stop-хук — верхний уровень папки клиента (cases/<клиент>/
+# _session_history.txt) и cases/_logs/. Тот же файл, положенный ГЛУБЖЕ (в дело,
+# в 00_intake), — данные, а не журнал: исключение по одному имени в любом месте
+# делало _session_history.txt внутри 00_intake невидимым для сторожа (этап 9.20,
+# круг 8). Прочие файлы с подчёркивания (_client.md, _case.md) отпечаток двигают.
 ZHURNALY_SISTEMY = ("_session_history.txt",)
 
 
 def _sluzhebnyy_zhurnal(rel_path: str, name: str) -> bool:
-    return name in ZHURNALY_SISTEMY or rel_path.split(os.sep)[0] == "_logs"
+    parts = rel_path.split(os.sep)
+    if parts[0] == "_logs":                       # cases/_logs/** — журнал системы
+        return True
+    # cases/<клиент>/_session_history.txt — ровно верхний уровень папки клиента.
+    return name in ZHURNALY_SISTEMY and len(parts) == 2
 
 
 def _musor(name):
@@ -746,6 +754,21 @@ def selftest():
         assert tree_fingerprint(os.path.join(tmp, "cases")) != fp2, \
             "новый файл дела не изменил отпечаток — заморозка ослепла"
         assert tree_fingerprint(os.path.join(tmp, "нет")) == "нет-каталога"
+        # Служебный журнал исключается по МЕСТУ, не по имени (этап 9.20, круг 8).
+        # Ось обихода: журнал на верхнем уровне папки клиента отпечаток НЕ двигает.
+        fp3 = tree_fingerprint(os.path.join(tmp, "cases"))
+        with open(os.path.join(d, "_session_history.txt"), "w", encoding="utf-8") as f:
+            f.write("Session ended\n")
+        assert tree_fingerprint(os.path.join(tmp, "cases")) == fp3, \
+            "журнал системы на верхнем уровне папки клиента сдвинул отпечаток"
+        # Обратная ось: тот же файл ГЛУБЖЕ (в 00_intake) — данные, а не журнал.
+        intake = os.path.join(d, "delo-2026", "00_intake")
+        os.makedirs(intake)
+        fp4 = tree_fingerprint(os.path.join(tmp, "cases"))
+        with open(os.path.join(intake, "_session_history.txt"), "w", encoding="utf-8") as f:
+            f.write("подмена под видом журнала\n")
+        assert tree_fingerprint(os.path.join(tmp, "cases")) != fp4, \
+            "_session_history.txt внутри 00_intake невидим для сторожа — исключение стало каналом"
 
     # Спин: одинаковый отпечаток подряд обязан копиться
     fps, stale, last = ["aa", "aa", "aa"], 0, None
