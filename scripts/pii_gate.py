@@ -213,6 +213,10 @@ CASE_NO_RE = re.compile(
     r"(?:№|\bN\b|\bNo\b|(?i:дел[оауе]м?|производств\w*))\s*"
     r"([А-ЯA-Z]\d{1,3}-\d{1,6}/\d{4}|\d{1,2}[аa]?-?\d{1,6}/\d{4})"
 )
+CASE_NO_BARE_RE = re.compile(
+    r"(?<![А-ЯA-Z0-9])([А-ЯA-Z]\d{1,3}-\d{1,6}/\d{4}|"
+    r"\d{1,2}[аa]?-?\d{1,6}/\d{4})(?![А-ЯA-Z0-9])"
+)
 # Адрес не имеет строгого формата — берём весь хвост строки после метки: это
 # избыточно (заденет и соседний текст на той же строке), но избыточность здесь
 # безопаснее недомаскировки, а обратимость от ширины захвата не зависит.
@@ -266,7 +270,7 @@ TRANSLIT_FIO_RE = re.compile(
 # слово-триггер — только детское учреждение.
 CHILD_INST_RE = re.compile(
     r"(?:гимнази\w*|лице[йяю]\w*|школ\w*|детск\w+\s+сад\w*|садик\w*|"
-    r"колледж\w*|техникум\w*)\s*(?:№\s*\d+|\d+)?(?:\s*(?:г\.|город\w*)\s*"
+    r"колледж\w*|техникум\w*)\s*(?:(?:№|No)\s*\d+|\d+)(?:\s*(?:г\.|город\w*)\s*"
     r"[А-ЯЁ][а-яё-]+)?", re.U)
 CADASTRE_RE = re.compile(r"(?<![\d:])\d{2}:\d{2}:\d{6,7}:\d{1,7}(?![\d:])")
 # Буквы госномера — только те 12, что есть и в кириллице, и в латинице.
@@ -283,7 +287,7 @@ CATEGORIES_STATIC = (
     ("УЧРЕЖДЕНИЕ", (CHILD_INST_RE,)),
     ("ИНН", (INN_RE, INN_BARE_RE)),
     ("ОГРН", (OGRN_RE, OGRN_BARE_RE)),
-    ("ДЕЛО", (CASE_NO_RE,)),
+    ("ДЕЛО", (CASE_NO_RE, CASE_NO_BARE_RE)),
     ("СЧЕТ", (BANK_ACCOUNT_RE,)),
     ("КАРТА", (CARD_RE,)),
     ("ПАСПОРТ", (PASSPORT_RE, PASSPORT_SERIA_RE, PASSPORT_TABLE_RE,
@@ -368,6 +372,23 @@ def _obezlichennaya_storona(word: str) -> bool:
     return word.lower() in _OBEZLICHENNAYA_STORONA
 
 
+_PII_TOKEN_RE = re.compile(r"\{\{PII:[А-ЯA-Z]+:\d+\}\}")
+_FIO_INITIALS_PREFIX_EXCEPTIONS = frozenset((
+    "суд", "суда", "суду", "судом", "суде", "судья", "судьи", "судье",
+    "судью", "судьей", "судьёй", "судей", "коллегия", "коллегии",
+    "председательствующий", "председательствующего", "секретарь", "помощник",
+))
+
+
+def _inside_pii_token(tokens: list[tuple[int, int]], start: int, end: int) -> bool:
+    return any(start >= s and end <= e for s, e in tokens)
+
+
+def _fio_initials_prefix_exception(value: str) -> bool:
+    first = value.split(None, 1)[0].strip(".,:;()«»\"'").lower()
+    return first in _FIO_INITIALS_PREFIX_EXCEPTIONS
+
+
 def _find_matches(text: str) -> list[tuple[int, int, str]]:
     """Непересекающиеся находки (start, end, категория), отсортированные по тексту.
 
@@ -377,14 +398,22 @@ def _find_matches(text: str) -> list[tuple[int, int, str]]:
     находки внутри.
     """
     raw = []
+    pii_tokens = [m.span() for m in _PII_TOKEN_RE.finditer(text)]
     for cat, patterns in _categories():
         for pat in patterns:
             for m in pat.finditer(text):
                 span = m.span(1) if m.lastindex else m.span(0)
+                if _inside_pii_token(pii_tokens, span[0], span[1]):
+                    continue
                 # Нарицательное обозначение стороны из обезличенного акта фамилией
                 # не является: правка такого слова ломает цитату из практики,
                 # ради которой обезличивание и делается (проба круга 5).
                 if cat == "ФИО" and _obezlichennaya_storona(text[span[0]:span[1]]):
+                    continue
+                if cat == "ФИО" and pat is FIO_INITIALS_RE \
+                        and _fio_initials_prefix_exception(text[span[0]:span[1]]):
+                    continue
+                if cat == "ФИО" and _looks_institutional(text[span[1]:span[1] + 60]):
                     continue
                 if cat == "ПАСПОРТ" and _looks_like_money(text, span[0], span[1]):
                     continue
@@ -558,7 +587,9 @@ _ADJ_STEMS = ("страхов", "правов", "долев", "делов", "в�
               "договорн", "имуществен", "жилищн", "земельн", "трудов", "семейн",
               "уголовн", "администрат", "гражданск", "арбитражн", "апелляцион",
               "кассацион", "надзорн", "первоначальн", "встречн", "основн", "дополнительн",
-              "юридическ")
+              "юридическ", "бюджетн", "таможенн", "водн", "лесн", "воздушн",
+              "градостроительн", "уголовно-процессуальн", "уголовно-исполнительн",
+              "гражданско-процессуальн", "морск")
 _ADJ_SUF = ("ой", "ая", "ое", "ый", "ым", "ом", "ых", "ую", "ого", "ому", "ые",
             "ий", "ей", "ие", "им", "ими", "ыми", "ою")
 
@@ -587,6 +618,8 @@ _COMMON_NOUN_STEMS = (
     "период", "участк", "объект", "предмет", "размер", "сумм", "величин",
     "полов", "долей", "дол", "процедур", "порядк", "график", "план",
     "госпошлин", "пошлин", "ответчик", "ответчиц", "истц",
+    "агент", "оператор", "помощник", "принципал", "комитент", "комиссионер",
+    "поверен", "попечител", "опекун", "потребител",
 )
 # Единичные слова, которые корнем не описать.
 _COMMON_NOUN_NOT_SURNAME = {
@@ -665,6 +698,16 @@ def _looks_institutional(tail: str) -> bool:
     return False
 
 
+def _looks_like_public_judge_initials_before(text: str, start: int) -> bool:
+    before = text[max(0, start - 48):start]
+    return bool(re.search(
+        r"(?:судь[яеию]|судьей|судьёй|председательствующ\w*)\s+"
+        r"[А-ЯЁ]\.\s?[А-ЯЁ]\.\s*$",
+        before,
+        re.I,
+    ))
+
+
 def _residual_extra_matches(text: str) -> list[tuple[int, int, str]]:
     """Находки, которые --mask намеренно не трогает (см. блок выше), но
     --residual обязан отловить: голая фамилия без маркера, фамилия третьего
@@ -676,6 +719,8 @@ def _residual_extra_matches(text: str) -> list[tuple[int, int, str]]:
             if _obihod_ne_familiya(word) or _obezlichennaya_storona(word):
                 continue
             if _looks_institutional(text[m.end():m.end() + 60]):
+                continue
+            if _looks_like_public_judge_initials_before(text, m.start()):
                 continue
             if _PARTICIPLE_RE.search(word):
                 continue      # «Взыскано …» — краткое причастие, а не фамилия
@@ -863,6 +908,10 @@ def selftest() -> int:
 
     assert residual_matches(original), "--residual обязан находить реквизиты в боевом тексте"
     assert not residual_matches(clean), "--residual обязан молчать на чистом тексте"
+    assert not residual_matches("{{PII:АДРЕС:1}}"), \
+        "собственный токен маскировщика не должен повторно считаться адресом"
+    assert mask_text("А65-12345/2026")[0] is not None, \
+        "голый номер дела должен маскироваться перед внешним сервисом"
 
     # Второй рубеж строже маскировщика: голая морфология без маркера и без
     # реквизита — то, что --mask намеренно не переписывает (см. комментарий
@@ -891,6 +940,9 @@ def selftest() -> int:
         "В соответствии с Гражданским кодексом Российской Федерации.\n",
         "Российская Федерация, город Казань.\n",
         "Арбитражный процессуальный кодекс Российской Федерации.\n",
+        "Операторов связи закон обязывает хранить тайну связи.\n",
+        "Судья И.И. Иванов огласил резолютивную часть решения.\n",
+        "В Обзоре судебной практики указано: школы обязаны соблюдать права обучающихся.\n",
     ):
         assert not residual_matches(text), f"--residual ложная тревога: {text!r}"
 

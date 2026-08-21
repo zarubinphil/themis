@@ -44,6 +44,7 @@ import os
 import re
 import subprocess
 import sys
+import unicodedata
 import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -54,6 +55,25 @@ DEMO = {"ivanov-ivan"}
 SERVICE_PREFIX = ("_", ".")
 # Совсем короткие имена дают ложные срабатывания на обычных словах.
 MIN_NAME = 5
+_ZERO_SHA_RE = re.compile(r"^0{40,64}$")
+_CYR_TO_LAT_CONFUSABLES = str.maketrans({
+    "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H", "О": "O",
+    "Р": "P", "С": "C", "Т": "T", "У": "Y", "Х": "X",
+    "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x",
+})
+
+
+def normalize_public_scan(text: str) -> str:
+    """Для публичных каналов: NFKC, без невидимых знаков, mixed-script homograph."""
+    text = unicodedata.normalize("NFKC", text)
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+    cyr = "".join(re.escape(chr(ch)) for ch in _CYR_TO_LAT_CONFUSABLES)
+    text = re.sub(
+        rf"(?<=[A-Za-z])[{cyr}]+|[{cyr}]+(?=[A-Za-z])",
+        lambda m: m.group(0).translate(_CYR_TO_LAT_CONFUSABLES),
+        text,
+    )
+    return text
 
 
 def client_names(cases_dir: str = CASES) -> list[str]:
@@ -158,7 +178,11 @@ def name_pattern(names: list[str], cyrillic: bool = False) -> re.Pattern | None:
         parts = [p for p in re.split(r"[-_ ]+", n) if p]
         if not parts:
             continue
-        lat_bodies.append(r"[-_ ]".join(re.escape(p) for p in parts))
+        norm_parts = [normalize_public_scan(p) for p in parts]
+        lat_bodies.append(r"[-_ ]".join(re.escape(p) for p in norm_parts))
+        fam_norm = norm_parts[0]
+        if len(fam_norm) >= MIN_NAME:
+            lat_bodies.append(re.escape(fam_norm) + r"(?![-_][A-Za-zА-Яа-яЁё])")
         # Транслитерируется только ФАМИЛЬНАЯ часть (первая): вторая — имя или
         # инициалы, их кириллические стемы коротки и совпадают с обиходом.
         # Стем короче 5 букв в шаблон не идёт: «sud»→«суд» с хвостом [а-яё]{0,3}
@@ -189,7 +213,7 @@ def scan_text(text: str, pat: re.Pattern | None, where: str) -> list[str]:
         return []
     out = []
     for i, line in enumerate(text.splitlines(), 1):
-        for m in pat.finditer(line):
+        for m in pat.finditer(normalize_public_scan(line)):
             out.append(f"{where}:{i} — имя папки доверителя ({len(m.group(1))} знаков). "
                        "Само значение не печатается: сторож не должен стать вторым "
                        "каналом утечки")
@@ -242,10 +266,10 @@ def git_bytes(*args: str) -> bytes:
     return r.stdout if r.returncode == 0 else b""
 
 
-# Office-форматы — это zip с XML внутри, а не двоичная непрозрачность. Судебные
+# Office/ODT-форматы — это zip с XML внутри, а не двоичная непрозрачность. Судебные
 # документы именно .docx: фамилия доверителя лежит в word/document.xml, и без
 # распаковки сторож объявляет такой коммит чистым (ложная уверенность хуже молчания).
-OFFICE_ZIP_EXT = (".docx", ".xlsx", ".pptx")
+OFFICE_ZIP_EXT = (".docx", ".xlsx", ".pptx", ".odt")
 
 
 def _office_xml_text(blob: bytes) -> str:
@@ -269,6 +293,36 @@ def _office_xml_text(blob: bytes) -> str:
     return "\n".join(parts)
 
 
+def _pdf_text(blob: bytes) -> str:
+    """Минимальный локальный слой для PDF без зависимостей: видимые ASCII/UTF-8 куски."""
+    text = blob.decode("utf-8", "ignore")
+    if not text.strip():
+        text = blob.decode("latin1", "ignore")
+    strings = re.findall(r"\(([^()]{1,500})\)", text)
+    if strings:
+        text += "\n" + "\n".join(strings)
+    return re.sub(r"[^A-Za-zА-Яа-яЁё0-9_.:/@+№()\"'«»\-\s]", " ", text)
+
+
+def _visible_blob_text(path: str, blob: bytes) -> str:
+    low = path.lower()
+    if low.endswith(OFFICE_ZIP_EXT):
+        return _office_xml_text(blob)
+    if low.endswith(".pdf"):
+        return _pdf_text(blob)
+    return blob.decode("utf-8", "replace")
+
+
+def _scan_file_text(path: str, blob: bytes, pat: re.Pattern | None) -> list[str]:
+    text = _visible_blob_text(path, blob)
+    if not text:
+        return []
+    hits = scan_text(text, pat, path)
+    if not _is_test_fixture_code(path):
+        hits += scan_pii(text, path)
+    return hits
+
+
 def staged_files() -> list[str]:
     return [f for f in git("diff", "--cached", "--name-only", "--diff-filter=ACMRT").split("\n") if f]
 
@@ -288,24 +342,18 @@ def check_staged(pat: re.Pattern | None) -> list[str]:
     problems = []
     for f in staged_files():
         problems += scan_text(f, pat, "путь файла")
-        if f.lower().endswith(OFFICE_ZIP_EXT):
-            # .docx/.xlsx/.pptx — это zip: читаем сырьё и распаковываем текст.
-            text = _office_xml_text(git_bytes("show", f":{f}"))
-            hits = scan_text(text, pat, f) + scan_pii(text, f) if text else []
-            if hits:
-                # Отклонённый бинарный судебный документ снимается с индекса:
-                # заблокированный коммит иначе оставляет .docx в staged, и каждый
-                # следующий коммит наследует ту же блокировку. Снятие с индекса
-                # (файл на диске цел) даёт работать с остальным.
-                subprocess.run(["git", "reset", "-q", "--", f], cwd=ROOT,
-                               capture_output=True)
-                problems += hits
+        blob = git_bytes("show", f":{f}")
+        if not blob:
             continue
-        blob = git("show", f":{f}")
-        if blob:
-            problems += scan_text(blob, pat, f)
-            if not _is_test_fixture_code(f):
-                problems += scan_pii(blob, f)
+        hits = _scan_file_text(f, blob, pat)
+        if hits and f.lower().endswith(OFFICE_ZIP_EXT):
+            # Отклонённый бинарный судебный документ снимается с индекса:
+            # заблокированный коммит иначе оставляет .docx в staged, и каждый
+            # следующий коммит наследует ту же блокировку. Снятие с индекса
+            # (файл на диске цел) даёт работать с остальным.
+            subprocess.run(["git", "reset", "-q", "--", f], cwd=ROOT,
+                           capture_output=True)
+        problems += hits
     return problems
 
 
@@ -351,6 +399,42 @@ def check_push_refs(pat: re.Pattern | None, stdin: str | None = None) -> list[st
         refs.extend(x for x in git("tag", "--points-at", "HEAD").splitlines() if x)
     for ref in refs:
         problems += scan_text(ref, pat, "имя ветки/тега")
+    for row in rows:
+        if len(row) < 4:
+            continue
+        local_sha, remote_sha = row[1], row[3]
+        if _ZERO_SHA_RE.match(local_sha):
+            continue
+        problems += check_push_content(pat, local_sha, remote_sha)
+    return problems
+
+
+def _commit_for_object(obj: str) -> str:
+    return git("rev-parse", "--verify", f"{obj}^{{commit}}").strip()
+
+
+def _push_files(local_sha: str, remote_sha: str) -> list[str]:
+    commit = _commit_for_object(local_sha)
+    if not commit:
+        return []
+    if remote_sha and not _ZERO_SHA_RE.match(remote_sha):
+        base = _commit_for_object(remote_sha)
+        if base:
+            return [f for f in git("diff", "--name-only", f"{base}..{commit}").splitlines() if f]
+    return [f for f in git("ls-tree", "-r", "--name-only", commit).splitlines() if f]
+
+
+def check_push_content(pat: re.Pattern | None, local_sha: str, remote_sha: str) -> list[str]:
+    """pre-push держит утечки, попавшие в ветку мимо локальных commit hooks."""
+    commit = _commit_for_object(local_sha)
+    if not commit:
+        return []
+    problems = []
+    for f in _push_files(local_sha, remote_sha):
+        problems += scan_text(f, pat, "путь файла")
+        blob = git_bytes("show", f"{commit}:{f}")
+        if blob:
+            problems += _scan_file_text(f, blob, pat)
     return problems
 
 
@@ -362,7 +446,8 @@ def check_tree(pat: re.Pattern | None) -> list[str]:
             continue
         problems += scan_text(f, pat, "путь файла")
         try:
-            problems += scan_text(open(path, encoding="utf-8", errors="ignore").read(), pat, f)
+            with open(path, "rb") as fh:
+                problems += _scan_file_text(f, fh.read(), pat)
         except OSError:
             continue
     return problems
@@ -523,8 +608,36 @@ def selftest() -> int:
                         f"{body}</w:t></w:r></w:p></w:body></w:document>")
         return buf.getvalue()
 
+    def _odt_bytes(body: str) -> bytes:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("content.xml", f"<office:text><text:p>{body}</text:p></office:text>")
+        return buf.getvalue()
+
     dirty_docx = _office_xml_text(_docx_bytes("По делу familiya-ab прошу"))
     clean_docx = _office_xml_text(_docx_bytes("Ходатайство об истребовании"))
+
+    def _prepush_content_probe() -> int:
+        global ROOT
+        old_root = ROOT
+        try:
+            with tempfile.TemporaryDirectory(prefix="pdguard-push-") as repo:
+                ROOT = repo
+                for cmd in (["init", "-q"],
+                            ["-c", "user.email=t@t", "-c", "user.name=t",
+                             "commit", "--allow-empty", "-qm", "base"]):
+                    subprocess.run(["git", *cmd], cwd=repo, capture_output=True)
+                base = git("rev-parse", "HEAD").strip()
+                with open(os.path.join(repo, "leak.md"), "w", encoding="utf-8") as f:
+                    f.write("familiya\n")
+                subprocess.run(["git", "add", "leak.md"], cwd=repo, capture_output=True)
+                subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                                "commit", "-qm", "leak"], cwd=repo, capture_output=True)
+                head = git("rev-parse", "HEAD").strip()
+                return len(check_push_refs(pat, f"refs/heads/main {head} "
+                                           f"refs/heads/main {base}\n"))
+        finally:
+            ROOT = old_root
 
     checks = [
         # Кириллица: пара «утечка в сообщении коммита + обиход в содержимом».
@@ -550,9 +663,17 @@ def selftest() -> int:
          len(scan_text("fix: развёл familiya-ab и её двойника", pat, "msg")) == 1),
         ("фамилия в пути файла ловится",
          len(scan_text("cases/familiya-ab/delo-2026/x.md", pat, "путь")) == 1),
+        ("фамильная часть имени папки ловится отдельно",
+         len(scan_text("leak: familiya без суффикса", pat, "f")) == 1),
+        ("невидимый разрыв в фамилии не снимает сторож",
+         len(scan_text("fami\u200bliya", pat, "f")) == 1),
+        ("гомоглиф в фамилии не снимает сторож",
+         len(scan_text("familiy\u0430", pat, "f")) == 1),
         ("фамилия в имени ветки ловится pre-push",
          len(check_push_refs(pat, "refs/heads/autoloop/familiya-ab abc "
                              "refs/heads/autoloop/familiya-ab abc\n")) == 2),
+        ("pre-push смотрит содержимое уходящих коммитов",
+         _prepush_content_probe() >= 1),
         ("обычное имя ветки проходит pre-push",
          check_push_refs(pat, "refs/heads/fix-guard abc refs/heads/fix-guard abc\n") == []),
         ("чистый текст проходит", scan_text("обычный комментарий про реестр", pat, "f") == []),
@@ -593,6 +714,10 @@ def selftest() -> int:
          len(scan_text(dirty_docx, pat, "hod.docx")) >= 1),
         ("чистый .docx без имён проходит", scan_text(clean_docx, pat, "hod.docx") == []),
         ("не-zip под видом .docx не роняет сторож", _office_xml_text(b"not a zip") == ""),
+        ("фамилия внутри .odt распакована и поймана",
+         len(_scan_file_text("z.odt", _odt_bytes("familiya"), pat)) >= 1),
+        ("фамилия внутри простого .pdf поймана",
+         len(_scan_file_text("z.pdf", b"%PDF-1.4 (familiya)", pat)) >= 1),
         # reference-transaction: тело/имя тега судится в фазе prepared.
         ("тело аннотированного тега с фамилией ловится",
          len(scan_text("релиз по делу familiya-ab", pat_msg, "тело тега")) >= 1),
