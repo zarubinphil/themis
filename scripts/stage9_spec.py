@@ -6500,6 +6500,127 @@ def check_ustanovka_vypuskaet_dokument():
     return fails
 
 
+def check_opisaniya_ne_lgut():
+    """9.23: подробные описания (docs/HOW-IT-WORKS.*) не обещают несуществующего.
+
+    Круг 9, документный фронт, продолжение check_dokumenty_ne_lgut на два новых
+    файла. README — витрина, а docs/HOW-IT-WORKS.ru.md и .en.md подробно
+    рассказывают, ЧТО система делает, и потому несут тот же риск: описание
+    переживает прибор. Скрипт переименовали, флаг убрали, маркер поменяли — а
+    текст продолжает обещать прежнее, и читатель повторяет команду, которой нет.
+
+    Проверяется ровно то, что можно проверить диском, без оценки стиля:
+
+      · оба файла на месте, и README ведёт на каждый (описание, на которое
+        никто не ссылается, читатель не найдёт);
+      · каждый упомянутый `scripts/*.py`, `bin/*` и относительная ссылка
+        существуют;
+      · каждый флаг, показанный в примере запуска, разбирается ТЕМ скриптом,
+        который в этом примере вызван (флаг берётся со строки вызова, а не из
+        текста вообще, — иначе ложные тревоги на прозе);
+      · каждый маркер конвейера, названный в описании, известен прибору,
+        который его ищет;
+      · заявленное число агентов совпадает с диском;
+      · названные каталоги дела совпадают с контрактом раскладки case_paths.py;
+      · честная оговорка про невыгруженный корпус права никуда не делась:
+        описание обязано называть `update_legal_corpus.py`, иначе читатель
+        решит, что цитаты статей работают из коробки (на машине замера
+        кодексов ноль, и setup_doctor честно говорит «СИСТЕМА НЕ ГОТОВА»).
+    """
+    fails = []
+    docs = ("docs/HOW-IT-WORKS.ru.md", "docs/HOW-IT-WORKS.en.md")
+    readme = _doc("README.md")
+    for rel in docs:
+        if not (ROOT / rel).is_file():
+            fails.append((f"opisanie:{rel}", f"{rel} обещан README и реестром описаний, "
+                          f"а файла нет"))
+            continue
+        if rel.split("/", 1)[1] not in readme:
+            fails.append((f"opisanie:ssylka:{rel}", f"README не ведёт на {rel}: описание, "
+                          f"на которое никто не ссылается, читатель не найдёт"))
+
+    izvestnye_markery = {}
+    for prib in ("scripts/themis_status.py", "scripts/claude_guard.py",
+                 "scripts/verdict.py", "scripts/case_paths.py"):
+        izvestnye_markery[prib] = _doc(prib)
+    svod_priborov = "\n".join(izvestnye_markery.values())
+
+    for rel in docs:
+        t = _doc(rel)
+        if not t:
+            continue
+        # ── упомянутые приборы существуют ──
+        for name in sorted(set(re.findall(r"scripts/([a-z0-9_]+\.py)", t))):
+            if not (SCRIPTS / name).is_file():
+                fails.append((f"opisanie:net-pribora:{name}",
+                              f"{rel} описывает scripts/{name} как существующий, а файла "
+                              f"в репозитории нет: живая ссылка на несуществующий прибор "
+                              f"стоит читателю напрасной команды"))
+        for name in sorted(set(re.findall(r"(?<![\\w/])bin/([a-z0-9-]+)", t))):
+            if not (ROOT / "bin" / name).is_file():
+                fails.append((f"opisanie:net-bin:{name}",
+                              f"{rel} называет bin/{name}, которого в репозитории нет"))
+        # ── относительные ссылки разрешаются ──
+        for link in sorted(set(re.findall(r"\]\(\.\./([^)#]+)\)", t))):
+            if not (ROOT / link).exists():
+                fails.append((f"opisanie:ssylka-bitaya:{link}",
+                              f"{rel} ссылается на ../{link}, которого нет"))
+        for link in sorted(set(re.findall(r"\]\((HOW-IT-WORKS\.[a-z]{2}\.md)\)", t))):
+            if not (ROOT / "docs" / link).is_file():
+                fails.append((f"opisanie:ssylka-bitaya:{link}",
+                              f"{rel} ссылается на docs/{link}, которого нет"))
+        # ── флаг из примера запуска разбирается ИМЕННО тем скриптом ──
+        for stroka in t.splitlines():
+            m = re.search(r"python3 scripts/([a-z0-9_]+\.py)(.*)$", stroka)
+            if not m:
+                continue
+            kod = _doc(f"scripts/{m.group(1)}")
+            if not kod:
+                continue
+            for flag in re.findall(r"(?<![\w-])(--[a-z][a-z0-9-]+)", m.group(2)):
+                if flag not in kod:
+                    fails.append((f"opisanie:flag:{m.group(1)}{flag}",
+                                  f"{rel} показывает запуск scripts/{m.group(1)} с флагом "
+                                  f"{flag}, которого этот скрипт не разбирает: читатель "
+                                  f"повторит команду и получит ошибку"))
+        # ── названный маркер известен прибору ──
+        for marker in sorted(set(re.findall(r"«(## [А-ЯЁ][^»]{3,40})»", t))
+                             | set(re.findall(r"«(ГОТОВ К ПОДАЧЕ)»", t))
+                             | set(re.findall(r"«(КАРТА ГОТОВА)[^»]*»", t))):
+            if marker not in svod_priborov:
+                fails.append((f"opisanie:marker:{marker[:24]}",
+                              f"{rel} называет маркер «{marker}», которого не ищет ни "
+                              f"themis_status, ни claude_guard, ни verdict: описание "
+                              f"разошлось с машиной состояний"))
+        # ── каталоги дела совпадают с контрактом раскладки ──
+        cp = _doc("scripts/case_paths.py")
+        for katalog in ("00_intake", "02_hearings", "GOTOVO", ".agent"):
+            if katalog in t and f'"{katalog}"' not in cp:
+                fails.append((f"opisanie:katalog:{katalog}",
+                              f"{rel} называет каталог {katalog}, которого нет в контракте "
+                              f"раскладки scripts/case_paths.py"))
+        # ── честная оговорка про корпус права на месте ──
+        if "cite.py" in t and "update_legal_corpus.py" not in t:
+            fails.append((f"opisanie:korpus:{rel}",
+                          f"{rel} описывает цитирование через cite.py, но не называет "
+                          f"update_legal_corpus.py: читатель решит, что корпус приезжает "
+                          f"с репозиторием, тогда как kodeksy/ и plenumy/ под .gitignore "
+                          f"и на свежей машине пусты"))
+
+    # ── заявленное число агентов равно диску ──
+    skolko = len(list((ROOT / ".claude" / "agents").glob("*.md")))
+    for rel in docs:
+        t = _doc(rel)
+        if not t:
+            continue
+        for slovo, chislo in (("тринадцать", 13), ("thirteen", 13)):
+            if slovo in t.lower() and skolko != chislo:
+                fails.append((f"opisanie:agenty:{rel}",
+                              f"{rel} заявляет {slovo} агентов, а на диске "
+                              f".claude/agents/ их {skolko}"))
+    return fails
+
+
 # ── Реестр проверок ──────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -6620,6 +6741,7 @@ CHECKS = [
     ("9.23 документы не обещают несуществующего", check_dokumenty_ne_lgut),
     ("9.23 железное правило держит прибор, не текст", check_pravila_derzhatsya_priborom),
     ("9.23 после установки система выпускает документ", check_ustanovka_vypuskaet_dokument),
+    ("9.23 описания не обещают несуществующего", check_opisaniya_ne_lgut),
 ]
 
 
