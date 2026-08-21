@@ -303,6 +303,29 @@ def validate(cfg):
 
 # ── Изоляция ролей ───────────────────────────────────────────────────────────
 
+def _worktree_path(name, root=ROOT):
+    """Путь рабочей копии роли строится от ПЕРЕДАННОГО root, не от модульного
+    STATE_DIR: приёмка и чужая машина гоняют прибор с иным корнем, а путь от
+    STATE_DIR увёл бы рабочие копии в боевое дерево."""
+    return os.path.join(root, ".autoloop", "worktrees", name)
+
+
+def _is_worktree(path):
+    """path — настоящая рабочая копия git (git worktree), а не обычный каталог.
+
+    Обычный каталог под .autoloop/worktrees git отнёс бы к ОСНОВНОМУ репозиторию:
+    `git reset --hard`, запущенный в нём, снёс бы незакоммиченную работу
+    координатора, `checkout -B` увёл бы основное дерево на ветку роли. Факт
+    проверяется git-ом: у настоящей рабочей копии её собственный toplevel равен ей
+    самой, у обычного каталога — это toplevel основного репозитория (выше)."""
+    if not os.path.isdir(path):
+        return False
+    code, top, _ = run(["git", "rev-parse", "--show-toplevel"], cwd=path, timeout=60)
+    if code != 0 or not top.strip():
+        return False
+    return os.path.realpath(top.strip()) == os.path.realpath(path)
+
+
 def worktree_add(name, root=ROOT):
     """Рабочая копия роли НА ВЕТКЕ `autoloop/<имя>` от текущего HEAD основного дерева.
 
@@ -312,19 +335,26 @@ def worktree_add(name, root=ROOT):
     координатор забирает её мержем (`worktree_merge`) — правки не теряются вместе
     с detached HEAD, как было бы без ветки.
     """
-    path = os.path.join(STATE_DIR, "worktrees", name)
+    path = _worktree_path(name, root)
     branch = f"autoloop/{name}"
     code, head, _ = run(["git", "rev-parse", "HEAD"], cwd=root, timeout=60)
     head = head.strip()
-    if os.path.isdir(path):
-        # Итерация N+1 стартует от СВЕЖЕГО HEAD основного дерева, а не от вчерашнего:
-        # иначе роль чинит уже починенное и мерж возит конфликты.
+    if _is_worktree(path):
+        # Настоящая рабочая копия: итерация N+1 стартует от СВЕЖЕГО HEAD основного
+        # дерева, а не от вчерашнего, иначе роль чинит уже починенное. reset/checkout
+        # здесь безопасны — git видит именно эту копию, а не основной репозиторий.
         run(["git", "reset", "--hard", "-q"], cwd=path, timeout=300)
         run(["git", "clean", "-fdq"], cwd=path, timeout=300)
         code, _, err = run(["git", "checkout", "-q", "-B", branch, head], cwd=path, timeout=300)
         if code != 0:
             raise RuntimeError(f"рабочая копия роли `{name}` не обновлена: {err.strip()[:200]}")
         return path
+    # Каталог на месте рабочей копии, но НЕ рабочая копия (обычная папка) — снести,
+    # иначе `git worktree add` откажет «destination exists», а reset/checkout в ней
+    # ударил бы по ОСНОВНОМУ дереву. Настоящую копию сюда не заносит: её ловит ветка
+    # выше. Пустой каталог удаляется тоже — он не рабочая копия.
+    if os.path.isdir(path):
+        shutil.rmtree(path, ignore_errors=True)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     code, _, err = run(["git", "worktree", "add", "-B", branch, path, head],
                        cwd=root, timeout=300)
@@ -342,7 +372,7 @@ def worktree_merge(name, root=ROOT):
     работа роли осталась в worktree и стёрлась бы обновлением копии). ПД-сторож
     коммита при этом не обходится: хук отработает и остановит грязный автокоммит."""
     branch = f"autoloop/{name}"
-    wt = os.path.join(STATE_DIR, "worktrees", name)
+    wt = _worktree_path(name, root)
     note = None
     code, out, _ = run(["git", "status", "--porcelain"], cwd=wt, timeout=60)
     if code == 0 and out.strip():
@@ -372,7 +402,7 @@ def worktree_merge(name, root=ROOT):
 
 
 def worktree_remove(name, root=ROOT):
-    path = os.path.join(STATE_DIR, "worktrees", name)
+    path = _worktree_path(name, root)
     run(["git", "worktree", "remove", "--force", path], cwd=root, timeout=300)
     shutil.rmtree(path, ignore_errors=True)
     run(["git", "branch", "-D", f"autoloop/{name}"], cwd=root, timeout=60)
@@ -493,7 +523,10 @@ def loop(cfg, root=ROOT, dry=False):
     gate_argv = [x.replace("{python}", sys.executable) for x in cfg["gate"]]
     cases_fp = tree_fingerprint(os.path.join(root, "cases"))
     env_fp = env_fingerprint()
-    money_start = spent_money(root) or 0.0
+    # База расхода fail-closed: не `or 0.0`. Молчащий прибор давал бы базу 0, и
+    # первый же успешный замер объявлялся тратой цикла (ложное «бюджет исчерпан»).
+    # None здесь — «база не измерена»; разница считается ниже, и там же fail-closed.
+    money_start = spent_money(root)
     started = time.time()
     runlog, fails, last_fp, stale = [], [], None, 0
     stop = "потолок итераций"
@@ -514,17 +547,29 @@ def loop(cfg, root=ROOT, dry=False):
         t0 = time.time()
         role_names = []
 
+        def ostatok_vremeni():
+            # Таймаут роли — ОСТАТОК общего бюджета времени, а не полный потолок на
+            # каждую: иначе прогон законно переезжает потолок во столько раз, сколько
+            # ролей. Проверка времени стоит ПЕРЕД каждым шагом (ниже).
+            return float(guards["wall_clock_seconds"]) - (time.time() - started)
+
         def podgotovit(role):
             brief = role_brief(cfg, role, it, fails)
             argv = [x.replace("{brief}", brief).replace("{python}", sys.executable)
                     for x in role["argv"]]
             cwd = root
-            if role.get("parallel") and cfg.get("isolation_worktree", True) and not dry:
+            # Изоляция — ИНВАРИАНТ, а не флаг `parallel`: рабочая копия выдаётся
+            # КАЖДОЙ роли, чтобы чужой CLI работал в дереве без материалов дел
+            # (cases/ под .gitignore). `parallel` — только про одновременность.
+            if cfg.get("isolation_worktree", True) and not dry:
                 cwd = worktree_add(role["name"], root)
+                if os.path.realpath(cwd) == os.path.realpath(root):
+                    raise RuntimeError(f"изоляция запрошена, но роль `{role['name']}` "
+                                       f"осталась в корне репозитория")
             return argv, cwd
 
         def ispolnit(role, argv, cwd):
-            code, out, err = run(argv, cwd=cwd, timeout=int(guards["wall_clock_seconds"]))
+            code, out, err = run(argv, cwd=cwd, timeout=max(1, int(ostatok_vremeni())))
             journal({"event": "role", "iteration": it, "role": role["name"],
                      "kind": role["kind"], "code": code, "cwd": cwd,
                      "tail": (out or err)[-800:]}, root)
@@ -532,39 +577,43 @@ def loop(cfg, root=ROOT, dry=False):
 
         volna = [r for r in cfg["roles"] if r.get("parallel")]
         poodinochke = [r for r in cfg["roles"] if not r.get("parallel")]
+        vremya_ischerpano = False
 
         # Волна параллельных ролей идёт ОДНОВРЕМЕННО. Раньше флаг `parallel` только
         # выделял рабочую копию, а исполнение оставалось последовательным: три роли
         # по часу давали три часа вместо часа. Рабочие копии разные, боковой обмен
         # по-прежнему невозможен — распараллеливать безопасно (20.08.2026).
         if volna and not dry:
-            import threading
-            zadaniya = [(r, *podgotovit(r)) for r in volna]
-            itogi = {}
-            potoki = []
-            for role, argv, cwd in zadaniya:
-                t = threading.Thread(target=lambda ro=role, a=argv, c=cwd:
-                                     itogi.__setitem__(ro["name"], ispolnit(ro, a, c)),
-                                     daemon=True)
-                t.start()
-                potoki.append(t)
-                role_names.append(role["name"])
-            for t in potoki:
-                t.join()
-            # Мержи — строго по одному: индекс основного дерева общий, параллельный
-            # мерж оставил бы его в состоянии конфликта.
-            for role, _, cwd in zadaniya:
-                if cwd == root:
-                    continue
-                if itogi.get(role["name"]) == 0:
-                    merged, ahead, note = worktree_merge(role["name"], root)
-                else:
-                    merged, ahead, note = False, -1, None
-                zapis = {"event": "role_merge", "iteration": it, "role": role["name"],
-                         "merged": merged, "commits": ahead}
-                if note:
-                    zapis["note"] = note
-                journal(zapis, root)
+            if ostatok_vremeni() <= 0:
+                vremya_ischerpano = True
+            else:
+                import threading
+                zadaniya = [(r, *podgotovit(r)) for r in volna]
+                itogi = {}
+                potoki = []
+                for role, argv, cwd in zadaniya:
+                    t = threading.Thread(target=lambda ro=role, a=argv, c=cwd:
+                                         itogi.__setitem__(ro["name"], ispolnit(ro, a, c)),
+                                         daemon=True)
+                    t.start()
+                    potoki.append(t)
+                    role_names.append(role["name"])
+                for t in potoki:
+                    t.join()
+                # Мержи — строго по одному: индекс основного дерева общий, параллельный
+                # мерж оставил бы его в состоянии конфликта.
+                for role, _, cwd in zadaniya:
+                    if cwd == root:
+                        continue
+                    if itogi.get(role["name"]) == 0:
+                        merged, ahead, note = worktree_merge(role["name"], root)
+                    else:
+                        merged, ahead, note = False, -1, None
+                    zapis = {"event": "role_merge", "iteration": it, "role": role["name"],
+                             "merged": merged, "commits": ahead}
+                    if note:
+                        zapis["note"] = note
+                    journal(zapis, root)
         elif volna and dry:
             for role in volna:
                 argv, _ = podgotovit(role)
@@ -574,24 +623,34 @@ def loop(cfg, root=ROOT, dry=False):
 
         # Последовательные роли идут ПОСЛЕ волны: рецензент обязан видеть уже
         # смерженную работу авторов, иначе он рецензирует вчерашнее дерево.
-        for role in poodinochke:
-            argv, cwd = podgotovit(role)
-            if dry:
-                journal({"event": "role_dry", "iteration": it, "role": role["name"],
-                         "argv": argv[:3]}, root)
-            else:
-                code = ispolnit(role, argv, cwd)
-                if cwd != root:
-                    if code == 0:
-                        merged, ahead, note = worktree_merge(role["name"], root)
-                    else:
-                        merged, ahead, note = False, -1, None
-                    zapis = {"event": "role_merge", "iteration": it, "role": role["name"],
-                             "merged": merged, "commits": ahead}
-                    if note:
-                        zapis["note"] = note
-                    journal(zapis, root)
-            role_names.append(role["name"])
+        if not vremya_ischerpano:
+            for role in poodinochke:
+                if not dry and ostatok_vremeni() <= 0:
+                    vremya_ischerpano = True     # проверка времени — ПЕРЕД шагом
+                    break
+                argv, cwd = podgotovit(role)
+                if dry:
+                    journal({"event": "role_dry", "iteration": it, "role": role["name"],
+                             "argv": argv[:3]}, root)
+                else:
+                    code = ispolnit(role, argv, cwd)
+                    if cwd != root:
+                        if code == 0:
+                            merged, ahead, note = worktree_merge(role["name"], root)
+                        else:
+                            merged, ahead, note = False, -1, None
+                        zapis = {"event": "role_merge", "iteration": it, "role": role["name"],
+                                 "merged": merged, "commits": ahead}
+                        if note:
+                            zapis["note"] = note
+                        journal(zapis, root)
+                role_names.append(role["name"])
+
+        # Потолок времени — потолок ПРОГОНА: исчерпан до начала роли — стоп, гейт не
+        # гоняем (иначе бюджет всё равно переехали бы на роль и/или гейт).
+        if vremya_ischerpano:
+            stop = f"потолок времени: {guards['wall_clock_seconds']} с"
+            break
 
         code, out, _ = run(gate_argv, cwd=root, timeout=3600)
         try:
@@ -639,6 +698,15 @@ def loop(cfg, root=ROOT, dry=False):
                     "бюджет не сторожится. Неразобранный расход есть стоп: разобрать "
                     "расход руками и перезапустить")
             break
+        if money_start is None:
+            # База не измерилась на старте, а замер сейчас удался — разницу считать
+            # НЕ ОТ ЧЕГО. Первый успешный замер не есть трата цикла: fail-closed так
+            # же, как неизмеримый замер выше. Иначе цифру всего расхода объявили бы
+            # тратой одной итерации и остановили прогон ложным «бюджет исчерпан».
+            stop = ("БАЗА РАСХОДА НЕ ИЗМЕРЕНА НА СТАРТЕ: прибор token_ledger тогда "
+                    "молчал, а теперь ответил — разницу считать не от чего, первый "
+                    "успешный замер тратой цикла не считается. Разобрать расход руками")
+            break
         if (spent - money_start) > float(guards["max_money"]):
             stop = (f"бюджет исчерпан: потрачено ${spent - money_start:.2f} при потолке "
                     f"${float(guards['max_money']):.2f}")
@@ -653,8 +721,10 @@ def loop(cfg, root=ROOT, dry=False):
                     f"(отпечаток `{fp}`) — код меняется, работа стоит")
             break
 
+    # Рабочая копия выдаётся КАЖДОЙ роли (изоляция — инвариант), значит и снимается
+    # у каждой, а не только у параллельных.
     for role in cfg["roles"]:
-        if role.get("parallel") and not dry:
+        if cfg.get("isolation_worktree", True) and not dry:
             worktree_remove(role["name"], root)
     journal({"event": "stop", "reason": stop, "iterations": len(runlog)}, root)
     report = write_report(cfg, runlog, stop, root)
