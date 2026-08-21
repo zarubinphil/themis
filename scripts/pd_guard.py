@@ -61,12 +61,23 @@ _CYR_TO_LAT_CONFUSABLES = str.maketrans({
     "Р": "P", "С": "C", "Т": "T", "У": "Y", "Х": "X",
     "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x",
 })
+_LAT_TO_CYR_CONFUSABLES = str.maketrans({
+    "A": "А", "B": "В", "E": "Е", "K": "К", "M": "М", "H": "Н", "O": "О",
+    "P": "Р", "C": "С", "T": "Т", "Y": "У", "X": "Х",
+    "a": "а", "e": "е", "o": "о", "p": "р", "c": "с", "y": "у", "x": "х",
+})
 
 
 def normalize_public_scan(text: str) -> str:
     """Для публичных каналов: NFKC, без невидимых знаков, mixed-script homograph."""
     text = unicodedata.normalize("NFKC", text)
     text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+    lat = "".join(re.escape(chr(ch)) for ch in _LAT_TO_CYR_CONFUSABLES)
+    text = re.sub(
+        rf"(?<=[А-Яа-яЁё])[{lat}]+|[{lat}]+(?=[А-Яа-яЁё])",
+        lambda m: m.group(0).translate(_LAT_TO_CYR_CONFUSABLES),
+        text,
+    )
     cyr = "".join(re.escape(chr(ch)) for ch in _CYR_TO_LAT_CONFUSABLES)
     text = re.sub(
         rf"(?<=[A-Za-z])[{cyr}]+|[{cyr}]+(?=[A-Za-z])",
@@ -274,40 +285,75 @@ def scan_pii(text: str, where: str) -> list[str]:
 
 
 def git(*args: str) -> str:
-    r = subprocess.run(["git", *args], capture_output=True, cwd=ROOT)
+    r = subprocess.run(["git", "-c", "core.quotepath=false", *args],
+                       capture_output=True, cwd=ROOT)
     return r.stdout.decode("utf-8", "replace") if r.returncode == 0 else ""
 
 
 def git_bytes(*args: str) -> bytes:
     """Сырой блоб без декодирования: .docx это zip, декодировать его в utf-8
     значит потерять содержимое до проверки."""
-    r = subprocess.run(["git", *args], capture_output=True, cwd=ROOT)
+    r = subprocess.run(["git", "-c", "core.quotepath=false", *args],
+                       capture_output=True, cwd=ROOT)
     return r.stdout if r.returncode == 0 else b""
+
+
+def git_z(*args: str) -> list[str]:
+    r = subprocess.run(["git", "-c", "core.quotepath=false", *args],
+                       capture_output=True, cwd=ROOT)
+    if r.returncode != 0:
+        return []
+    return [p.decode("utf-8", "replace") for p in r.stdout.split(b"\0") if p]
+
+
+def git_blob(spec: str) -> bytes | None:
+    r = subprocess.run(["git", "-c", "core.quotepath=false", "cat-file", "blob", spec],
+                       capture_output=True, cwd=ROOT)
+    return r.stdout if r.returncode == 0 else None
 
 
 # Office/ODT-форматы — это zip с XML внутри, а не двоичная непрозрачность. Судебные
 # документы именно .docx: фамилия доверителя лежит в word/document.xml, и без
 # распаковки сторож объявляет такой коммит чистым (ложная уверенность хуже молчания).
 OFFICE_ZIP_EXT = (".docx", ".xlsx", ".pptx", ".odt")
+_ZIP_TEXT_EXT = (
+    ".xml", ".rels", ".txt", ".md", ".html", ".htm", ".xhtml", ".csv", ".json",
+    ".opf", ".ncx",
+)
 
 
-def _office_xml_text(blob: bytes) -> str:
-    """Видимый текст из office-zip: снимаем zip и XML-разметку, чтобы фамилия
-    внутри стала обычной строкой для scan_text/scan_pii. Не zip — пусто."""
+def _office_xml_text(blob: bytes, depth: int = 0) -> str:
+    """Видимый текст из zip-контейнера: решаем по содержимому, не по расширению."""
+    if depth > 2 or len(blob) > 20 * 1024 * 1024:
+        return ""
     try:
         zf = zipfile.ZipFile(io.BytesIO(blob))
     except (zipfile.BadZipFile, OSError):
         return ""
     parts = []
     for name in zf.namelist():
-        if not name.endswith(".xml"):
+        low = name.lower()
+        if name.endswith("/") or "__macosx/" in low:
             continue
         try:
-            raw = zf.read(name).decode("utf-8", "replace")
+            info = zf.getinfo(name)
+            if info.file_size > 5 * 1024 * 1024:
+                continue
+            data = zf.read(name)
         except (OSError, KeyError, RuntimeError):
             continue
+        if data.startswith(b"PK\x03\x04"):
+            nested = _office_xml_text(data, depth + 1)
+            if nested:
+                parts.append(nested)
+            continue
+        if not low.endswith(_ZIP_TEXT_EXT) and b"\0" in data[:512]:
+            continue
+        raw = data.decode("utf-8", "replace")
         raw = re.sub(r"</(?:\w+:)?p>", "\n", raw)
         raw = re.sub(r"</(?:\w+:)?tc>", "\t", raw)
+        raw = re.sub(r"</(?:p|div|br|li|tr|td|h[1-6])\b[^>]*>", "\n", raw,
+                     flags=re.I)
         parts.append(html.unescape(re.sub(r"<[^>]+>", "", raw)))
     return "\n".join(parts)
 
@@ -324,9 +370,10 @@ def _pdf_text(blob: bytes) -> str:
 
 
 def _visible_blob_text(path: str, blob: bytes) -> str:
+    zipped = _office_xml_text(blob)
+    if zipped:
+        return zipped
     low = path.lower()
-    if low.endswith(OFFICE_ZIP_EXT):
-        return _office_xml_text(blob)
     if low.endswith(".pdf"):
         return _pdf_text(blob)
     return blob.decode("utf-8", "replace")
@@ -343,7 +390,7 @@ def _scan_file_text(path: str, blob: bytes, pat: re.Pattern | None) -> list[str]
 
 
 def staged_files() -> list[str]:
-    return [f for f in git("diff", "--cached", "--name-only", "--diff-filter=ACMRT").split("\n") if f]
+    return git_z("diff", "--cached", "--name-only", "-z", "--diff-filter=ACMRT")
 
 
 def _is_test_fixture_code(path: str) -> bool:
@@ -361,17 +408,12 @@ def check_staged(pat: re.Pattern | None) -> list[str]:
     problems = []
     for f in staged_files():
         problems += scan_text(f, pat, "путь файла")
-        blob = git_bytes("show", f":{f}")
-        if not blob:
+        blob = git_blob(f":{f}")
+        if blob is None:
+            problems.append(f"{f}:0 — файл есть в индексе, но blob не прочитан. "
+                            "Fail-closed: проверка не может считать его чистым")
             continue
         hits = _scan_file_text(f, blob, pat)
-        if hits and f.lower().endswith(OFFICE_ZIP_EXT):
-            # Отклонённый бинарный судебный документ снимается с индекса:
-            # заблокированный коммит иначе оставляет .docx в staged, и каждый
-            # следующий коммит наследует ту же блокировку. Снятие с индекса
-            # (файл на диске цел) даёт работать с остальным.
-            subprocess.run(["git", "reset", "-q", "--", f], cwd=ROOT,
-                           capture_output=True)
         problems += hits
     return problems
 
@@ -439,8 +481,8 @@ def _push_files(local_sha: str, remote_sha: str) -> list[str]:
     if remote_sha and not _ZERO_SHA_RE.match(remote_sha):
         base = _commit_for_object(remote_sha)
         if base:
-            return [f for f in git("diff", "--name-only", f"{base}..{commit}").splitlines() if f]
-    return [f for f in git("ls-tree", "-r", "--name-only", commit).splitlines() if f]
+            return git_z("diff", "--name-only", "-z", f"{base}..{commit}")
+    return git_z("ls-tree", "-r", "-z", "--name-only", commit)
 
 
 def check_push_content(pat: re.Pattern | None, local_sha: str, remote_sha: str) -> list[str]:
@@ -449,20 +491,22 @@ def check_push_content(pat: re.Pattern | None, local_sha: str, remote_sha: str) 
     if not commit:
         return []
     problems = []
+    meta_pat = name_pattern(client_names(), cyrillic=True) or pat
+    problems += scan_text(git("cat-file", "-p", commit), meta_pat, "метаданные коммита")
     for f in _push_files(local_sha, remote_sha):
         problems += scan_text(f, pat, "путь файла")
-        blob = git_bytes("show", f"{commit}:{f}")
-        if blob:
+        blob = git_blob(f"{commit}:{f}")
+        if blob is None:
+            problems.append(f"{f}:0 — blob уходящего коммита не прочитан. "
+                            "Fail-closed: pre-push не считает его чистым")
+        else:
             problems += _scan_file_text(f, blob, pat)
     return problems
 
 
 def check_tree(pat: re.Pattern | None) -> list[str]:
     problems = []
-    for f in [x for x in git("ls-files").split("\n") if x]:
-        if f == "knowledge/lessons-log.md":
-            # Исторический журнал уроков уже в дереве; новые правки держат staged/push.
-            continue
+    for f in git_z("ls-files", "-z"):
         path = os.path.join(ROOT, f)
         if not os.path.isfile(path):
             continue
