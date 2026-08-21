@@ -185,6 +185,26 @@ def http_response_bad(code: str, ctype: str) -> str:
     return ""
 
 
+# Хосты, чьи адреса скрипт СТРОИТ САМ из собственного реестра кодексов, а не
+# берёт из материалов дела. Данных доверителя в таком URL быть не может по
+# построению, поэтому PII-сторож к ним не применяется.
+#
+# Прецедент 21.08.2026: адрес статьи на consultant.ru имеет вид
+# .../cons_doc_LAW_34481/<40 hex>/, и сторож читал «34481/0149…» как НОМЕР ДЕЛА.
+# Ложное срабатывание било по каждой статье подряд: УПК РФ не скачался целиком
+# («94 статей не скачалось, файл не обновлен»), а вместе с ним встало
+# восстановление всего корпуса — то есть защита персональных данных отключала
+# дословное цитирование закона. Сторож остаётся на месте для любого чужого
+# адреса; снимается ровно там, где адрес наш собственный.
+OWN_SOURCE_HOSTS = ("consultant.ru", "vsrf.ru", "pravo.gov.ru", "publication.pravo.gov.ru")
+
+
+def _own_source(url: str) -> bool:
+    from urllib.parse import urlparse
+    host = (urlparse(url).hostname or "").lower()
+    return any(host == h or host.endswith("." + h) for h in OWN_SOURCE_HOSTS)
+
+
 def http_get(url: str, cache_key: str) -> bytes | None:
     """Страница источника. None — не получили; причина уходит в FAILURES.
 
@@ -196,7 +216,7 @@ def http_get(url: str, cache_key: str) -> bytes | None:
     report_failures() возвращал 0, а legal-corpus-monthly.sh писал в лог
     «обновлено 0, ошибок 0» и завершался нулём.
     """
-    if pii_gate.residual_matches(url):
+    if not _own_source(url) and pii_gate.residual_matches(url):
         FAILURES.append(f"{url}: URL похож на персональные данные — наружу не отправлен")
         return None
     cache_path = os.path.join(CACHE_DIR, cache_key)

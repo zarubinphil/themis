@@ -84,19 +84,49 @@ def check_mcp_key(server: str) -> tuple[bool, str]:
     return False, "зарегистрирован, но env пуст — ключа нет"
 
 
+def probe_sudact(timeout: int = 12) -> bool:
+    """Отвечает ли поиск практики на РЕАЛЬНЫЙ запрос. Проба идёт по тому же
+    маршруту, каким ходит practice_search.py: корень сайта может отвечать 200,
+    когда сам поиск лежит с HTTP 500 — так и было 21.08.2026."""
+    url = ("https://sudact.ru/regular/doc_ajax/?regular-txt=%D0%B4%D0%BE%D0%BF%D1%80%D0%BE%D1%81"
+           "&regular-case_doc=&regular-lawchunkinfo=&regular-date_from=&regular-date_to="
+           "&regular-workflow_stage=&regular-area=&regular-court=&regular-judge=")
+    try:
+        r = subprocess.run(
+            ["curl", "-sL", "--max-time", str(timeout), "-A", UA, "-o", "/dev/null",
+             "-w", "%{http_code}", url],
+            capture_output=True, text=True, timeout=timeout + 4)
+        return r.stdout.strip().startswith("2")
+    except Exception:
+        return False
+
+
 def check_sgai() -> tuple[bool, str]:
     exe = subprocess.run(["which", "sgai"], capture_output=True, text=True)
     if not exe.stdout.strip():
         return False, "CLI не установлен"
+    # Баланс спрашиваем у `credits`, а не у `validate`. Прецедент 21.08.2026:
+    # `validate` проверяет здоровье КЛЮЧА и при нулевом остатке отвечает успехом —
+    # preflight печатал «OK», а два охотника подряд получали «Insufficient credits»
+    # на живой охоте. Отчёт, расходящийся с фактом, хуже отсутствия отчёта:
+    # по нему планируют работу.
     try:
-        r = subprocess.run(["sgai", "validate", "--json"], capture_output=True,
+        r = subprocess.run(["sgai", "credits", "--json"], capture_output=True,
                            text=True, timeout=25)
         blob = (r.stdout or "") + (r.stderr or "")
-        if re.search(r'"?remaining"?\s*[:=]\s*0\b|no credits|insufficient', blob, re.I):
+        m = re.search(r'"remaining"\s*:\s*(\d+)', blob)
+        if m:
+            left = int(m.group(1))
+            plan = re.search(r'"plan"\s*:\s*"([^"]+)"', blob)
+            suffix = f" ({plan.group(1)})" if plan else ""
+            if left == 0:
+                return False, f"кредиты исчерпаны{suffix}"
+            return True, f"кредитов: {left}{suffix}"
+        if re.search(r"no credits|insufficient", blob, re.I):
             return False, "баланс исчерпан"
         if r.returncode == 0:
-            return True, "доступен"
-        return False, f"validate вернул код {r.returncode}"
+            return True, "доступен, остаток не прочитан"
+        return False, f"credits вернул код {r.returncode}"
     except subprocess.TimeoutExpired:
         return False, "таймаут проверки"
     except Exception as e:
@@ -131,10 +161,21 @@ def main() -> int:
     # THEMIS_SUDACT_SEARCH). Preflight его читает, а не дублирует условие:
     # своя копия условия врала «закрыт» при работающем поиске.
     sudact_on = _sudact_allowed()
-    rows.append(("Поиск практики sudact.ru", sudact_on,
-                 "включен владельцем" if sudact_on else "выключен явно (THEMIS_SUDACT_SEARCH=0)",
-                 "practice_search.py ищет"
-                 if sudact_on else "искать в knowledge/practice_index.md; акт по URL — --doc"))
+    if not sudact_on:
+        rows.append(("Поиск практики sudact.ru", False,
+                     "выключен явно (THEMIS_SUDACT_SEARCH=0)",
+                     "искать в knowledge/practice_index.md; акт по URL — --doc"))
+    else:
+        # Флаг владельца говорит «искать РАЗРЕШЕНО», но не «источник ЖИВ».
+        # 21.08.2026 источник весь день отдавал HTTP 500, а preflight печатал «OK»,
+        # и охотники записали пустой результат как отсутствие практики. Разрешение
+        # и живость — разные вопросы, спрашиваем оба.
+        alive = probe_sudact()
+        rows.append(("Поиск практики sudact.ru", alive,
+                     "включен владельцем, источник отвечает" if alive
+                     else "включен владельцем, но источник НЕ отвечает",
+                     "practice_search.py ищет" if alive
+                     else "пустой результат НЕ считать отсутствием практики — повторить позже"))
     rows.append(("WebSearch (квота сессии)", None, "программно не проверяется",
                  "лимит 200 запросов на сессию — спросить у охотника в первом отчете"))
 
