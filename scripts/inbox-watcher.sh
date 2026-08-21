@@ -2,14 +2,20 @@
 # inbox-watcher.sh — обрабатывает новые файлы в ~/Desktop/inbox/
 #
 # Запускается автоматически через launchd (WatchPaths) при появлении файлов.
-# Для ручного запуска: ~/Проекты/themis/scripts/inbox-watcher.sh
+# Для ручного запуска: $ROOT/scripts/inbox-watcher.sh
+
+
+# Корень репозитория берём от расположения самого скрипта, а не жёсткой
+# строкой: у другого юриста Фемида лежит не в $ROOT, и фоновые
+# задания молча ломались бы на несуществующем пути (аудит 21.08.2026).
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 INBOX="$HOME/Desktop/inbox"
 UNSORTED="$INBOX/unsorted"
-CASES="$HOME/Проекты/themis/cases"
-LOG="$HOME/Проекты/themis/audit.log"
+CASES="$ROOT/cases"
+LOG="$ROOT/audit.log"
 CLAUDE="$HOME/.local/bin/claude"
-LOCK="$HOME/Проекты/themis/scripts/.inbox.lock"
+LOCK="$ROOT/scripts/.inbox.lock"
 
 mkdir -p "$INBOX" "$UNSORTED"
 

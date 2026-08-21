@@ -1,211 +1,153 @@
 <div align="center">
 
-<img src="cockpit/static/logo.png" alt="Зарубин и партнёры" width="200"/>
+<img src="cockpit/static/logo.png" alt="Фемида" width="200"/>
 
-# Themis · Фемида
+# Фемида · Themis
 
-**Multi-agent AI system for Russian litigation, built on Claude Code.**
-**Мультиагентная ИИ-система ведения российских судебных дел на Claude Code.**
+**Я веду судебные дела вместе с юристом. Не вместо него.**
+**I work cases alongside a lawyer. Not instead of one.**
 
-13 lawyer-agents · practice hunters · a 5-jurist council · local-first OCR ($0) ·
-self-learning · an Apple-grade cockpit where the lawyers argue a case live.
-
-13 агентов-юристов · охотники за практикой · Ареопаг из 5 правоведов ·
-локальное извлечение ($0) · самообучение · cockpit, где юристы спорят о деле вживую.
-
-**[English](#english) · [Русский](#русский)**
+**[Русский](#русский) · [English](#english)**
 
 </div>
 
-![Cockpit — new case](docs/screenshots/cockpit-main.png)
-
----
-
-<a name="english"></a>
-## English
-
-### What it is
-
-Themis runs litigation like a living law firm of AI agents led by a single
-assistant — **Femida, the goddess of justice**. She maps the case, reads and
-cross-checks the materials, hunts and verifies case law (both for and against the
-position), forms a legal position through a council, drafts court-ready documents,
-and prepares the lawyer for the hearing. The point isn't text speed — it's
-**built-in multi-level verification**: no fact, position, or document passes on
-without confirmation from independent agents and a consensus marker.
-
-### How decisions are made — the lawyers argue
-
-The practice hunters genuinely disagree. The classic builds the position, the
-skeptic attacks it, the tactician adds procedure — then Femida weighs all three.
-You see it happen live:
-
-![The lawyers argue](docs/screenshots/cockpit-debate.png)
-
-### The document lands in the chat, ready to open
-
-When the work is done, the draft appears as a card you can open in Word — and feed
-back for self-learning after you edit it.
-
-![Document in chat](docs/screenshots/cockpit-document.png)
-
-### Highlights
-
-- **13 lawyer-agents** — registry, cartographer, readers, reconciler, three
-  practice hunters, a 5-jurist council (Areopagus), drafter, reviewer, hearing prep.
-- **Local-first extraction ($0)** — Apple Vision OCR (accurate Russian, on-device),
-  markitdown (text), whisper (audio/video). Mixed PDFs extracted in full.
-  Auto-requisites (INN / case № / sums) to a sidecar. **No Ollama, no cloud on the
-  main path.**
-- **Self-learning** — you edit the finished `.docx`; Femida compares before/after
-  (content *and* formatting) and stops repeating the same mistakes.
-- **Cockpit** — a local UI (FastAPI) where agents switch live, the chat flows
-  sequentially, and Femida speaks in the goddess's feminine voice.
-- **Knowledge graph** — `/graphify` (исполнитель вне репозитория — решение в knowledge/OWNER-TODO.md)
-  surfaces cross-case links (shared opponent, same object, reusable arguments)
-  so the growing base saves tokens.
-- **Telegram bot — a remote, not a shop window.** Anything sent to Telegram is
-  disclosed to Telegram, so the bot only ever says dates, counts and "done": no
-  names, case numbers or amounts (an outgoing guard enforces it). Documents are
-  fetched by a link into your private network, authorised by the panel. Voice
-  notes are transcribed on your machine. Your own bot, your own token
-  (`knowledge/bot-protocol.md`); empty config = no bot, and the system runs fine.
-- **Self-update** — `/themis-update` pulls the latest logic from GitHub **without
-  touching your cases or knowledge base**.
-- **Privacy** — client data (`cases/`) stays local and never ships.
-
-**[How it actually works](docs/HOW-IT-WORKS.en.md)** — the long version: what runs
-when you hand it a case, what reads the scans, where the system checks itself, what
-it refuses to do, and what still needs your hands. Every claim in it was checked by
-running it.
-
-### The 13 agents
-
-| Persona (RU) | Role (EN) | Step |
-|---|---|---|
-| Грузенберг / Gruzenberg | Registry — inbox intake | 1 |
-| Мейер / Meyer | Case mapping | 1 |
-| Гольмстен · Буринский · Покровский / Holmsten · Burinsky · Pokrovsky | Readers (scan / image / text) | 1 |
-| Шершеневич / Shershenevich | Reconciler — verify readers | 1 |
-| Спасович / Spasovich | Practice hunter — classic | 2 |
-| Плевако / Plevako | Practice hunter — tactical | 2 |
-| Карабчевский / Karabchevsky | Practice hunter — skeptic | 2 |
-| Ареопаг / Areopagus (5 jurists) | Council — legal position | 3 |
-| Сперанский / Speransky | Drafter | 4 |
-| Кони / Koni | Reviewer | 5 |
-| Андреевский / Andreevsky | Hearing prep | — |
-| Рождественский / Rozhdestvensky | Archivist — knowledge base | — |
-
-### Install
-
-Requirements: **macOS** (Apple Vision OCR), Python 3.11+, Xcode CLT
-(`xcode-select --install`), [Claude Code](https://claude.com/claude-code).
-
-```bash
-git clone https://github.com/zarubinphil/themis.git
-cd themis
-bash install.sh
-```
-
-`install.sh` installs Python deps, builds Apple Vision OCR from source, installs
-whisper + ffmpeg, prepares directories and checks for the Claude Code CLI.
-
-### Use
-
-In Claude Code: open the project and say *"New case: Ivanov, split the flat after
-divorce, draft a claim."* Femida runs steps 0→5 and produces the document.
-
-Cockpit (UI): `python3 cockpit/app.py` → http://localhost:8800
-
-Update: `/themis-update` — pulls the latest logic, leaves your data untouched.
-
-### Privacy
-
-`cases/` (client materials) is git-ignored and **never published**. Extraction is
-local ($0); documents stay on your Mac. The repo ships only a synthetic example
-(`cases/ivanov-ivan`).
-
-### License
-
-MIT — see [LICENSE](LICENSE). Built on [Claude Code](https://claude.com/claude-code).
+![Фемида здоровается и спрашивает разрешение на установку](docs/screenshots/onboarding.png)
 
 ---
 
 <a name="русский"></a>
 ## Русский
 
-### Что это
+### Кто я
 
-Themis ведёт судебные дела как живая юрфирма из ИИ-агентов под управлением единого
-ассистента — **Фемиды, богини правосудия**. Она картирует дело, читает и сверяет
-материалы, ищет и проверяет судебную практику (за позицию и против), вырабатывает
-правовую позицию через совет, составляет процессуальные документы готовыми к подаче
-и готовит юриста к заседанию. Главное — не скорость текста, а **встроенная
-многоуровневая верификация**: ни факт, ни позиция, ни документ не идут дальше без
-подтверждения независимыми агентами и маркера консенсуса.
+Привет. Я Фемида.
 
-### Как принимаются решения — юристы спорят
+Меня собрал Филипп Зарубин, практикующий юрист, по довольно скучной причине:
+слишком много времени хорошего юриста уходит не на право и не на размышления, а
+на механику вокруг них. Прочитать двести страниц сканов. Перенести факты из
+одного файла в другой. Найти практику. Сверить даты. Проверить ссылки. И снова
+перечитать материалы в поисках одной детали, которая точно там была.
 
-Охотники за практикой по-настоящему не соглашаются. Классик строит позицию, скептик
-её ломает, тактик добавляет процессуальное — затем Фемида сводит три голоса. Это
-видно вживую (скриншот выше: спор Спасович ↔ Карабчевский ↔ Плевако).
+Эту работу я забираю себе.
 
-### Документ появляется в чате — открывай сразу
+Внутри меня не один искусственный интеллект. Когда ты даёшь мне серьёзное дело,
+я собираю под него команду: один читает материалы, другой ищет практику, третий
+разбирает позицию оппонента, четвёртому я специально поручаю спорить с тобой и
+ломать твою позицию раньше, чем это сделает другая сторона. Они работают
+параллельно, передают друг другу выводы и спорят между собой. Я называю их
+агентами.
 
-Когда работа сделана, черновик приходит карточкой: открыть в Word и, после твоих
-правок, отдать на самообучение (скриншот выше).
+Но есть место, которое я не отдам ни одному агенту. Твоё.
 
-### Ключевое
+**Я могу взять на себя работу. Думать и принимать решения по-прежнему тебе.**
+Я не была на встрече с доверителем, не сидела рядом в заседании, не слышала
+интонаций. У тебя есть понимание живой ситуации, которого у меня нет. У меня
+есть скорость, память и терпение. Поэтому лучше всего мы работаем вместе.
 
-- **13 агентов-юристов** — канцелярия, картограф, читатели, сверка, три охотника за
-  практикой, Ареопаг (совет 5 правоведов), составитель, ревизор, подготовка к суду.
-- **Local-first извлечение ($0)** — Apple Vision OCR (русский точно, локально),
-  markitdown (текст), whisper (аудио/видео). Смешанный PDF извлекается полностью.
-  Авто-реквизиты (ИНН / № дела / суммы) в сайдкар. **Никакого Ollama, никакого
-  облака на основном проходе.**
-- **Самообучение** — правишь готовый `.docx`, Фемида сравнивает «до/после»
-  (содержание И форматирование) и больше не повторяет огрехи.
-- **Cockpit** — локальный UI (FastAPI), где агенты переключаются вживую, чат идёт
-  последовательно, Фемида говорит женским голосом богини.
-- **Граф знаний** — `/graphify` (исполнитель вне репозитория — решение в knowledge/OWNER-TODO.md)
-  вскрывает межкейсовые связи (общий оппонент, один объект, переиспользуемые
-  аргументы) — экономия токенов на росте базы.
-- **Бот в Telegram — пульт, а не витрина.** Всё, что ушло в Telegram, разглашено
-  Telegram, поэтому бот называет только даты, счёт и «готово»: ни имён, ни номеров
-  дел, ни сумм — держит сторож на выходе. Документ забирается ссылкой внутрь твоей
-  приватной сети, узнаёт тебя панель. Голосовые расшифровываются на твоей машине.
-  Бот свой, токен свой (`knowledge/bot-protocol.md`); пустой конфиг — бота нет,
-  система работает.
-- **Самообновление** — `/themis-update` тянет последнюю логику с GitHub, **не трогая
-  твои дела и базу знаний**.
-- **Приватность** — данные клиентов (`cases/`) всегда локально, в публику не уходят.
+### Как проходит установка — ты не потеряешься
 
-**[Как это работает на самом деле](docs/HOW-IT-WORKS.ru.md)** — подробный разбор:
-что происходит, когда вы приносите дело, чем читаются материалы, где система
-проверяет сама себя, чего она не делает и где нужны вы. Каждое утверждение там
-проверено запуском.
+Это первое, о чём стоит сказать, потому что установка обычно и есть то место,
+где человек бросает незнакомую программу.
 
-### 13 агентов
+Я веду тебя за руку и объясняю каждый свой шаг: что я сейчас сделаю, зачем это
+нужно и что будет, если не делать. Технических слов без перевода не говорю.
+Компьютер называю компьютером, а не машиной.
 
-| Персонаж | Роль | Шаг |
+**Сначала я представляюсь** и рассказываю, как устроена, — это тот текст, что на
+картинке выше.
+
+**Потом задаю девять вопросов о твоей практике.** По одному, не списком. К
+каждому объясняю, зачем спрашиваю и как на него ответить. Например:
+
+> **Какие дела ты ведёшь чаще всего?**
+>
+> Спрашиваю, чтобы понять, какие законы скачать первыми. Кодексов много, каждый
+> весит прилично, и качаются они не мгновенно. Я начну с тех, что нужны тебе
+> завтра, а остальные доберу фоном.
+>
+> Ответь своими словами: «семейные споры и разделы имущества», «арбитраж, подряд
+> и поставка», «уголовные дела».
+
+Так — все девять. Про регион, про суды, про то, куда ты складываешь входящие,
+про электронную подпись, про напоминания в Telegram. Ни одного вопроса без
+объяснения, зачем он мне.
+
+**Ничего не ставлю без твоего разрешения.** Сначала смотрю, чего не хватает на
+твоём компьютере, потом называю: вот это, весит столько, нужно мне для того-то,
+без него не заработает вот эта часть. И жду прямого «ставь». Скажешь «не надо» —
+не ставлю и запоминаю, что этой возможности не будет. Молчание тоже считается
+отказом.
+
+**Честно говорю, что на твоей системе не работает.** Распознавание сканов
+сделано на технологии Apple: на Mac оно бесплатное и локальное, а на Windows и
+Linux его просто нет. Я скажу это на установке, а не в тот четверг, когда ты
+принесёшь мне сканы и получишь пустую карту дела.
+
+**Законы скачиваю на твой диск: сначала твоё, потом всё.** Первыми — кодексы под
+твою практику, чтобы ты мог работать уже сегодня. Потом фоном дотягиваю
+остальные: налоговый, трудовой, жилищный, арбитражный процессуальный,
+банкротство и прочие. Не потому, что они нужны прямо сейчас, а чтобы ты никогда
+больше не столкнулся с «этой статьи у меня нет». Дальше держу их свежими сама:
+раз в месяц сверяю редакции и обновляю изменившееся.
+
+**В конце проверяю себя на твоём настоящем документе,** а не на выдуманном
+примере. Пустой результат означает незаконченную установку, а не «не справилась».
+
+### Что я умею
+
+**Читаю материалы у тебя на компьютере и бесплатно.** Сканы распознаю
+средствами твоего Mac, примерно полторы секунды на страницу. Из обычных PDF,
+Word и Excel беру текст напрямую, без распознавания. Смешанный документ, где
+половина текст, а половина вклеенный скан, разбираю целиком. Прочитанное
+запоминаю: второй раз тот же файл читается мгновенно и уже ничего не стоит.
+
+**Сама вынимаю реквизиты** — ИНН, ОГРН, номера дел, суммы, паспорта — и проверяю
+их контрольной суммой, не выходя в интернет. Подменённая при распознавании
+цифра почти никогда не даёт верную контрольную сумму.
+
+**Считаю то, что должна считать программа, а не модель.** Проценты по статье 395
+ГК с таблицей ключевой ставки и разбивкой по периодам. Процессуальные сроки с
+производственным календарём и ссылкой на норму. Госпошлину. Сумму прописью.
+
+**Цитирую законы дословно с диска.** Не пересказываю по памяти и не тяну из
+интернета: однажды пересказ исказил текст статьи 683 ГК, и с тех пор нормы
+берутся только из корпуса на твоём компьютере.
+
+**Проверяю себя сама, и это самое непривычное.** Между моим ответом и тобой
+стоит несколько сторожей, и каждый из них код, а не обещание. Приёмка из 118
+проверок. Сторож, который не даст стереть материалы дела. Сторож персональных
+данных на каждом коммите. Проверка формата документа перед подачей. Запрет
+собрать документ раньше, чем его прочитает проверяющий, — и это отдельный
+юрист, не тот, что писал.
+
+**Учусь на твоих правках.** Поправил выданный документ под себя — я сравню «до»
+и «после» по содержанию и по форме и перестану повторять эти огрехи.
+
+📖 **[Как я работаю на самом деле](docs/HOW-IT-WORKS.ru.md)** — подробный разбор
+без рекламы: что происходит внутри, где я себя проверяю, чего я не делаю и где
+нужен ты. Каждое утверждение там проверено запуском.
+
+### Мои агенты
+
+| Кто | Чем занят | Когда |
 |---|---|---|
-| Грузенберг | Канцелярия — приём входящих | 1 |
-| Мейер | Картирование дела | 1 |
-| Гольмстен · Буринский · Покровский | Читатели (скан / картинка / текст) | 1 |
-| Шершеневич | Сверка читателей | 1 |
-| Спасович | Охотник — классик | 2 |
-| Плевако | Охотник — тактик | 2 |
-| Карабчевский | Охотник — скептик | 2 |
-| Ареопаг (5 правоведов) | Совет — правовая позиция | 3 |
-| Сперанский | Составитель | 4 |
-| Кони | Ревизор | 5 |
-| Андреевский | Подготовка к заседанию | — |
-| Рождественский | Архивист — база знаний | — |
+| Грузенберг | принимает входящие материалы | приём |
+| Мейер | строит карту дела | разбор |
+| Гольмстен · Буринский · Покровский | читают сканы, фотографии, документы | разбор |
+| Шершеневич | сверяет читателей между собой | разбор |
+| Спасович | ищет практику за твою позицию | практика |
+| Плевако | ищет процессуальные ходы | практика |
+| Карабчевский | ищет практику против тебя | практика |
+| Ареопаг, пятеро правоведов | спорят и вырабатывают позицию | позиция |
+| Сперанский | пишет документ | документ |
+| Кони | проверяет документ, которого не писал | проверка |
+| Андреевский | готовит к заседанию | заседание |
+| Рождественский | пополняет базу знаний | всегда |
 
 ### Установка
 
-Требования: **macOS** (Apple Vision OCR), Python 3.11+, Xcode CLT
-(`xcode-select --install`), [Claude Code](https://claude.com/claude-code).
+Нужен **Mac** (для распознавания сканов), Python 3.11 и выше, Xcode Command Line
+Tools и [Claude Code](https://claude.com/claude-code).
 
 ```bash
 git clone https://github.com/zarubinphil/themis.git
@@ -213,24 +155,203 @@ cd themis
 bash install.sh
 ```
 
-`install.sh` ставит Python-зависимости, собирает Apple Vision OCR из исходника,
-ставит whisper + ffmpeg, готовит директории и проверяет Claude Code CLI.
+Дальше я всё объясню сама и спрошу разрешения, прежде чем что-то ставить.
 
-### Использование
-
-В Claude Code: открой проект, скажи *«Новое дело: Иванов, раздел квартиры после
-развода, нужно исковое»*. Фемида прогонит Шаг 0→5 и выдаст документ.
-
-Cockpit (UI): `python3 cockpit/app.py` → http://localhost:8800
-
-Обновление: `/themis-update` — тянет последнюю логику, данные не трогает.
+Панель, где видно ход работы: `python3 cockpit/app.py` → http://localhost:8800
+Обновиться до свежей версии: `bash scripts/update.sh` — данные дел не трогаются.
 
 ### Приватность
 
-`cases/` (материалы дел) — в `.gitignore`, **никогда не публикуется**. Извлечение
-локальное ($0), документы остаются на твоём Mac. В репозитории — только
-синтетический пример (`cases/ivanov-ivan`).
+Материалы дел не покидают твой компьютер. Папки доверителей закрыты от
+публикации на уровне репозитория, наружу уходят только шаблоны и один
+вымышленный пример. Распознавание и чтение — локальные.
+
+Напоминания в Telegram — твой личный бот, не мой и не общий. Наружу уходят
+только даты и слово «готово»: ни фамилий, ни номеров дел, ни сумм. За этим
+следит отдельная проверка, а не добрая воля. Не нужен бот — я работаю без него
+точно так же.
 
 ### Лицензия
 
-MIT — см. [LICENSE](LICENSE). Построено на [Claude Code](https://claude.com/claude-code).
+**Частному юристу — бесплатно. Организации — по договору.**
+
+Если ты один человек и пользуешься мной для собственной юридической работы,
+включая частную практику и ИП, — пользуйся свободно, без платы и без
+регистрации. Если меня разворачивают в компании, юрфирме или ведомстве, если
+мною пользуется больше одного человека или если меня предлагают клиентам как
+услугу — нужна коммерческая лицензия.
+
+Правообладатель — **Зарубин Филипп Андреевич**. Все права, прямо не
+предоставленные лицензией, сохраняются за ним.
+
+Полный текст: **[LICENSE.ru.md](LICENSE.ru.md)** (основной) и
+[LICENSE](LICENSE) (английский). До 21.08.2026 я распространялась по MIT; копии,
+полученные до этой даты, остаются под MIT в отношении той версии.
+
+Построена на [Claude Code](https://claude.com/claude-code).
+
+### Если ты меня улучшил
+
+Починил ошибку, ускорил работу, научил новому, собрал ещё одного хорошего
+агента — верни это сюда. Тогда следующий юрист не пройдёт твой путь заново, а
+его доработки однажды придут к тебе.
+
+И если я оказалась полезна, поставь звезду. Для тебя это несколько секунд, для
+проекта — заметно больше.
+
+---
+
+<a name="english"></a>
+## English
+
+### Who I am
+
+Hello. I am Themis.
+
+I was built by Philipp Zarubin, a practising lawyer, for a fairly dull reason:
+too much of a good lawyer's time goes not into the law and not into thinking,
+but into the mechanics around them. Read two hundred pages of scans. Move facts
+from one file to another. Hunt case law. Check dates. Verify citations. Then read
+the file again for one detail you know was in there.
+
+That work I take off you.
+
+There is not one artificial intelligence inside me. When you hand me a serious
+case I assemble a team for it: one reads the file, another hunts case law, a
+third takes apart the other side's position, and the fourth I deliberately set
+against you, to break your position before your opponent does. They work in
+parallel, pass conclusions to one another and argue among themselves. I call
+them agents.
+
+But there is one place I will not hand to any agent. Yours.
+
+**I can take the work off you. The thinking and the decisions stay yours.** I was
+not at the meeting with the client, I did not sit beside you in the hearing, I
+did not hear how people said what they said. You have an understanding of the
+living situation that I do not. I have speed, memory and patience. Which is why
+we work best together.
+
+### What installation looks like — you will not get lost
+
+Worth saying first, because installation is usually where people abandon an
+unfamiliar program.
+
+I walk you through it and explain every step: what I am about to do, why it is
+needed, and what happens if we skip it. No technical words without a translation.
+
+**First I introduce myself** and explain how I am built — the text in the picture
+above.
+
+**Then I ask nine questions about your practice.** One at a time, never as a
+list. Each one comes with why I am asking and how to answer:
+
+> **What kind of cases do you handle most?**
+>
+> I ask so I know which statutes to download first. There are many codes, each
+> is sizeable, and they do not arrive instantly. I will start with the ones you
+> need tomorrow and fetch the rest in the background.
+
+Nine like that. Region, courts, where you keep incoming material, electronic
+signatures, Telegram reminders. Not one question without a reason attached.
+
+**I install nothing without your permission.** First I look at what is missing on
+your computer, then I name it: this thing, this size, needed for that, and
+without it this part will not work. Then I wait for a plain "go ahead". Say no
+and I do not install it, and I remember that capability is off. Silence counts as
+no.
+
+**I tell you honestly what does not work on your system.** Scan recognition runs
+on Apple technology: free and local on a Mac, absent on Windows and Linux. You
+hear that during installation, not on the Thursday you hand me scans.
+
+**Statutes go onto your disk: yours first, then all of them.** The codes for your
+practice come first so you can work today. The rest follow in the background, so
+you never again meet "I do not have that article". After that I keep them current
+myself, checking monthly.
+
+**At the end I test myself on a real document of yours,** not a made-up example.
+
+### What I can do
+
+**I read your material locally and for nothing.** Scans are recognised by your
+Mac, about a second and a half per page. Text inside ordinary PDF, Word and Excel
+I take directly. Mixed documents come through whole. What I have read I remember:
+the same file a second time is instant and costs nothing.
+
+**I extract identifiers myself** — tax numbers, company registration numbers,
+case numbers, amounts — and verify them by checksum without going online.
+
+**I compute what a program should compute, not a model.** Statutory interest with
+the central bank rate table. Procedural deadlines against the working calendar,
+with the provision cited. Court fees. Amounts in words.
+
+**I quote statutes verbatim from disk.** Not from memory and not from the web: a
+web lookup once mangled a Civil Code article, and since then the text comes from
+the corpus on your computer.
+
+**I check myself, and that is the unfamiliar part.** Between my answer and you
+stand several guards, each of them code rather than a promise. An acceptance
+suite of 118 checks. A guard that will not let case material be erased. A
+personal-data guard on every commit. A format check before filing. And a rule
+that no document is assembled before a reviewer has read it — a different agent
+from the one that wrote it.
+
+**I learn from your edits.** Correct a document I gave you and I compare before
+and after, in substance and in form, and stop repeating those mistakes.
+
+📖 **[How I actually work](docs/HOW-IT-WORKS.en.md)** — the long version without
+the marketing: what happens inside, where I check myself, what I do not do and
+where you are still required. Every claim there was verified by running it.
+
+### Installation
+
+You need a **Mac** (for scan recognition), Python 3.11+, Xcode Command Line Tools
+and [Claude Code](https://claude.com/claude-code).
+
+```bash
+git clone https://github.com/zarubinphil/themis.git
+cd themis
+bash install.sh
+```
+
+From there I explain everything myself and ask before installing anything.
+
+Panel: `python3 cockpit/app.py` → http://localhost:8800
+Update: `bash scripts/update.sh` — your case data is untouched.
+
+### Privacy
+
+Case material never leaves your computer. Client folders are excluded from
+publication at the repository level; only templates and one fictional example go
+out. Extraction and recognition are local.
+
+Telegram reminders use your own bot, never mine. What goes out is dates and the
+word "done": no names, no case numbers, no amounts. A separate check enforces
+that. No bot, no problem — I work the same without it.
+
+### Licence
+
+**Free for an individual lawyer. Paid for organisations.**
+
+If you are one person using me for your own legal work, including a sole
+practice, use me freely — no fee, no registration. If I am deployed inside a
+company, a law firm or an agency, if more than one person uses me, or if I am
+offered to clients as a service, a commercial licence is required.
+
+Rights holder: **Philipp Andreevich Zarubin**. Every right not expressly granted
+by the licence stays with him.
+
+Full text: **[LICENSE](LICENSE)** (English) and [LICENSE.ru.md](LICENSE.ru.md)
+(Russian, governing). Until 21.08.2026 I was distributed under the MIT Licence;
+copies obtained before that date remain under MIT for that version.
+
+Built on [Claude Code](https://claude.com/claude-code).
+
+### If you improved me
+
+Fixed a bug, made something faster, taught me a new trick, built another good
+agent — send it back. The next lawyer will not walk your road from scratch, and
+their work may one day come back to you.
+
+And if I was useful, leave a star. A few seconds for you; rather more than that
+for the project.

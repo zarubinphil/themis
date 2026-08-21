@@ -40,6 +40,7 @@
 
 РЕЖИМЫ:
   --init                    первичная выгрузка всего реестра (кодексы + план)
+  --missing                 догрузить ТОЛЬКО отсутствующее (дёшево, дозагрузка)
   --update                  перекачать; если текст разошелся — старую версию
                             в knowledge/_corpus_archive/{ДД.ММ.ГГГГ}/, новую записать
   --check                   дешевая сверка: только дата редакции/хэш, без полной
@@ -1010,6 +1011,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--init", action="store_true")
+    ap.add_argument("--missing", action="store_true",
+                    help="догрузить только те акты, которых нет на диске")
     ap.add_argument("--update", action="store_true")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--doc", metavar="SLUG", help="ограничиться одним кодексом")
@@ -1077,9 +1080,26 @@ def main() -> int:
             FAILURES.append(f"{slug}: файла нет на диске, кодекс не выгружен")
         return report_failures()
 
+    if a.missing:
+        # Докачать только отсутствующее. Нужно там, где корпус пополняется по
+        # частям: на онбординге сначала тянутся акты под практику юриста (чтобы
+        # он мог начать работать сегодня), а всё остальное доезжает следом.
+        # `--init` для этого не годится: он качает заново и уже скачанное, а
+        # один кодекс — это сотни запросов и десятки минут.
+        nadi = [e for e in targets
+                if not os.path.exists(os.path.join(KODEKSY_DIR, e["slug"] + ".md"))]
+        if not nadi:
+            print(f"корпус полон: {len(targets)} из {len(targets)}, докачивать нечего")
+            return 0
+        print(f"нет на диске: {len(nadi)} из {len(targets)} — догружаю")
+        for e in nadi:
+            cmd_build_one(e, "init")
+        return report_failures()
+
     mode = "update" if a.update else "init"
     if not (a.init or a.update):
-        print("укажите режим: --init | --update | --check | --plenums | --demo", file=sys.stderr)
+        print("укажите режим: --init | --missing | --update | --check | --plenums | --demo",
+              file=sys.stderr)
         return 1
     for e in targets:
         cmd_build_one(e, mode)

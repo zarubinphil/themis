@@ -7,11 +7,17 @@
 
 # Интерпретатор выбирается явно: launchd не даёт логин-шелл, и `python3`
 # из системного PATH — это 3.9, на которой падает импорт (прецедент 21.08.2026).
+
+# Корень репозитория берём от расположения самого скрипта, а не жёсткой
+# строкой: у другого юриста Фемида лежит не в $ROOT, и фоновые
+# задания молча ломались бы на несуществующем пути (аудит 21.08.2026).
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
 . "$(dirname "$0")/_python.sh"
 
-CASES="$HOME/Проекты/themis/cases"
+CASES="$ROOT/cases"
 INBOX="$HOME/Desktop/inbox"
-LOG="$HOME/Проекты/themis/audit.log"
+LOG="$ROOT/audit.log"
 DAYS_AHEAD=7
 
 TODAY=$(date +%Y-%m-%d)
@@ -75,7 +81,7 @@ osascript -e "display notification \"$(echo -e "$BODY")\" with title \"$MSG\" so
 # имена доверителей и номера дел остаются в локальном уведомлении выше.
 # Секрет читается из ~/.secrets и в лог не попадает. Бот выключен либо секрета
 # нет — молча пропускаем: система от бота не зависит.
-BOT="$HOME/Проекты/themis/scripts/themis_bot.py"
+BOT="$ROOT/scripts/themis_bot.py"
 BOT_SECRET="$HOME/.secrets/themis-telegram.env"
 if [[ -f "$BOT_SECRET" ]]; then
     set -a; . "$BOT_SECRET"; set +a
@@ -87,5 +93,5 @@ fi
 # --- Если есть входящие — запустить inbox-triage автоматически ---
 if [[ "$INBOX_COUNT" -gt 0 ]]; then
     echo "$(date '+%Y-%m-%d %H:%M') | BRIEFING | Запускаю inbox-triage для $INBOX_COUNT файлов" >> "$LOG"
-    "$HOME/Проекты/themis/scripts/inbox-watcher.sh"
+    "$ROOT/scripts/inbox-watcher.sh"
 fi

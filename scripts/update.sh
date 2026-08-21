@@ -27,7 +27,7 @@ echo "Запоминаю исходник OCR (для пересборки пр�
 OCR_BEFORE="$(shasum bin/vision-ocr.swift 2>/dev/null | awk '{print $1}')"
 
 # Только СИСТЕМНЫЕ пути. cases/ и knowledge/ НЕ перечислены → не трогаются.
-SYS=(.claude AGENTS.md scripts cockpit bin install.sh README.md .mcp.json .gitignore LICENSE CONTRIBUTING.md docs)
+SYS=(.claude AGENTS.md scripts cockpit bin install.sh README.md .mcp.json .gitignore LICENSE LICENSE.ru.md CONTRIBUTING.md docs)
 echo "Обновляю логику (данные дел и базу знаний не трогаю)…"
 for p in "${SYS[@]}"; do
   git checkout "origin/$BR" -- "$p" 2>/dev/null || true

@@ -1153,7 +1153,15 @@ class DocBuilder:
         import subprocess
         from pathlib import Path as _P
 
-        scan = _P.home() / ".claude/skills/humanizer-legal/scripts/scan_legal.sh"
+        # Скилл едет ВНУТРИ репозитория, поэтому свежая установка на другом
+        # устройстве работает сразу. Прецедент 21.08.2026: гейт искал скрипт
+        # только в ~/.claude/skills/, на второй машине его не было, и ни один
+        # судебный документ не выпускался вовсе. Домашняя копия остаётся
+        # запасным путём: у владельца скилл живёт там и правится там.
+        scan = _P(__file__).resolve().parent.parent / \
+            ".claude/skills/humanizer-legal/scripts/scan_legal.sh"
+        if not scan.exists():
+            scan = _P.home() / ".claude/skills/humanizer-legal/scripts/scan_legal.sh"
         if not scan.exists():
             print(f"ВНИМАНИЕ: {scan} не найден — проверка humanizer-legal не выполнена.")
             return []

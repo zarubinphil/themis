@@ -1,21 +1,124 @@
-MIT License
+THEMIS COMMUNITY LICENCE 1.0
+Source-available. Free for an individual lawyer. Paid for organisations.
 
-Copyright (c) 2026 Themis contributors
+Copyright (c) 2026 Philipp Andreevich Zarubin. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Themis is not open-source software under the OSI definition. It is source-
+available: you may read the source, run it, and change it for yourself, within
+the limits set out below. Every right not expressly granted here stays with the
+copyright holder.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+The Russian text of this licence (LICENSE.ru.md) is the governing version. This
+English text is provided for convenience. Where the two differ, the Russian
+text prevails.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+--------------------------------------------------------------------------
+1. DEFINITIONS
+--------------------------------------------------------------------------
+
+"Software" — Themis: its source code, scripts, agent and skill definitions,
+documentation and any part of them.
+
+"Rights holder" — Philipp Andreevich Zarubin.
+
+"You" — the person or organisation using the Software.
+
+"Individual use" — use by one natural person, on devices under that person's
+control, for their own legal work, including work as a sole practitioner,
+an individual entrepreneur (индивидуальный предприниматель), or an in-house
+lawyer acting on their own behalf. Individual use stays individual when the
+lawyer works on client matters and is paid for that work: what matters is that
+one natural person is the only user.
+
+"Organisational use" — anything else. In particular: use by or on behalf of a
+legal entity; use by more than one person; installation on infrastructure of a
+law firm, company or agency; use by employees or contractors in the course of
+their duties; use for the benefit of an employer.
+
+--------------------------------------------------------------------------
+2. WHAT IS FREE
+--------------------------------------------------------------------------
+
+For individual use, the rights holder grants you, free of charge, a
+non-exclusive, non-transferable, worldwide, revocable licence to:
+
+  (a) run the Software on your own devices;
+  (b) study and modify it for your own needs;
+  (c) publish your modifications as a fork, provided this licence and the
+      copyright notice travel with them unchanged.
+
+No royalty, no registration, no time limit while this licence stands.
+
+--------------------------------------------------------------------------
+3. WHAT NEEDS A PAID LICENCE
+--------------------------------------------------------------------------
+
+Organisational use requires a separate written commercial licence from the
+rights holder. So does each of the following, whoever does it:
+
+  (a) offering the Software or its functions to third parties as a service,
+      hosted or otherwise;
+  (b) selling, sublicensing, renting or distributing the Software for a fee;
+  (c) embedding the Software or a derivative of it into a product or service
+      supplied to others;
+  (d) removing or obscuring the copyright and licence notices.
+
+To ask for a commercial licence, contact the rights holder through
+https://github.com/zarubinphil
+
+--------------------------------------------------------------------------
+4. CONTRIBUTIONS
+--------------------------------------------------------------------------
+
+Themis is meant to be improved by the lawyers who use it. If you send a
+contribution (a pull request, patch or any other material), you grant the
+rights holder a perpetual, worldwide, non-exclusive, royalty-free, irrevocable
+right to use, modify, publish and license that contribution as part of the
+Software, including under the commercial licence in clause 3.
+
+You keep authorship of your contribution. You confirm that you are entitled to
+give these rights and that the contribution carries no third-party rights that
+would prevent it.
+
+Never include client data in a contribution: no case materials, no names, no
+case-folder names, no registries. A case-folder name is a person's surname.
+
+--------------------------------------------------------------------------
+5. NO WARRANTY
+--------------------------------------------------------------------------
+
+The Software is provided "as is". The rights holder gives no warranty of any
+kind, express or implied, including fitness for a particular purpose.
+
+Themis does not practise law and does not give legal advice. It prepares
+material for a lawyer. Every conclusion, every document and every decision on a
+case remains the professional responsibility of the lawyer using it. Checking
+what the Software produces before it goes to a court or a client is your duty,
+not the machine's.
+
+To the fullest extent permitted by law, the rights holder is not liable for any
+loss arising from use of the Software, including a lost case, a missed
+procedural deadline, an incorrect calculation, or disclosure of data through
+your own configuration.
+
+--------------------------------------------------------------------------
+6. TERMINATION
+--------------------------------------------------------------------------
+
+If you breach this licence, your rights under it end automatically. You may
+restore them by curing the breach, or by obtaining a commercial licence.
+
+--------------------------------------------------------------------------
+7. GOVERNING LAW
+--------------------------------------------------------------------------
+
+This licence is governed by the law of the Russian Federation.
+
+--------------------------------------------------------------------------
+8. EARLIER VERSIONS
+--------------------------------------------------------------------------
+
+Until 21.08.2026 Themis was distributed under the MIT Licence. Copies obtained
+before that date remain under the MIT Licence for that version: a licence
+already granted cannot be withdrawn retroactively. This licence governs the
+version it is distributed with, and every later one.

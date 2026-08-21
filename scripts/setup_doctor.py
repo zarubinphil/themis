@@ -221,7 +221,13 @@ def check_corpus() -> list[dict]:
     return out
 
 
-HUMANIZER_SCAN = os.path.expanduser("~/.claude/skills/humanizer-legal/scripts/scan_legal.sh")
+# Скилл едет внутри репозитория; домашняя копия — запасной путь (у владельца
+# он живёт и правится там). Ищем в обоих местах, иначе свежая установка на
+# другом устройстве краснеет на ровном месте (прецедент 21.08.2026).
+_SCAN_REL = ".claude/skills/humanizer-legal/scripts/scan_legal.sh"
+_SCAN_V_REPO = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), _SCAN_REL)
+HUMANIZER_SCAN = _SCAN_V_REPO if os.path.isfile(_SCAN_V_REPO) \
+    else os.path.expanduser("~/" + _SCAN_REL)
 
 
 def check_humanizer() -> dict:
@@ -235,8 +241,8 @@ def check_humanizer() -> dict:
         "humanizer-legal (анти-AI гейт)", CRIT,
         f"{HUMANIZER_SCAN} не найден — verdict.py --scan работает fail-closed и "
         "блокирует вердикт «ГОТОВ К ПОДАЧЕ» на любом документе",
-        "поставить скилл humanizer-legal (у владельца — ~/.claude/skills/humanizer-legal/) "
-        "либо перенести scan_legal.sh на эту машину по тому же пути")
+        "скилл едет внутри репозитория (.claude/skills/humanizer-legal/) — "
+        "обновиться: bash scripts/update.sh")
 
 
 def check_selftests() -> dict:

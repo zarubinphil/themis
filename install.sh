@@ -297,6 +297,105 @@ if [ "$(uname)" != "Darwin" ]; then
   echo "   На других ОС OCR-движок недоступен (текст/документы будут работать через markitdown)."
 fi
 
+# ── Разрешение на установку ──────────────────────────────────────────────────
+# Я не ставлю на чужой компьютер ничего молча. Сначала называю, что именно, зачем
+# и сколько это весит, и жду прямого согласия. «Сейчас поставлю зависимости» —
+# это не разрешение, а его имитация.
+if [ "$THEMIS_LANG" = "ru" ]; then
+  echo ""
+  echo "  Прежде чем что-то ставить, скажу, что мне нужно и зачем."
+  echo ""
+  echo "  Библиотеки Python, около 200 МБ. Без них я не открою ни одного"
+  echo "  документа:"
+  echo "    · pymupdf, markitdown, python-docx — читать PDF, Word и Excel"
+  echo "    · Pillow — работать с фотографиями документов"
+  echo "    · fastapi, uvicorn — панель, где видно ход работы по делу"
+  echo "    · openai-whisper — расшифровывать голосовые прямо у тебя,"
+  echo "      не отправляя запись наружу"
+  echo ""
+  if [ "$(uname)" = "Darwin" ]; then
+    echo "  Ещё соберу распознавание сканов. Оно работает на технологии,"
+    echo "  которая уже есть в твоём Mac, поэтому бесплатно и никуда не"
+    echo "  отправляет твои документы. Нужен компилятор из Xcode Command Line"
+    echo "  Tools; если его нет, я скажу отдельно."
+    echo ""
+    echo "  И ffmpeg, около 100 МБ, через Homebrew. Нужен только для звука и"
+    echo "  видео. Не работаешь с аудио — можно пропустить."
+    echo ""
+  fi
+  echo "  Всё ставится к тебе на компьютер. Наружу ничего не уходит."
+  echo ""
+  printf "  Ставлю? [Enter — да, n — отмена]: "
+else
+  echo ""
+  echo "  Before I install anything, here is what I need and why."
+  echo ""
+  echo "  Python libraries, about 200 MB. Without them I cannot open a single"
+  echo "  document:"
+  echo "    · pymupdf, markitdown, python-docx — to read PDF, Word and Excel"
+  echo "    · Pillow — to handle photographs of documents"
+  echo "    · fastapi, uvicorn — the panel that shows what I am doing"
+  echo "    · openai-whisper — to transcribe voice notes on your own computer,"
+  echo "      without sending the recording anywhere"
+  echo ""
+  if [ "$(uname)" = "Darwin" ]; then
+    echo "  I will also build scan recognition. It runs on technology already"
+    echo "  present in your Mac, so it costs nothing and sends your documents"
+    echo "  nowhere. It needs the compiler from Xcode Command Line Tools; if"
+    echo "  that is missing I will say so separately."
+    echo ""
+    echo "  And ffmpeg, about 100 MB, via Homebrew. Needed only for audio and"
+    echo "  video. Skip it if you never work with recordings."
+    echo ""
+  fi
+  echo "  Everything is installed on your own computer. Nothing goes out."
+  echo ""
+  printf "  Install? [Enter — yes, n — cancel]: "
+fi
+
+# Ответ читаем с терминала (работает и когда скрипт запущен через `| bash`),
+# а если терминала нет — со стандартного входа. Не получили ответа вовсе —
+# считаем это отказом. Гейт согласия, который при молчании ставит пакеты, —
+# не гейт: прецедент 21.08.2026, проба с ответом «n» прошла установку насквозь,
+# потому что ответ ушёл мимо /dev/tty.
+SOGLASIE=""
+if [ "${THEMIS_YES:-}" = "1" ]; then
+  SOGLASIE="y"                      # для неинтерактивной установки: THEMIS_YES=1
+elif [ -r /dev/tty ] && [ -t 1 ]; then
+  read -r SOGLASIE < /dev/tty || SOGLASIE="__net__"
+elif [ ! -t 0 ]; then
+  read -r SOGLASIE || SOGLASIE="__net__"
+else
+  SOGLASIE="__net__"
+fi
+[ -z "$SOGLASIE" ] && [ "${THEMIS_YES:-}" != "1" ] && [ ! -t 0 ] && SOGLASIE="__net__"
+
+if [ "$SOGLASIE" = "__net__" ]; then
+  echo ""
+  if [ "$THEMIS_LANG" = "ru" ]; then
+    echo "  Не смог спросить разрешение — значит не ставлю."
+    echo "  Запусти в терминале: bash install.sh"
+    echo "  Либо разреши заранее:  THEMIS_YES=1 bash install.sh"
+  else
+    echo "  I could not ask for permission, so I install nothing."
+    echo "  Run it in a terminal:  bash install.sh"
+    echo "  Or agree up front:     THEMIS_YES=1 bash install.sh"
+  fi
+  exit 1
+fi
+
+case "$SOGLASIE" in
+  n|N|нет|no)
+    if [ "$THEMIS_LANG" = "ru" ]; then
+      echo ""
+      echo "  Понял, ничего не ставлю. Запусти bash install.sh, когда решишь."
+    else
+      echo ""
+      echo "  Understood, installing nothing. Run bash install.sh when ready."
+    fi
+    exit 0 ;;
+esac
+
 # ── 1. Python-зависимости ────────────────────────────────────────────────────
 echo ""
 echo "[1/7] Python-пакеты…"
@@ -311,15 +410,20 @@ echo "      ✓ медиа:      openai-whisper (расшифровка ауди
 
 # ── 2. Apple Vision OCR (сборка из исходника) ────────────────────────────────
 echo ""
-# Гейт humanizer-legal стоит перед вердиктом «ГОТОВ К ПОДАЧЕ» и работает
-# fail-closed: нет скрипта скилла — документ не выпускается вовсе. Скилл живёт
-# вне репозитория, поэтому установка обязана о нём сказать вслух (проба круга 9:
-# свежая машина по README не выпускала ни одного документа).
-if [ ! -x "$HOME/.claude/skills/humanizer-legal/scripts/scan_legal.sh" ]; then
-  echo "[!] Скилл humanizer-legal не найден:"
-  echo "    ~/.claude/skills/humanizer-legal/scripts/scan_legal.sh"
-  echo "    Без него гейт стиля закрыт и ни один судебный документ не выпустится."
-  echo "    Поставить скилл humanizer-legal до первой работы по делу."
+# Проверка стиля судебных документов стоит перед вердиктом «ГОТОВ К ПОДАЧЕ» и
+# работает fail-closed: нет скрипта — документ не выпускается вовсе. Раньше он
+# жил ТОЛЬКО в домашней папке навыков, вне репозитория, и установка на втором
+# устройстве проходила «успешно», а документы не выпускались (21.08.2026).
+# Теперь он едет внутри репозитория; домашняя копия — запасной путь.
+SCAN_REPO=".claude/skills/humanizer-legal/scripts/scan_legal.sh"
+SCAN_DOMA="$HOME/.claude/skills/humanizer-legal/scripts/scan_legal.sh"
+if [ -f "$SCAN_REPO" ]; then
+  chmod +x "$SCAN_REPO" 2>/dev/null || true
+elif [ ! -x "$SCAN_DOMA" ]; then
+  echo "[!] Проверка стиля судебных документов не найдена:"
+  echo "    $SCAN_REPO"
+  echo "    Она должна ехать вместе с репозиторием, без неё ни один судебный"
+  echo "    документ не выпустится. Обнови: bash scripts/update.sh"
 fi
 
 echo "[2/7] Apple Vision OCR…"
