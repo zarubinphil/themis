@@ -74,6 +74,11 @@ back for self-learning after you edit it.
   touching your cases or knowledge base**.
 - **Privacy** — client data (`cases/`) stays local and never ships.
 
+**[How it actually works](docs/HOW-IT-WORKS.en.md)** — the long version: what runs
+when you hand it a case, what reads the scans, where the system checks itself, what
+it refuses to do, and what still needs your hands. Every claim in it was checked by
+running it.
+
 ### The 13 agents
 
 | Persona (RU) | Role (EN) | Step |
@@ -174,6 +179,11 @@ Themis ведёт судебные дела как живая юрфирма и�
 - **Самообновление** — `/themis-update` тянет последнюю логику с GitHub, **не трогая
   твои дела и базу знаний**.
 - **Приватность** — данные клиентов (`cases/`) всегда локально, в публику не уходят.
+
+**[Как это работает на самом деле](docs/HOW-IT-WORKS.ru.md)** — подробный разбор:
+что происходит, когда вы приносите дело, чем читаются материалы, где система
+проверяет сама себя, чего она не делает и где нужны вы. Каждое утверждение там
+проверено запуском.
 
 ### 13 агентов
 
