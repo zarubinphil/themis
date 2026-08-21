@@ -6155,6 +6155,332 @@ def check_model_policy_i_pin():
     return fails
 
 
+# ── 9.23 Круг 9, документный контур: обещание равно поведению ─────────────────
+
+def _doc(rel):
+    q = ROOT / rel
+    return q.read_text(encoding="utf-8", errors="ignore") if q.is_file() else ""
+
+
+def check_verdikt_iz_otchyota():
+    """9.23: вердикт Кони берётся из отчёта рецензента, а не из тела черновика.
+
+    Круг 9, документный фронт, воспроизведено запуском. `doc-reviewer.md`
+    объявляет канонический путь: «Отчет проверки — .agent/drafts/_working/
+    review_log.md… Машина состояний ищет вердикт именно здесь: запись по
+    другому пути шаг 5 не закрывает». Прибор же собирает кандидатов globом
+    `(case/".agent/drafts").rglob("*.md")` — под сканирование попадает САМ
+    проверяемый черновик. Фраза «думаю, он уже ГОТОВ К ПОДАЧЕ», написанная
+    автором в теле черновика, закрывает шаг 5 и открывает /finalize, хотя
+    рецензент не запускался вовсе.
+
+    Это тот же класс, что «маркер шага читался подстрокой», но злее: документ
+    сам себя одобряет. Расширение globa лечило симптом «Шаг 5 ✗», а вылечило
+    гейт приёмки целиком.
+    """
+    ts = tool("themis_status.py")
+    if not ts.is_file():
+        return [("otchyot:missing", "scripts/themis_status.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-otchyot-") as tmp:
+        delo = Path(tmp) / "cases" / FAM_LAT / "spor-2026"
+        (delo / ".agent" / "context").mkdir(parents=True)
+        (delo / ".agent" / "drafts" / "_working").mkdir(parents=True)
+        (delo / "_case.md").write_text("# Дело\n- **Уровень:** L1\n", encoding="utf-8")
+        (delo / ".agent" / "context" / "knowledge-map.md").write_text(
+            "# Карта\n## КАРТА ГОТОВА ✓\n", encoding="utf-8")
+        (delo / ".agent" / "context" / "practice.md").write_text(
+            "# Практика\n## FAST-СИНТЕЗ ФЕМИДЫ\n", encoding="utf-8")
+        (delo / ".agent" / "drafts" / "isk_v1.md").write_text(
+            "# Исковое заявление\nЧерновик v1. Кони не запускалась.\n"
+            "Пометка автора: думаю, он уже ГОТОВ К ПОДАЧЕ.\n", encoding="utf-8")
+        code, out = py(ts, str(delo))
+        if "Шаг 5" in out and "✓" in out.split("Шаг 5")[1].split("\n")[0]:
+            fails.append(("otchyot:iz-chernovika", "шаг 5 закрыт фразой из тела САМОГО "
+                          "черновика: отчёта рецензента нет, doc-reviewer не запускался, "
+                          "а прибор глобит всё дерево черновиков вместе с проверяемым "
+                          "документом — гейт приёмки открывается собственным текстом "
+                          "документа. Вердикт обязан быть отдельным артефактом "
+                          "рецензента, а не подстрокой где угодно"))
+        # Обратная ось: настоящий отчёт рецензента шаг 5 закрывает.
+        (delo / ".agent" / "drafts" / "isk_v1.md").write_text(
+            "# Исковое заявление\nЧерновик v1.\n", encoding="utf-8")
+        (delo / ".agent" / "drafts" / "_working" / "review_log.md").write_text(
+            "# Отчёт проверки\nr1: ГОТОВ К ПОДАЧЕ — isk_v1.md\n", encoding="utf-8")
+        code, out = py(ts, str(delo))
+        if "Шаг 5" in out and "✗" in out.split("Шаг 5")[1].split("\n")[0]:
+            fails.append(("otchyot:trevoga", "настоящий отчёт рецензента в предписанном "
+                          "месте шаг 5 НЕ закрывает — ужесточение обязано оставить "
+                          "законный путь"))
+    return fails
+
+
+def check_markery_i_flagi():
+    """9.23: ключи, которыми прибор открывает шаги, названы в документах.
+
+    Круг 9, документный фронт.
+
+      · «## FAST-ПОЗИЦИЯ ФЕМИДЫ» — единственная строка, открывающая шаг 3 на
+        треке FAST, — не встречается НИ В ОДНОМ документе репозитория; агент
+        узнать её неоткуда, а подсказка прибора зовёт /position-council, прямо
+        запрещённый триажем на FAST. Зеркальный маркер практики
+        («## FAST-СИНТЕЗ ФЕМИДЫ») в CLAUDE.md описан — этот забыт.
+      · Флаг обновления предписан документами в параметризованной форме
+        «[ОБНОВИТЬ КЛИЕНТА: поле: значение]», а прибор ищет подстроку
+        «[ОБНОВИТЬ КЛИЕНТА]» с закрывающей скобкой сразу за словом: реальный
+        флаг не ловится никогда, и необработанные флаги не попадают ни в
+        ориентировку, ни в разбор конца сессии.
+    """
+    ts = tool("themis_status.py")
+    if not ts.is_file():
+        return [("markery:missing", "scripts/themis_status.py отсутствует")]
+    kod = ts.read_text(encoding="utf-8", errors="ignore")
+    fails = []
+    for marker in re.findall(r'has_marker\([^,]+,\s*r?"([^"]+)"', kod):
+        # Только ЛИТЕРАЛЬНЫЕ маркеры: шаблон с look-behind и альтернативами — это
+        # правило разбора, а не ключ, который агент пишет в файл.
+        if re.search(r"\(\?|\||\[|\\", marker):
+            continue
+        chistyy = marker.strip()
+        if not chistyy or len(chistyy) < 6:
+            continue
+        nayden = git_grep(re.escape(chistyy), ".claude", "knowledge", "docs", "README.md")
+        if not nayden:
+            fails.append((f"markery:{chistyy[:28]}", f"ключ «{chistyy}», которым прибор "
+                          f"открывает шаг протокола, не назван ни в одном документе "
+                          f"репозитория — агенту его узнать неоткуда, и законный путь "
+                          f"существует только в коде"))
+    # Флаг обновления: предписанная параметризованная форма обязана ловиться.
+    with tempfile.TemporaryDirectory(prefix="stage9-flag-") as tmp:
+        delo = Path(tmp) / "cases" / FAM_LAT / "spor-2026"
+        (delo / ".agent" / "context").mkdir(parents=True)
+        (delo / "_case.md").write_text("# Дело\n- **Уровень:** L1\n", encoding="utf-8")
+        (delo / ".agent" / "context" / "knowledge-map.md").write_text(
+            "# Карта\n## КАРТА ГОТОВА ✓\n\n[ОБНОВИТЬ КЛИЕНТА: ИНН: 1234567890]\n",
+            encoding="utf-8")
+        code, out = py(ts, str(delo))
+        if "ОБНОВИТЬ" not in out.upper():
+            fails.append(("markery:flag", "флаг в предписанной документами форме "
+                          "«[ОБНОВИТЬ КЛИЕНТА: поле: значение]» прибором не виден: он "
+                          "ищет подстроку с закрывающей скобкой сразу за словом, а "
+                          "параметр — это и есть полезная нагрузка флага. "
+                          "Необработанные флаги не попадают ни в ориентировку, ни в "
+                          "разбор конца сессии"))
+    return fails
+
+
+def check_reestr_agentov_strogiy():
+    """9.23: агент без frontmatter ловится валидатором реестра.
+
+    Круг 9, документный фронт. Валидатор проверяет только валидность YAML
+    ВНУТРИ существующего frontmatter и молча пропускает файл, у которого шапки
+    нет вовсе, — а такой агент выпадает из реестра ровно так же, как агент со
+    сломанным YAML. Прецедент 02.08.2026: конвейер встал на шаге 4 после
+    1,5 млн токенов именно из-за молчаливого выпадения агента.
+    """
+    ts = tool("themis_status.py")
+    if not ts.is_file():
+        return [("reestr:missing", "scripts/themis_status.py отсутствует")]
+    fails = []
+    with tempfile.TemporaryDirectory(prefix="stage9-reestr-") as tmp:
+        td = Path(tmp)
+        (td / "scripts").mkdir()
+        shutil.copy2(ts, td / "scripts" / "themis_status.py")
+        agents = td / ".claude" / "agents"
+        agents.mkdir(parents=True)
+        (agents / "doc-drafter.md").write_text(
+            "# doc-drafter\nname: doc-drafter\nбез frontmatter вовсе\n", encoding="utf-8")
+        delo = td / "cases" / FAM_LAT / "d-2026"
+        (delo / ".agent" / "context").mkdir(parents=True)
+        code, out = py(td / "scripts" / "themis_status.py", str(delo), cwd=td)
+        if "doc-drafter" not in out:
+            fails.append(("reestr:bez-shapki", "агент вообще без frontmatter прошёл "
+                          "валидатор молча: он проверяет YAML только там, где шапка "
+                          "есть. Из реестра такой агент выпадает так же, как со "
+                          "сломанным YAML, и конвейер встаёт на его шаге"))
+    return fails
+
+
+def check_dokumenty_ne_lgut():
+    """9.23: документы не обещают того, чего приборы не делают.
+
+    Круг 9, документный фронт, каждое расхождение воспроизведено запуском или
+    проверкой диска. Собрано в одну проверку, потому что корень один: две
+    копии правды — текст инструкции и поведение прибора — разошлись, и агент
+    исполняет ту, что читает.
+
+      · doc-drafter предписывает Шаг 8 «сборка .docx» ПЕРЕД Шагом 9 «проверка
+        Кони», а сборщик отказывает без вердикта: предписанный порядок
+        физически неисполним, и контракт вывода обещает файл, которого не будет;
+      · тот же doc-drafter предписывает квадратные скобки для источников и
+        купюр, а сторож формата за них заваливает и .docx, и парный .md —
+        документ противоречит сам себе в соседних строках;
+      · themis-update: успешное обновление возвращает 1 (последняя строка
+        update.sh — `[ … ] && echo …`), а скилл на код ≠ 0 предписывает ОТКАТ:
+        удачное обновление откатывается всегда;
+      · themis-update обещает обновлять .codex/ и .agents/, которых нет в
+        списке SYS= самого обновлятора;
+      · /init-practice поручает practice.md тактику, хотя ни один охотник этого
+        файла не пишет, и считает практику устаревшей через 30 дней, тогда как
+        прибор и конституция — через 365;
+      · DOCX_FORMATTING ссылается на scripts/make_playfair.py, которого в
+        репозитории нет, и обещает проверку «трёх гарнитур», хотя §1 того же
+        файла и сторож знают ровно одну;
+      · GOTOVO/ обещана владельцу как папка готовых документов, но не
+        создаётся при заведении дела и не наполняется никем.
+    """
+    fails = []
+
+    def sverit(uslovie, name, why):
+        if uslovie:
+            fails.append((f"lozh:{name}", why))
+
+    dd = _doc(".claude/skills/doc-drafter/SKILL.md")
+    if dd:
+        i_sborka = dd.find("Сборка .docx")
+        i_koni = dd.find("Проверка Кони")
+        sverit(0 <= i_koni < i_sborka or (i_sborka >= 0 and i_koni >= 0
+                                          and i_sborka < i_koni and "verdict.py" not in
+                                          dd[:i_sborka]),
+               "porydok-drafter",
+               "doc-drafter предписывает сборку .docx ДО раунда Кони, а сборщик без "
+               "вердикта отказывает: предписанный порядок неисполним, и контракт "
+               "вывода обещает файл, которого не будет. Раунд Кони по .md обязан "
+               "стоять ПЕРЕД сборкой")
+        sverit("[...]" in dd, "skobki-drafter",
+               "doc-drafter предписывает квадратные скобки для источников и купюр, а "
+               "сторож формата за них заваливает и .docx, и парный .md — решение "
+               "владельца от 10.08.2026; документ противоречит сам себе в соседних строках")
+    df = _doc(".claude/skills/doc-drafter/DOCX_FORMATTING.md")
+    if df:
+        sverit("[...]" in df, "skobki-formatting",
+               "DOCX_FORMATTING предписывает купюру в цитате квадратными скобками, "
+               "запрещёнными решением владельца и сторожем формата")
+        sverit("make_playfair" in df and not (SCRIPTS / "make_playfair.py").is_file(),
+               "make-playfair",
+               "DOCX_FORMATTING описывает scripts/make_playfair.py как существующий, "
+               "а файла в репозитории нет: живая ссылка на несуществующий прибор стоит "
+               "агенту лишних вызовов")
+        sverit("трёх гарнитур" in df or "три гарнитуры" in df, "tri-garnitury",
+               "DOCX_FORMATTING обещает проверку «трёх гарнитур», хотя решение владельца "
+               "от 04.08.2026 оставило одну (PT Serif) и сторож знает одну")
+    up = _doc("scripts/update.sh")
+    if up:
+        hvost = [l for l in up.strip().splitlines() if l.strip()][-1]
+        sverit(hvost.strip().startswith("[") and "&&" in hvost,
+               "update-kod",
+               f"последняя строка scripts/update.sh — условная команда ({hvost.strip()[:60]}…), "
+               f"поэтому удачное обновление возвращает 1, а скилл themis-update на "
+               f"код ≠ 0 предписывает ОТКАТ: успешное обновление откатывается всегда")
+    tu = _doc(".claude/skills/themis-update/SKILL.md")
+    if tu and up:
+        m = re.search(r"SYS=\(([^)]*)\)", up)
+        sys_spisok = set(m.group(1).split()) if m else set()
+        for kat in (".codex", ".agents"):
+            sverit(kat in tu and kat not in sys_spisok, f"update-{kat.strip('.')}",
+                   f"themis-update обещает обновлять {kat}/, которого нет в списке SYS= "
+                   f"самого обновлятора — обещанное зеркало не обновляется никогда")
+    ip = _doc(".claude/commands/init-practice.md")
+    if ip:
+        sverit("30 дней" in ip, "init-practice-ttl",
+               "/init-practice считает практику устаревшей через 30 дней, а прибор и "
+               "конституция — через 365 (PRACTICE_TTL_DAYS, решение с записанной "
+               "причиной): команда гонит охоту заново по свежей практике")
+        sverit("тактик пишет `practice.md`" in ip or "тактик пишет practice.md" in ip,
+               "init-practice-taktik",
+               "/init-practice поручает practice.md тактику, но ни один охотник этого "
+               "файла не пишет — на FAST синтез делает Фемида с маркером")
+    # GOTOVO обещана владельцу и обязана заводиться вместе с делом.
+    nc = _doc(".claude/commands/new-case.md")
+    setup = _doc(".claude/skills/themis-setup/SKILL.md")
+    sverit("GOTOVO" in setup and nc and "GOTOVO" not in nc, "gotovo",
+           "скилл установки обещает владельцу папку GOTOVO/ с готовыми документами, "
+           "а команда заведения дела её не создаёт: код-канон раскладки "
+           "(scripts/case_paths.py) её знает, документы разошлись")
+    return fails
+
+
+def check_pravila_derzhatsya_priborom():
+    """9.23: правило, объявленное железным, держится прибором, а не текстом.
+
+    Круг 9, документный фронт. Конституция сама говорит: «CLAUDE.md и skill —
+    advisory, исполняются вероятностно. Жёсткое — только hook/permissions».
+    Проверено запуском, что часть железных правил не держит никто:
+
+      · «не редактировать поданные документы» — 02_hearings/ не защищена
+        сторожем вовсе: запись и удаление в поданном пакете проходят;
+      · белый список внешних сервисов (knowledge/allowed-services.md) не
+        держится ни прибором, ни хуком: слова WebFetch и WebSearch в стороже
+        не встречаются, обращение к неразрешённому сервису ничем не остановлено;
+      · LOCAL-FIRST: Read скана .png/.jpg облачным vision не блокируется, хотя
+        конституция объявляет облако точечным фолбэком, а основной проход —
+        локальным Apple Vision.
+    """
+    cg = tool("claude_guard.py")
+    if not cg.is_file():
+        return [("pravila:missing", "scripts/claude_guard.py отсутствует")]
+    fails = []
+    case = f"cases/{FAM_LAT}/delo-2026"
+    podano = f"{case}/02_hearings/21-08-2026_zasedanie/isk.docx"
+    if _guard({"tool_name": "Write", "tool_input": {"file_path": podano}}) != 2:
+        fails.append(("pravila:02-hearings", "поданный документ в 02_hearings/ можно "
+                      "переписать: «не редактировать поданные документы» объявлено "
+                      "железным правилом и не держится ни одним сторожем"))
+    if _bash(f"rm -f {podano}") != 2:
+        fails.append(("pravila:02-hearings-rm", "поданный документ в 02_hearings/ можно "
+                      "удалить — то же железное правило без сторожа"))
+    kod = cg.read_text(encoding="utf-8", errors="ignore")
+    if "WebFetch" not in kod and "WebSearch" not in kod:
+        fails.append(("pravila:belyy-spisok", "белый список внешних сервисов не держится "
+                      "ни прибором, ни хуком: сторож не знает про WebFetch и WebSearch "
+                      "вовсе, и обращение к неразрешённому сервису ничем не остановлено. "
+                      "Правило, объявленное железным и исполняемое вероятностно, — "
+                      "это не правило"))
+    for raster in ("skan.png", "foto.jpg"):
+        if _guard({"tool_name": "Read",
+                   "tool_input": {"file_path": f"{case}/00_intake/{raster}"}}) != 2:
+            fails.append((f"pravila:local-first-{raster.split('.')[-1]}", f"скан "
+                          f"{raster} читается напрямую облачным vision: конституция "
+                          f"объявляет основным проходом локальный Apple Vision, а облако "
+                          f"— точечным фолбэком, и это не держит никто"))
+    return fails
+
+
+def check_ustanovka_vypuskaet_dokument():
+    """9.23: после документированной установки система выпускает документ.
+
+    Круг 9, документный фронт. README описывает единственную процедуру
+    установки (`bash install.sh`), и после неё:
+
+      · основной движок OCR не собирается — install.sh компилирует только
+        строковый резерв vision-ocr, а bin/vision-doc (структурный, таблицы
+        ячейками), объявленный конституцией ОСНОВНЫМ, не собирается ни разу;
+        роутер при этом молча деградирует вместо предписанной остановки;
+      · гейт humanizer-legal fail-closed ищет скрипт ВНЕ репозитория, которого
+        документированная установка не ставит, — и блокирует вердикт «ГОТОВ К
+        ПОДАЧЕ» на любом документе. Гейт правильный, недостаёт установки.
+
+    Свежая машина по README получает систему, которая не выпускает ни одного
+    документа. Это ровно тот класс, ради которого заведён золотой сценарий.
+    """
+    fails = []
+    inst = _doc("install.sh")
+    if inst:
+        if "vision-doc" not in inst:
+            fails.append(("ustanovka:vision-doc", "install.sh не собирает bin/vision-doc, "
+                          "объявленный конституцией ОСНОВНЫМ движком OCR: собирается "
+                          "только строковый резерв, а роутер молча деградирует вместо "
+                          "предписанной остановки «не деградировать молча»"))
+        readme = _doc("README.md")
+        if "scan_legal" not in inst and "humanizer-legal" not in inst \
+                and "humanizer-legal" not in readme:
+            fails.append(("ustanovka:humanizer", "гейт humanizer-legal fail-closed ищет "
+                          "скрипт вне репозитория, а документированная установка его не "
+                          "ставит и о нём не предупреждает: свежая машина по README "
+                          "получает систему, которая не выпускает ни одного документа"))
+    return fails
+
+
 # ── Реестр проверок ──────────────────────────────────────────────────────────
 
 CHECKS = [
@@ -6269,6 +6595,12 @@ CHECKS = [
     ("9.22 селфтесты, код состояния, урок по работе", check_pribory_cikla_krug9),
     ("9.22 чужие CLI fail-closed; деньги честны", check_cli_i_budget_krug9),
     ("9.22 политика моделей и пин агента — одна правда", check_model_policy_i_pin),
+    ("9.23 вердикт из отчёта рецензента, не из черновика", check_verdikt_iz_otchyota),
+    ("9.23 ключи шагов названы в документах", check_markery_i_flagi),
+    ("9.23 агент без frontmatter ловится", check_reestr_agentov_strogiy),
+    ("9.23 документы не обещают несуществующего", check_dokumenty_ne_lgut),
+    ("9.23 железное правило держит прибор, не текст", check_pravila_derzhatsya_priborom),
+    ("9.23 после установки система выпускает документ", check_ustanovka_vypuskaet_dokument),
 ]
 
 
