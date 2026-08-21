@@ -4,6 +4,11 @@
 # Запускается через launchd каждый день в 9:00.
 # Вывод попадает в уведомление macOS через osascript.
 
+
+# Интерпретатор выбирается явно: launchd не даёт логин-шелл, и `python3`
+# из системного PATH — это 3.9, на которой падает импорт (прецедент 21.08.2026).
+. "$(dirname "$0")/_python.sh"
+
 CASES="$HOME/Проекты/themis/cases"
 INBOX="$HOME/Desktop/inbox"
 LOG="$HOME/Проекты/themis/audit.log"
@@ -74,8 +79,8 @@ BOT="$HOME/Проекты/themis/scripts/themis_bot.py"
 BOT_SECRET="$HOME/.secrets/themis-telegram.env"
 if [[ -f "$BOT_SECRET" ]]; then
     set -a; . "$BOT_SECRET"; set +a
-    if python3 "$BOT" --check >/dev/null 2>&1; then
-        python3 "$BOT" --notify-hearings --days "$DAYS_AHEAD" >> "$LOG" 2>&1
+    if "$PY" "$BOT" --check >/dev/null 2>&1; then
+        "$PY" "$BOT" --notify-hearings --days "$DAYS_AHEAD" >> "$LOG" 2>&1
     fi
 fi
 

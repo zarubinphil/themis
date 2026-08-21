@@ -158,6 +158,21 @@ def extracted(files: list[Path]) -> int:
     return n
 
 
+def _nuzhno_kodeksov() -> int:
+    """Сколько актов ЗНАЕТ реестр обновлятора. Считаем оттуда, а не константой
+    рядом: добавят акт в реестр — вторая копия числа молча устареет."""
+    try:
+        import re as _re
+        src = (Path(__file__).resolve().parent / "update_legal_corpus.py").read_text(
+            encoding="utf-8", errors="ignore")
+        return len(_re.findall(r'\{"slug":\s*"[a-z0-9-]+"', src)) or 17
+    except OSError:
+        return 17
+
+
+NUZHNO_KODEKSOV = _nuzhno_kodeksov()
+
+
 def brief(case: Path, level: str) -> None:
     """Сводка старта сессии: то, ради чего конституция велела читать шесть файлов."""
     case_txt = read(case / "_case.md")
@@ -210,7 +225,33 @@ def brief(case: Path, level: str) -> None:
         hint = "FAST по объёму"
     else:
         hint = "FULL по объёму"
-    print(f"  трек: {hint}; новизну правового вопроса оценивает Фемида по practice_index\n")
+    print(f"  трек: {hint}; новизну правового вопроса оценивает Фемида по practice_index")
+
+    # Состояние корпуса права проверяется прибором, а не обнаруживается случайно
+    # на третьем часу работы. Прецедент 21.08.2026: автолуп подменил
+    # knowledge/kodeksy/ симлинком, 19 актов исчезли, cite.py молчал «корпус не
+    # выгружен» — и ни один шаг протокола у корпуса не спрашивал, жив ли он.
+    # Документ без дословной нормы уходит в суд, а заметить это некому.
+    korpus_predupredit(case)
+    print()
+
+
+def korpus_predupredit(case: Path) -> None:
+    """Кричит, если корпуса права нет или он поредел. Дешево: считает файлы."""
+    root = case.parents[2] if len(case.parents) > 2 else Path.cwd()
+    kod, plen = root / "knowledge" / "kodeksy", root / "knowledge" / "plenumy"
+    est = len(list(kod.glob("*.md"))) if kod.is_dir() else 0
+    plenumov = len(list(plen.glob("*.md"))) if plen.is_dir() else 0
+    if est == 0:
+        print("  ⚠ КОРПУС ПРАВА ПУСТ: дословных цитат статей не будет, cite.py вернёт "
+              "«не найдено», госпошлина не посчитается. Выгрузить: "
+              "python3 scripts/update_legal_corpus.py --init")
+    elif est < NUZHNO_KODEKSOV:
+        print(f"  ⚠ корпус права неполон: кодексов {est} из {NUZHNO_KODEKSOV}. "
+              f"Доложить: python3 scripts/update_legal_corpus.py --init")
+    if plenumov == 0:
+        print("  ⚠ Пленумов ВС РФ на диске нет: "
+              "python3 scripts/update_legal_corpus.py --plenums")
 
 
 def read(f: Path) -> str:

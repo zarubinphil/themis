@@ -9,19 +9,31 @@
 set -o pipefail
 cd "$(dirname "$0")/.." || exit 1
 
+# Интерпретатор выбирается явно, общим правилом (см. scripts/_python.sh).
+. "$(dirname "$0")/_python.sh"
+echo "интерпретатор: $PY ($("$PY" -V 2>&1))"
+
 LOG="knowledge/_corpus_log.md"
 STAMP=$(date '+%d.%m.%Y %H:%M')
 
-CHECK_OUT=$(python3 scripts/update_legal_corpus.py --check 2>&1)
+CHECK_OUT=$("$PY" scripts/update_legal_corpus.py --check 2>&1)
 echo "$CHECK_OUT"
 
-CHANGED=$(echo "$CHECK_OUT" | grep "ИЗМЕНИЛОСЬ" | sed -E 's/^([a-z0-9-]+):.*/\1/')
+# Берём и ИЗМЕНИЛОСЬ, и НЕ ВЫГРУЖЕН. Прецедент 21.08.2026: автолуп подменил
+# knowledge/kodeksy/ симлинком, корпус исчез, и месячная сверка его НЕ вернула —
+# она грепала только «ИЗМЕНИЛОСЬ» и пропавшие акты не видела вовсе. Задание,
+# которое обновляет, но не лечит, оставляет систему без дословных цитат закона
+# на неопределённый срок: cite.py молчит «корпус не выгружен», а это ловится
+# только случайно.
+CHANGED=$(echo "$CHECK_OUT" | grep -E "ИЗМЕНИЛОСЬ|НЕ ВЫГРУЖЕН" | sed -E 's/^([a-z0-9-]+):.*/\1/')
 UPDATED=0
 FAILED=0
 if [[ -n "$CHANGED" ]]; then
     while IFS= read -r slug; do
         [[ -z "$slug" ]] && continue
-        if python3 scripts/update_legal_corpus.py --update --doc "$slug"; then
+        # Пропавший акт поднимается --init, изменившийся — --update.
+        if [ -f "knowledge/kodeksy/$slug.md" ]; then REZHIM="--update"; else REZHIM="--init"; fi
+        if "$PY" scripts/update_legal_corpus.py "$REZHIM" --doc "$slug"; then
             UPDATED=$((UPDATED + 1))
         else
             FAILED=$((FAILED + 1))

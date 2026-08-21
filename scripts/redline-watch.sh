@@ -14,6 +14,11 @@ set -uo pipefail
 # из Framework/Homebrew там не резолвятся, и еженедельный разбор молча не стартует.
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/Library/Frameworks/Python.framework/Versions/3.11/bin:$PATH"
 
+
+# Интерпретатор выбирается явно: launchd не даёт логин-шелл, и `python3`
+# из системного PATH — это 3.9, на которой падает импорт (прецедент 21.08.2026).
+. "$(dirname "$0")/_python.sh"
+
 ROOT="$HOME/Проекты/themis"
 LOG="$ROOT/audit.log"
 DRY=0
@@ -22,8 +27,8 @@ DRY=0
 cd "$ROOT" || exit 0
 ts() { date '+%d.%m.%Y %H:%M'; }
 
-FOUND=$(python3 scripts/redline_watch.py --days 8 --json)
-COUNT=$(echo "$FOUND" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)
+FOUND=$("$PY" scripts/redline_watch.py --days 8 --json)
+COUNT=$(echo "$FOUND" | "$PY" -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)
 
 if [[ "$COUNT" -eq 0 ]]; then
     echo "$(ts) | REDLINE | правок за неделю нет" >> "$LOG"
@@ -32,7 +37,7 @@ fi
 
 # Список дел без повторов — разбираем по делу, а не по документу:
 # правки одного дела разбираются одним проходом, это дешевле.
-CASES=$(echo "$FOUND" | python3 -c "
+CASES=$(echo "$FOUND" | "$PY" -c "
 import json,sys
 print('\n'.join(sorted({d['case'] for d in json.load(sys.stdin)})))")
 
@@ -41,7 +46,7 @@ echo "$(ts) | REDLINE | документов с правками: $COUNT, дел
 osascript -e "display notification \"Правок доверителя за неделю: $COUNT\" with title \"Фемида — разбор правок\" sound name \"Ping\"" 2>/dev/null
 
 if [[ "$DRY" -eq 1 ]]; then
-    python3 scripts/redline_watch.py --days 8
+    "$PY" scripts/redline_watch.py --days 8
     exit 0
 fi
 
