@@ -15,9 +15,12 @@
 упомянуто в тексте, запрещенная буква «ё», даты в формате ДД.ММ.ГГГГ.
 Плюс (этап 9.8, требование владельца): денежная сумма пишется цифрами и тут
 же прописью в КРУГЛЫХ скобках — «1 000 (одна тысяча) рублей» — и пропись
-обязана СОВПАДАТЬ с числом (сверяет `scripts/propis.py`, свой конвертер
-числительных). Прописи требует только сумма денег: даты, статьи, номера дел,
-ИНН, проценты и листы дела её не требуют.
+обязана СОВПАДАТЬ с числом. Разбор денег — единый на проект,
+`scripts/money_rule.py` (словарь валют и числительных из `scripts/propis.py`,
+дословные цитаты в елочках, сверка по шести падежам) — его же импортирует
+verdict.py: две копии правила расходились, и целые классы документов
+не выпускались (этап 9.22, круг 9). Прописи требует только сумма денег:
+даты, статьи, номера дел, ИНН, проценты и листы дела её не требуют.
 
     document_guard.py ДОКУМЕНТ.docx [--md ДОКУМЕНТ.md] [--l3]
     document_guard.py --selftest
@@ -30,6 +33,12 @@ import argparse
 import os
 import re
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import money_rule as _mr  # единый денежный разбор проекта (валюты,
+except ImportError:           # числительные, цитаты, сверка прописи)
+    _mr = None
 
 SPEC_MARGINS_MM = {"top": 20, "bottom": 30, "left": 30, "right": 15}
 SPEC_MARGINS_MM_L3 = {**SPEC_MARGINS_MM, "left": 35}
@@ -423,22 +432,21 @@ def check_docx(path: str, l3: bool = False, dogovor: bool = False,
 # пробелом, проба круга 4) или точкой между тройками:
 # перевод строки числа не склеивает — иначе ячейка таблицы сливается с номером
 # строки, а номер счета — с суммой под ним (ложные тревоги пробы 20.08.2026).
-# «руб.» с точкой — основная письменная форма («Цена иска: 1 250 000 руб.»);
-# граница слова после точки не строится \b, поэтому хвост проверяется
-# явным запретом буквы.
 _MONEY_NUM = (r"\d{1,3}(?:[ \u00a0\u202f\u2009]\d{3})+(?:,\d{1,2})?"
               r"|\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?"
               r"|\d{1,3}(?:,\d{3})+"
               r"|\d+(?:,\d{1,2})?")
-# Запятая между тройками — тоже разряды («1,250,000»), а не копейки: копейки
-# отделяются запятой с ОДНОЙ-двумя цифрами и без повторной тройки (проба
-# круга 6, 20.08.2026). Символ валюты — та же валюта: «100 000 (пять) ₽»
-# проходил мимо, потому что якорь знал только слова (та же проба).
-_MONEY_CUR = r"руб(?:л[а-я]*)?\.?|коп(?:е[а-я]*)?\.?|₽"
+# Словарь валют — ОДИН на проект, scripts/money_rule.py: рубли и копейки,
+# доллары, евро, центы, символы и «р.». Сторож знал только рубли, вердикт —
+# больше, и пропись в чужой валюте («200 000 (сто) долларов США», расхождение
+# в 2000 раз) не сверялась вовсе (этап 9.22, круг 9). Склонение единицы —
+# параметром валюты из того же словаря, не зашитое «рублей».
+_MONEY_CUR = _mr.CUR_RE if _mr is not None else r"руб(?:л[а-я]*)?\.?|коп(?:е[а-я]*)?\.?|₽"
+_MONEY_CUR_END = _mr.CUR_END if _mr is not None else r"(?![A-Za-zА-Яа-яЁё])"
 _MONEY_RE = re.compile(
     rf"(?P<num>{_MONEY_NUM})"
     rf"(?:\s*\((?P<propis>[^()]*)\))?"
-    rf"(?:\s+(?P<cur>{_MONEY_CUR}))?(?![а-яА-Я])",
+    rf"(?:\s+(?P<cur>{_MONEY_CUR}))?{_MONEY_CUR_END}",
     re.I)
 
 # Сокращенная форма «500 тыс. руб.» / «12 млн руб.» — та же денежная сумма,
@@ -448,43 +456,9 @@ _MONEY_RE = re.compile(
 _MONEY_ABBR_RE = re.compile(
     r"(?<![\dа-яА-Я])(?P<num>\d+(?:[ \u00a0\u202f\u2009.]\d{3})*(?:,\d+)?)"
     r"\s*(?P<scale>тыс|млн|млрд)\.?(?P<propis>\s*\([^()]*\))?"
-    rf"\s+(?P<cur>{_MONEY_CUR})(?![а-яА-Я])",
+    rf"\s+(?P<cur>{_MONEY_CUR}){_MONEY_CUR_END}",
     re.I)
 _ABBR_MULT = {"тыс": 1_000, "млн": 1_000_000, "млрд": 1_000_000_000}
-
-
-def _money_int(num_raw: str) -> tuple[str, str | None]:
-    """Целая часть и копейки найденного числа: пробелы и точки между тройками —
-    разряды, запятая — копейки. Запятая между ТРОЙКАМИ («1,250,000») — тоже
-    разряды: две и более группы по три цифры после запятой копейками не бывают
-    (проба круга 6, 20.08.2026)."""
-    s = num_raw.replace("\u00a0", " ").replace("\u202f", " ").replace("\u2009", " ").strip()
-    kop = None
-    if re.fullmatch(r"\d{1,3}(?:,\d{3})+", s):
-        return s.replace(",", ""), None
-    if "," in s:
-        s, kop = s.split(",", 1)
-    s = s.replace(" ", "")
-    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", s):
-        s = s.replace(".", "")
-    return s, kop
-
-
-def _sklonenie(n: int, odna: str, dve: str, pyat: str) -> str:
-    """Форма существительного после числительного: 1 рубль, 2 рубля, 5 рублей."""
-    n = abs(n) % 100
-    if 11 <= n <= 14:
-        return pyat
-    n %= 10
-    return odna if n == 1 else dve if 2 <= n <= 4 else pyat
-
-
-def _sklonenie_rubl(n: int) -> str:
-    return _sklonenie(n, "рубль", "рубля", "рублей")
-
-
-def _sklonenie_kop(n: int) -> str:
-    return _sklonenie(n, "копейка", "копейки", "копеек")
 
 
 # Пропись ПЕРЕД числом — «двести тысяч (100 000) рублей» — та же
@@ -493,64 +467,27 @@ def _sklonenie_kop(n: int) -> str:
 # его от слова валюты), и ложь о сумме проходила (проба круга 6, 20.08.2026).
 _MONEY_BEFORE_PROPIS_RE = re.compile(
     rf"(?P<words>[а-яё][а-яё \-]{{1,90}}?)\(\s*(?P<num>{_MONEY_NUM})\s*\)"
-    rf"\s*(?P<cur>{_MONEY_CUR})(?![а-яА-Я])",
+    rf"\s*(?P<cur>{_MONEY_CUR}){_MONEY_CUR_END}",
     re.I)
-# Слово-числительное: им служит хвост фразы перед скобками с цифрами.
-_NUMERAL_WORD_RE = re.compile(
-    r"^(?:ноль|нул\w*|один|одна|одно|одну|одного|одной|одному|одним|одном|"
-    r"два|две|двух|двум|двумя|три|трех|трем|тремя|четыре\w*|пят\w*|шест\w*|"
-    r"сем\w*|восем\w*|девят\w*|десят\w*|двадцат\w*|тридцат\w*|сорок\w*|"
-    r"сто|ста|сот\w*|тысяч\w*|миллион\w*|миллиард\w*)$",
-    re.I)
-
-
-def _propis_variants(_propis, n: int, gender: str = "м") -> list[list[str]]:
-    """Все шесть падежей числа словами. Сумма в документе склоняется по синтаксису
-    фразы («взыскать одну тысячу», «к одной тысяче», «одной тысячей») — сверка
-    обязана принимать любой падеж, но ложь ловить в каждом (проба круга 6:
-    сверка знала только именительный, и просительная часть иска — «Взыскать
-    1 000 (одну тысячу) рублей» — объявлялась браком)."""
-    out = []
-    for c in _propis.CASES:
-        try:
-            out.append(_propis.propis(n, gender=gender, case=c).split())
-        except ValueError:
-            pass
-    return out
-
-
-def _words_match(words: list[str], variants: list[list[str]]) -> bool:
-    return any(words == v for v in variants)
-
-
-def _strip_currency_words(words: list[str]) -> tuple[bool, list[str]]:
-    """Валюта внутри прописи: последнее слово «рубл…/копе…» — та же денежная
-    сумма («1 000 (сто тысяч рублей)»). Полная форма «… рублей ноль копеек»
-    внутри скобок — валюта после числительных и нулевые копейки словами —
-    обиходная, несовпадением не является (проба круга 6, 20.08.2026)."""
-    if not words or not words[-1].startswith(("руб", "коп")):
-        return False, words
-    nul = next((i for i, w in enumerate(words[:-1]) if w.startswith("руб")), None)
-    if (nul is not None and words[-1].startswith("коп")
-            and words[nul + 1:-1] in (["ноль"], ["нуль"])):
-        return True, words[:nul]
-    return True, words[:-1]
+# Слово-числительное — словарь словоформ propis.py из money_rule, а не
+# префикс со свободным хвостом: прежний перечень добавил «тридцать/сорок/
+# пятьдесят» и забыл «девяносто» — верная пропись «девяносто тысяч (90 000)
+# рублей» браковалась (этап 9.22, круг 9); «полтора миллиона» сверяется
+# структурно (money_rule.polutora_value).
 
 
 def check_money_propis(text: str, where: str) -> list[str]:
     """Денежная сумма обязана нести пропись в круглых скобках, и пропись обязана
     совпадать с числом: «1 000 (сто тысяч) рублей» глазами не ловится, для того
     и прибор. Сверка — по словам целиком: «пять» внутри «пятьдесят» и префикс
-    «одна тысяча» в «одна тысяча двести» совпадением не считаются. Конвертер —
-    свой `scripts/propis.py`; недоступен — fail-closed. Число сверх предела
+    «одна тысяча» в «одна тысяча двести» совпадением не считаются. Разбор —
+    единый, scripts/money_rule.py (словарь валют и числительных, цитаты,
+    конвертер propis.py); недоступен — fail-closed. Число сверх предела
     конвертера — строка нарушения, а не трасса: до остальных проверок документа
     авария недопустима."""
-    try:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        import propis as _propis
-    except ImportError:
-        return [f"{where}: scripts/propis.py недоступен — совпадение прописи "
-                f"с числом НЕ проверено (fail-closed)"]
+    if _mr is None:
+        return [f"{where}: scripts/money_rule.py (propis) недоступен — "
+                f"совпадение прописи с числом НЕ проверено (fail-closed)"]
     # Перечень приложений — реквизиты прилагаемых документов, а не денежные
     # суммы документа: прописи он не несет никогда (ложная тревога круга 4).
     # Но текст ПОСЛЕ перечня — часть документа: расчет цены иска почти всегда
@@ -571,51 +508,52 @@ def check_money_propis(text: str, where: str) -> list[str]:
             spisok = False
             hvost_lines.append(line)
         text = golova + "\n" + "\n".join(hvost_lines)
-    # Дословная цитата нормы в кавычках-елочках воспроизводится как в законе —
-    # ТРЕБОВАТЬ там пропись значит запретить цитирование (правило проекта —
-    # цитировать дословно). Но пропись, которая в цитате ЕСТЬ, обязана совпадать
-    # с числом: подмена суммы внутри елочек — та же ложь (проба круга 6: цитаты
-    # вырезались целиком, и «сумма 100 000 (пять тысяч) рублей» в кавычках
-    # проходила). Цитаты проверяются отдельным проходом в режиме «не требовать,
-    # но сверять», а из основного текста вырезаются, чтобы не задвоить находки.
-    quotes = [m.group(0)[1:-1] for m in re.finditer(r"«[^»]*»", text)]
-    text = re.sub(r"«[^»]*»", " ", text)
+    # Дословная цитата нормы или судебного акта в кавычках-елочках
+    # воспроизводится как в источнике — ТРЕБОВАТЬ там пропись значит запретить
+    # цитирование (правило проекта — цитировать дословно; возражения и жалобы
+    # почти всегда цитируют обжалуемый акт с суммой, этап 9.22, круг 9). Но
+    # пропись, которая в цитате ЕСТЬ, обязана совпадать с числом: подмена
+    # суммы внутри елочек — та же ложь (проба круга 6). Цитаты проверяются
+    # отдельным проходом в режиме «не требовать, но сверять», а из основного
+    # текста вырезаются, чтобы не задвоить находки.
+    text, quotes = _mr.split_quotes(text)
     problems = []
     # Пропись ПЕРЕД числом: «двести тысяч (100 000) рублей». Хвост фразы из
-    # числительных сверяется с числом в скобках; совпала — внутреннее число
-    # второй раз не судим. Числительных в хвосте нет — это не форма прописи
-    # (например, «расчет (100 000) рублей») — число судит общий проход ниже.
+    # числительных (словарь propis.py, не префикс) сверяется с числом в
+    # скобках; совпала — внутреннее число второй раз не судим. Числительных
+    # в хвосте нет — это не форма прописи (например, «расчет (100 000)
+    # рублей») — число судит общий проход ниже.
     covered = []
     for m in _MONEY_BEFORE_PROPIS_RE.finditer(text):
         words_all = re.sub(r"\s+", " ", m.group("words").strip().lower()).split()
-        tail = []
-        for w in reversed(words_all):
-            if _NUMERAL_WORD_RE.match(w):
-                tail.insert(0, w)
-            else:
-                break
+        tail = _mr.numeral_tail(words_all)
         if not tail:
             continue
         covered.append(m.span())
-        _int_before, _ = _money_int(m.group("num"))
-        if not _int_before or int(_int_before) == 0:
+        int_str, _ = _mr.money_int(m.group("num"))
+        if not int_str or int(int_str) == 0:
             continue
-        if not _words_match(tail, _propis_variants(_propis, int(_int_before))):
+        n = int(int_str)
+        if _mr.polutora_value(tail) == n:
+            continue  # «полтора миллиона (1 500 000) рублей» — верная форма
+        cur_name = _mr.currency_of(m.group("cur"))
+        gender = _mr.CURRENCIES[cur_name]["gender"] if cur_name else "м"
+        if not _mr.words_match(tail, _mr.propis_variants(n, gender=gender)):
             problems.append(f"{where}: пропись «{' '.join(tail)}» НЕ совпадает "
                             f"с числом {m.group('num')} — ожидалось "
-                            f"«{_propis.propis(int(_int_before))}»")
+                            f"«{_mr.propis_word(n, gender=gender)}»")
     for m in _MONEY_ABBR_RE.finditer(text):
         # «500 тыс. руб.» / «12 млн руб.» — без прописи в скобках нарушение;
         # с прописью — форма редкая, но сумма читается и сверяется глазами.
         if m.group("propis"):
             continue
-        int_str, _ = _money_int(m.group("num"))
+        int_str, _ = _mr.money_int(m.group("num"))
         full = int(int_str) * _ABBR_MULT[m.group("scale").lower()]
         full_show = f"{full:,}".replace(",", " ")
         problems.append(f"{where}: сумма «{m.group(0).strip()}» сокращением "
                         f"тыс./млн. — недопустимо, денежная сумма пишется "
                         f"полностью цифрами и прописью: «{full_show} "
-                        f"({_propis.propis(full)}) {m.group('cur')}»")
+                        f"({_mr.propis_word(full)}) {m.group('cur')}»")
     for m in _MONEY_RE.finditer(text):
         if any(a <= m.start() < b for a, b in covered):
             continue  # число в скобках формы «пропись (число)» — уже судили
@@ -625,21 +563,32 @@ def check_money_propis(text: str, where: str) -> list[str]:
         words = re.sub(r"\s+", " ", (words_raw or "").strip().lower()).split()
         words = [w for w in words if w]
         # Якорь-валюта: снаружи скобок или последним словом внутри них —
-        # «1 000 (сто тысяч рублей)» та же денежная сумма; полная форма
-        # «… рублей ноль копеек» внутри скобок — тоже.
+        # «1 000 (сто тысяч рублей)» та же денежная сумма. Хвост разбирается
+        # СТРУКТУРНО: «… рублей 00 копеек» цифрами — тот же обиход, что
+        # «ноль копеек» словом (этап 9.22, круг 9).
         has_cur = cur is not None
-        inner_cur, words = _strip_currency_words(words)
+        inner_cur, words = _mr.strip_currency_tail(words)
         has_cur = has_cur or inner_cur
         if not has_cur:
             continue  # не деньги: дата, статья, номер дела, ИНН, ставка
-        int_str, kop_str = _money_int(num_raw)
+        int_str, kop_str = _mr.money_int(num_raw)
         if not int_str or int(int_str) == 0:
             continue  # «рублей 00 копеек» — нулевые копейки цифрами это обиход
         cur_show = cur or (words_raw or "").strip().split()[-1]
+        # Валюта находки — каноническая, из единого словаря: род числительного
+        # и склонение единицы параметром валюты («долларов», не «рублей»),
+        # мелкая единица — её строкой словаря (рубль → копейка ж.р.,
+        # доллар/евро → цент м.р.).
+        cur_name = _mr.currency_of(cur or cur_show)
+        cur_info = _mr.CURRENCIES.get(cur_name) if cur_name else None
+        gender = cur_info["gender"] if cur_info else "м"
+        minor_info = (_mr.CURRENCIES[cur_info["minor"]]
+                      if cur_info and cur_info.get("minor")
+                      else _mr.CURRENCIES["копейка"])
         # Сверка принимает ЛЮБОЙ из шести падежей (просительная часть —
         # винительный: «взыскать одну тысячу»), но ложь ловится в каждом:
         # родительный от ДРУГОГО числа — брак (проба круга 6, 20.08.2026).
-        exp_rub_variants = _propis_variants(_propis, int(int_str))
+        exp_rub_variants = _mr.propis_variants(int(int_str), gender=gender)
         if not exp_rub_variants:
             problems.append(f"{where}: число {num_raw} не конвертируется — "
                             f"сумма осталась НЕ проверенной")
@@ -651,9 +600,10 @@ def check_money_propis(text: str, where: str) -> list[str]:
         polnoe = expected
         if kop_str and int(kop_str):
             try:
-                polnoe = (f"{expected} {_sklonenie_rubl(int(int_str))} "
-                          f"{_propis.propis(int(kop_str), gender='ж')} "
-                          f"{_sklonenie_kop(int(kop_str))}")
+                polnoe = (f"{expected} "
+                          f"{_mr.sklonenie(int(int_str), cur_info['forms'] if cur_info else _mr.CURRENCIES['рубль']['forms'])} "
+                          f"{_mr.propis_word(int(kop_str), gender=minor_info['gender'])} "
+                          f"{_mr.sklonenie(int(kop_str), minor_info['forms'])}")
             except ValueError:
                 pass
         if not words:
@@ -664,22 +614,23 @@ def check_money_propis(text: str, where: str) -> list[str]:
         try:
             # Копейка — женский род: «одна копейка», «двадцать одна копейка» —
             # грамотный русский, а не несовпадение (ложная тревога круга 4).
-            exp_kop_variants = (_propis_variants(_propis, int(kop_str), gender="ж")
+            exp_kop_variants = (_mr.propis_variants(int(kop_str),
+                                                    gender=minor_info["gender"])
                                 if kop_str and int(kop_str) else None)
         except ValueError as e:
             problems.append(f"{where}: копейки {num_raw} не конвертируются ({e}) — "
                             f"сумма осталась НЕ проверенной")
             continue
         if exp_kop_variants is None:
-            ok = _words_match(words, exp_rub_variants)
+            ok = _mr.words_match(words, exp_rub_variants)
         else:
             # Копейки: «одна тысяча двести тридцать четыре рубля пятьдесят
             # шесть копеек» — обе части внутри одних скобок, словами целиком,
             # каждая в своем падеже.
             ok = any(
                 words[:len(v)] == v and len(words) > len(v)
-                and words[len(v)].startswith("руб")
-                and _words_match(words[len(v) + 1:], exp_kop_variants)
+                and words[len(v)].startswith(_mr.MAJOR_PREFIXES)
+                and _mr.words_match(words[len(v) + 1:], exp_kop_variants)
                 for v in exp_rub_variants)
         if not ok:
             problems.append(f"{where}: пропись «{words_raw.strip()}» НЕ совпадает "
@@ -688,30 +639,30 @@ def check_money_propis(text: str, where: str) -> list[str]:
         # Цитата в елочках: пропись не ТРЕБУЕТСЯ (дословная норма), но
         # присутствующая обязана совпадать с числом — подмена суммы внутри
         # кавычек та же ложь (проба круга 6, 20.08.2026).
-        problems += _scan_quote(q, where, _propis)
+        problems += _scan_quote(q, where)
     return problems
 
 
-def _scan_quote(fragment: str, where: str, _propis) -> list[str]:
+def _scan_quote(fragment: str, where: str) -> list[str]:
     """Проход по цитате в елочках: только СОВПАДЕНИЕ присутствующей прописи,
     без требования её наличия (дословное цитирование нормы — правило проекта)."""
     out = []
     covered = []
     for m in _MONEY_BEFORE_PROPIS_RE.finditer(fragment):
         words_all = re.sub(r"\s+", " ", m.group("words").strip().lower()).split()
-        tail = []
-        for w in reversed(words_all):
-            if _NUMERAL_WORD_RE.match(w):
-                tail.insert(0, w)
-            else:
-                break
+        tail = _mr.numeral_tail(words_all)
         if not tail:
             continue
         covered.append(m.span())
-        int_str, _ = _money_int(m.group("num"))
+        int_str, _ = _mr.money_int(m.group("num"))
         if not int_str or int(int_str) == 0:
             continue
-        if not _words_match(tail, _propis_variants(_propis, int(int_str))):
+        n = int(int_str)
+        if _mr.polutora_value(tail) == n:
+            continue
+        cur_name = _mr.currency_of(m.group("cur"))
+        gender = _mr.CURRENCIES[cur_name]["gender"] if cur_name else "м"
+        if not _mr.words_match(tail, _mr.propis_variants(n, gender=gender)):
             out.append(f"{where}: пропись «{' '.join(tail)}» в цитате НЕ совпадает "
                        f"с числом {m.group('num')} — цитата дословна, но подмена "
                        f"суммы в ней — та же ложь")
@@ -725,26 +676,33 @@ def _scan_quote(fragment: str, where: str, _propis) -> list[str]:
         if not words:
             continue  # прописи нет — в цитате это не нарушение
         has_cur = cur is not None
-        inner_cur, words = _strip_currency_words(words)
+        inner_cur, words = _mr.strip_currency_tail(words)
         has_cur = has_cur or inner_cur
         if not has_cur or not words:
             continue
-        int_str, kop_str = _money_int(m.group("num"))
+        int_str, kop_str = _mr.money_int(m.group("num"))
         if not int_str or int(int_str) == 0:
             continue
-        variants = _propis_variants(_propis, int(int_str))
+        cur_name = _mr.currency_of(cur or (words_raw or "").strip().split()[-1])
+        cur_info = _mr.CURRENCIES.get(cur_name) if cur_name else None
+        gender = cur_info["gender"] if cur_info else "м"
+        minor_info = (_mr.CURRENCIES[cur_info["minor"]]
+                      if cur_info and cur_info.get("minor")
+                      else _mr.CURRENCIES["копейка"])
+        variants = _mr.propis_variants(int(int_str), gender=gender)
         if not variants:
             continue
         kop_variants = None
         if kop_str and int(kop_str):
-            kop_variants = _propis_variants(_propis, int(kop_str), gender="ж")
+            kop_variants = _mr.propis_variants(int(kop_str),
+                                               gender=minor_info["gender"])
         if kop_variants is None:
-            ok = _words_match(words, variants)
+            ok = _mr.words_match(words, variants)
         else:
             ok = any(
                 words[:len(v)] == v and len(words) > len(v)
-                and words[len(v)].startswith("руб")
-                and _words_match(words[len(v) + 1:], kop_variants)
+                and words[len(v)].startswith(_mr.MAJOR_PREFIXES)
+                and _mr.words_match(words[len(v) + 1:], kop_variants)
                 for v in variants)
         if not ok:
             out.append(f"{where}: пропись «{words_raw.strip()}» в цитате НЕ совпадает "
@@ -1124,6 +1082,24 @@ def selftest() -> int:
         ("нулевые копейки цифрами — обиход, не нарушение",
          not any("пропис" in p for p in check_text(
              "Прошу взыскать 5 000 (пять тысяч) рублей 00 копеек.", "t"))),
+        # Этап 9.22, круг 9: обе оси денежного правила после сведения копий
+        # в scripts/money_rule.py.
+        ("нулевые копейки цифрами ВНУТРИ скобок — стандартная форма, не брак",
+         check_text("Прошу взыскать задолженность 50 000,00 (пятьдесят тысяч "
+                    "рублей 00 копеек) по договору (ст. 309 ГК РФ).", "t") == []),
+        ("«девяносто тысяч (90 000)» — верная пропись, а не несовпадение",
+         check_text("Прошу взыскать девяносто тысяч (90 000) рублей "
+                    "задолженности.", "t") == []),
+        ("«полтора миллиона (1 500 000)» — верная живая форма",
+         check_text("Прошу взыскать полтора миллиона (1 500 000) рублей "
+                    "задолженности.", "t") == []),
+        ("пропись в чужой валюте сверяется: «200 000 (сто) долларов США» — брак",
+         any("НЕ совпадает" in p for p in check_text(
+             "Прошу взыскать 200 000 (сто) долларов США по контракту "
+             "(ст. 317 ГК РФ).", "t"))),
+        ("верная пропись в чужой валюте проходит",
+         check_text("Прошу взыскать 200 000 (двести тысяч) долларов США "
+                    "по контракту (ст. 317 ГК РФ).", "t") == []),
         ("даты, статьи, номера дел, ИНН, ставки и листы прописи НЕ требуют",
          check_text("Заседание назначено на 21.08.2026 (ст. 333 ГК РФ, п. 71) "
                     "по делу № А65-123/2026, ИНН 1655021805, ставка 7,5 % "
