@@ -180,8 +180,17 @@ def main():
     b.add_signature(os.environ.get("THEMIS_SIGNER", "Представитель по доверенности"),
                     os.environ.get("THEMIS_SIGN_DATE", ""))
 
+    # DocBuilder.save() при отказе печатает причину и молча возвращает None, файл
+    # не пишет. «Создано» после отказа = ложь: юрист идёт за несуществующим
+    # документом. Успех обязан следовать за фактом записи — свежим mtime файла.
+    before = os.path.getmtime(out_path) if os.path.exists(out_path) else None
     b.save(out_path)
-    print(f"✓ Создано: {out_path}")
+    after = os.path.getmtime(out_path) if os.path.exists(out_path) else None
+    if after is not None and after != before:
+        print(f"✓ Создано: {out_path}")
+        return 0
+    print(f"✗ НЕ создано: {out_path} — сборщик отказал (причина выше).", file=sys.stderr)
+    return 1
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

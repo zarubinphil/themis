@@ -313,12 +313,22 @@ def convert(md_path: str):
         b.add_body(strip_markdown_bold(stripped))
         i += 1
 
+    # DocBuilder.save() при отказе (нет вердикта, текст не совпал с одобренным)
+    # ПЕЧАТАЕТ причину и молча возвращает None — файл не пишет. Печатать «Создано»
+    # после этого = лгать: юрист идёт за документом, которого нет. Сообщение об
+    # успехе обязано следовать за ФАКТОМ записи, а факт — свежий mtime файла.
+    before = out_path.stat().st_mtime_ns if out_path.exists() else None
     b.save(str(out_path))
-    print(f"✓ Создано: {out_path}")
+    after = out_path.stat().st_mtime_ns if out_path.exists() else None
+    if after is not None and after != before:
+        print(f"✓ Создано: {out_path}")
+        return 0
+    print(f"✗ НЕ создано: {out_path} — сборщик отказал (причина выше).", file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Использование: python3 scripts/md_to_docx.py <путь к .md>")
         sys.exit(1)
-    convert(sys.argv[1])
+    sys.exit(convert(sys.argv[1]))
