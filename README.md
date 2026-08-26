@@ -1,17 +1,17 @@
 <div align="center">
 
-<img src="cockpit/static/logo.png" alt="Фемида" width="200"/>
+<img src="docs/assets/pantheon/emblem.png" alt="Themis Pantheon emblem" width="220"/>
 
 # Фемида · Themis
 
 **Я веду судебные дела вместе с юристом. Не вместо него.**
 **I work cases alongside a lawyer. Not instead of one.**
 
-**[Русский](#русский) · [English](#english)**
+**[Русский](README.ru.md) · [English](#english)**
 
 </div>
 
-![Фемида здоровается и спрашивает разрешение на установку](docs/screenshots/onboarding.png)
+![Themis Pantheon hero: Themis with scales, sword, legal documents, agent review cards and the shared marble column](docs/assets/pantheon/hero.png)
 
 ---
 
@@ -150,7 +150,7 @@ Word и Excel беру текст напрямую, без распознава�
 Tools и [Claude Code](https://claude.com/claude-code).
 
 ```bash
-git clone https://github.com/zarubinphil/themis.git
+git clone https://github.com/zarubinvibe/themis.git
 cd themis
 bash install.sh
 ```
@@ -309,7 +309,7 @@ You need a **Mac** (for scan recognition), Python 3.11+, Xcode Command Line Tool
 and [Claude Code](https://claude.com/claude-code).
 
 ```bash
-git clone https://github.com/zarubinphil/themis.git
+git clone https://github.com/zarubinvibe/themis.git
 cd themis
 bash install.sh
 ```
@@ -355,3 +355,21 @@ their work may one day come back to you.
 
 And if I was useful, leave a star. A few seconds for you; rather more than that
 for the project.
+
+<!-- pantheon-family:start -->
+## Pantheon family
+
+Part of the [Pantheon project family](https://github.com/zarubinvibe?tab=repositories). Every public project links directly to its repository and source ZIP.
+
+| Type | Name | What it does | Source |
+|---|---|---|---|
+| project | Athena | Portable agent OS that restores a complete Claude and Codex setup on a new Mac. | [Repository](https://github.com/zarubinvibe/athena) · [ZIP](https://github.com/zarubinvibe/athena/archive/refs/heads/main.zip) |
+| project | Claude Code Setup OS | Bootstrap skill for a token-efficient Claude Code workspace and a local LLM wiki. | [Repository](https://github.com/zarubinvibe/claude-code-setup-os) · [ZIP](https://github.com/zarubinvibe/claude-code-setup-os/archive/refs/heads/main.zip) |
+| project | Helioz | 24/7 agent work conveyor with verified completion markers and goal-based overnight decisions. | [Repository](https://github.com/zarubinvibe/helioz) · [ZIP](https://github.com/zarubinvibe/helioz/archive/refs/heads/main.zip) |
+| project | Humanizer | Agent skill that removes common AI writing patterns from English text. | [Repository](https://github.com/zarubinvibe/humanizer) · [ZIP](https://github.com/zarubinvibe/humanizer/archive/refs/heads/main.zip) |
+| project | Humanizer RU | Russian writing skill that detects and removes 58 common AI text patterns. | [Repository](https://github.com/zarubinvibe/humanizer-ru) · [ZIP](https://github.com/zarubinvibe/humanizer-ru/archive/refs/heads/main.zip) |
+| project | Mnemazine | Local-first memory system that turns raw inputs into verified reusable knowledge. | [Repository](https://github.com/zarubinvibe/mnemazine) · [ZIP](https://github.com/zarubinvibe/mnemazine/archive/refs/heads/main.zip) |
+| project | Smltlk | macOS menu bar app for keyboard-layout repair, offline dictation, and speech-to-prompt. | [Repository](https://github.com/zarubinvibe/smltlk) · [ZIP](https://github.com/zarubinvibe/smltlk/archive/refs/heads/main.zip) |
+| project | Themis | Multi-agent assistant for Russian litigation with local OCR and review by a five-jurist council. | [Repository](https://github.com/zarubinvibe/themis) · [ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip) |
+| project | Zeuz | Factory that turns an idea into a governed multi-agent workflow with gates, observability, and replay. | [Repository](https://github.com/zarubinvibe/zeuz) · [ZIP](https://github.com/zarubinvibe/zeuz/archive/refs/heads/main.zip) |
+<!-- pantheon-family:end -->

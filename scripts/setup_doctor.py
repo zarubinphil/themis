@@ -233,7 +233,7 @@ HUMANIZER_SCAN = _SCAN_V_REPO if os.path.isfile(_SCAN_V_REPO) \
 def check_humanizer() -> dict:
     """Гейт humanizer-legal (verdict.py --scan) работает fail-closed: нет скрипта —
     вердикт «ГОТОВ К ПОДАЧЕ» не выдаётся вовсе ни на одном документе. Скилл живёт
-    вне репозитория (~/.claude/skills/) — свежий клон обязан узнать об этом здесь,
+    вне репозитория ($HOME/.claude/skills/) — свежий клон обязан узнать об этом здесь,
     а не молчаливой деградацией на первом же документе (этап 9)."""
     if os.path.isfile(HUMANIZER_SCAN):
         return check("humanizer-legal (анти-AI гейт)", OK, "scan_legal.sh на месте")
@@ -336,7 +336,7 @@ def unavailable_on(plat: str) -> list[dict]:
     return obshchee
 
 
-SMLTLK_SRC = os.path.expanduser("~/Проекты/smltlk")
+SMLTLK_SRC = os.environ.get("SMLTLK_SRC", os.path.join(os.path.dirname(ROOT), "smltlk"))
 
 
 def _smltlk_installed() -> bool:
@@ -357,12 +357,12 @@ def smltlk_on(plat: str) -> dict:
         return {"available": True,
                 "installed": _smltlk_installed(),
                 "source": SMLTLK_SRC if est_istochnik else "",
-                "how": ("bash install.sh --with-smltlk (собирает из ~/Проекты/smltlk "
+                "how": ("bash install.sh --with-smltlk (собирает из соседнего каталога smltlk "
                         "скриптом scripts/build_app.sh: нужен Xcode со Swift 6 и ~500 МБ "
                         "под модель распознавания). Связка: диктовка → скилл voice-to-brief "
                         "→ бриф задачи; голосовые из бота расшифровываются той же локальной "
                         "моделью" if est_istochnik else
-                       "исходников ~/Проекты/smltlk на этой машине нет — взять их у владельца "
+                       "исходников smltlk на этой машине нет — взять их у владельца "
                        "проекта, затем bash install.sh --with-smltlk"),
                 "why": "приложение строки меню macOS, Neural Engine распознаёт локально",
                 "replacement": ""}

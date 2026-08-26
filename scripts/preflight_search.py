@@ -51,10 +51,10 @@ def probe_url(url: str, timeout: int = 8) -> bool:
 
 
 def check_mcp_key(server: str) -> tuple[bool, str]:
-    """Есть ли ключ у MCP-сервера в ~/.claude.json."""
-    cfg = os.path.expanduser("~/.claude.json")
+    """Есть ли ключ у MCP-сервера в $HOME/.claude.json."""
+    cfg = os.path.expanduser("$HOME/.claude.json")
     if not os.path.exists(cfg):
-        return False, "~/.claude.json отсутствует"
+        return False, "$HOME/.claude.json отсутствует"
     try:
         data = json.load(open(cfg, encoding="utf-8"))
     except Exception as e:

@@ -268,7 +268,7 @@ def check_config():
         code, out, err = run([tool("themis_config.py"), "--check", "--config", str(chuzhoy)])
         if code == 0:
             fails.append(("themis_config.py", "секрет ВНУТРИ конфига принят — токен обязан "
-                                              "жить в ~/.secrets, в конфиге только имя переменной"))
+                                              "жить в $HOME/.secrets, в конфиге только имя переменной"))
     tracked = subprocess.run(["git", "ls-files"], cwd=str(ROOT), capture_output=True, text=True)
     for name in tracked.stdout.splitlines():
         if name.endswith(("themis.config.json", "config.json")) and "example" not in name:

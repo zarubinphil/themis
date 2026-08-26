@@ -25,6 +25,7 @@ import json
 import os
 import re
 import sys
+import time
 
 
 def block(msg: str) -> None:
@@ -430,6 +431,62 @@ def _workflow_gate(p: str) -> None:
                 "запрещены (сборка только через DocBuilder, вердикт — Кони). "
                 "Статус: python3 scripts/themis_status.py " + case_root
             )
+
+
+# Лок каталога черновиков: одни руки в один каталог. Старше 45 минут — держатель,
+# скорее всего, ушёл: предупреждаем, но не запираем чужую работу навсегда.
+DRAFTS_LOCK_STALE_MIN = 45
+
+
+def _drafts_lock_gate(p: str) -> None:
+    """Пока в .agent/drafts/ лежит свежий .owner, чужая запись туда отбивается.
+
+    25.08 основной поток и составитель писали в ОДИН каталог черновиков, и работа
+    одной из двух рук была выброшена (пп. 12, 15 разбора). .owner — простой текст: кто
+    работает и когда. Сам лок-файл писать/снимать можно (иначе его не создать и не
+    освободить). Протухший лок (>45 мин) не блокирует, а предупреждает.
+
+    В .owner пишется токен владельца, а процесс держателя несёт тот же токен в
+    THEMIS_DRAFTS_OWNER. Без совпадения токена запись считается чужой."""
+    rel = _case_rel(p)
+    if rel is None or len(rel) < 3:
+        return
+    tail = [x.casefold() for x in rel[2:]]
+    if tail[:2] != [".agent", "drafts"]:
+        return
+    if os.path.basename(p) == ".owner":
+        return
+    drafts_dir = None
+    for root in _CASES_ROOTS:
+        dd = os.path.join(root, rel[0], rel[1], ".agent", "drafts")
+        if os.path.isdir(dd):
+            drafts_dir = dd
+            break
+    if drafts_dir is None:
+        drafts_dir = os.path.join(PROJECT_CASES, rel[0], rel[1], ".agent", "drafts")
+    owner = os.path.join(drafts_dir, ".owner")
+    if not os.path.isfile(owner):
+        return
+    try:
+        who = " ".join(open(owner, encoding="utf-8").read().split()) or "(имя не указано)"
+    except OSError:
+        who = "(лок не прочитан)"
+    token = os.environ.get("THEMIS_DRAFTS_OWNER", "").strip()
+    if token and re.search(rf"(?:^|\s)token={re.escape(token)}(?:\s|$)", who):
+        return
+    try:
+        age_min = (time.time() - os.path.getmtime(owner)) / 60
+    except OSError:
+        age_min = 0
+    if age_min > DRAFTS_LOCK_STALE_MIN:
+        print(f"⚠ Фемида: лок черновиков протух ({int(age_min)} мин) — держал {who}. "
+              f"Если это ваш незакрытый лок, снять: rm {owner}", file=sys.stderr)
+        return
+    block(
+        f"БЛОК: каталог черновиков заперт — работает {who}. Две руки в один каталог "
+        f"25.08 стоили выброшенной работы. Дождаться освобождения; если лок ваш и "
+        f"работа окончена, снять: rm {owner}"
+    )
 
 
 # ── Дисциплина содержимого дела (этап 4) ────────────────────────────────────
@@ -1391,6 +1448,7 @@ def main() -> None:
             )
         _cases_write_gate([p])
         _workflow_gate(p)
+        _drafts_lock_gate(p)
 
     if tool == "Bash":
         raw_cmd = as_str(ti.get("command"))
@@ -1420,6 +1478,7 @@ def main() -> None:
         _cases_write_gate(targets)
         for t in targets:
             _workflow_gate(t)      # документ въезжает в GOTOVO и обычным cp, не только Write
+            _drafts_lock_gate(t)   # лок черновиков держит и cp/mv в .agent/drafts, не только Write
 
         unpack = _unpack_into_cases(cmd, base)
         if unpack or _extract_into_cwd(cmd, base):
@@ -1978,6 +2037,54 @@ def selftest() -> int:
          run({"tool_name": "Bash", "tool_input": {
              "command": "zip -r cases/klient/delo-2026/GOTOVO/out.zip /tmp/x"}}), 2),
     ]
+
+    # ── Лок каталога черновиков .agent/drafts/.owner ──
+    # Проверяем гейт напрямую: _case_rel опирается на _CASES_ROOTS (вычислены от места
+    # сторожа), поэтому под tmp временно регистрируем свой корень cases/. block() зовёт
+    # sys.exit(2) — ловим SystemExit, чтобы не убить сам селфтест.
+    def _lock_probe(path):
+        try:
+            _drafts_lock_gate(path)
+            return 0
+        except SystemExit as e:
+            return e.code if isinstance(e.code, int) else 2
+
+    global _CASES_ROOTS
+    lock_drafts = tmp + "/cases/lk/ld/.agent/drafts"
+    os.makedirs(lock_drafts, exist_ok=True)
+    lock_target = lock_drafts + "/isk.md"
+    lock_owner = lock_drafts + "/.owner"
+    saved_roots = _CASES_ROOTS
+    _CASES_ROOTS = list(_CASES_ROOTS) + [os.path.join(tmp, "cases")]
+    old_token = os.environ.get("THEMIS_DRAFTS_OWNER")
+    try:
+        free = _lock_probe(lock_target)                      # нет .owner — пускает
+        with open(lock_owner, "w", encoding="utf-8") as f:
+            f.write("Мейер · 25.08.2026 14:00 token=abc123")
+        locked = _lock_probe(lock_target)                    # есть .owner — блок
+        os.environ["THEMIS_DRAFTS_OWNER"] = "abc123"
+        same_owner = _lock_probe(lock_target)                # свой токен — пускает
+        os.environ["THEMIS_DRAFTS_OWNER"] = "other"
+        other_owner = _lock_probe(lock_target)               # чужой токен — блок
+        own_ok = _lock_probe(lock_owner)                     # сам .owner писать можно
+        old = time.time() - 3600
+        os.utime(lock_owner, (old, old))
+        stale = _lock_probe(lock_target)                     # протухший лок — не блок
+    finally:
+        _CASES_ROOTS = saved_roots
+        if old_token is None:
+            os.environ.pop("THEMIS_DRAFTS_OWNER", None)
+        else:
+            os.environ["THEMIS_DRAFTS_OWNER"] = old_token
+    cases += [
+        ("нет .owner — запись черновиков проходит", free, 0),
+        ("свежий .owner — чужая запись черновиков заблокирована", locked, 2),
+        ("свой токен .owner — запись черновиков проходит", same_owner, 0),
+        ("чужой токен .owner — запись черновиков заблокирована", other_owner, 2),
+        ("сам файл .owner писать можно", own_ok, 0),
+        ("протухший лок (>45 мин) не блокирует", stale, 0),
+    ]
+
     bad = [name for name, got, want in cases if got != want]
     for name, got, want in cases:
         print(f"  {'✓' if got == want else '✗'} {name}" + ("" if got == want else f" (ждали {want}, вышло {got})"))

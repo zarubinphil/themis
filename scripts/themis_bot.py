@@ -8,7 +8,7 @@
 владельца узнаёт панель по своему токену. Это же бот объясняет владельцу первым
 сообщением, а не прячет в документации.
 
-Секрет. Токен живёт в `~/.secrets/themis-telegram.env` (переменная
+Секрет. Токен живёт в `$HOME/.secrets/themis-telegram.env` (переменная
 `THEMIS_TELEGRAM_BOT_TOKEN`), имя переменной берётся из конфига. В коде, в git и в
 примерах — только ИМЯ. Аргументом командной строки секрет не принимается вовсе:
 argv видно любому процессу машины через `ps`.
@@ -146,7 +146,7 @@ def gotovnost(c: dict, path: str | None = None) -> list:
         beda.append("не названа переменная с токеном (bot.token_env)")
     elif not token(c):
         beda.append(f"переменная {c['bot']['token_env']} пуста — положить токен в "
-                    "~/.secrets/themis-telegram.env и передать в окружение запуска")
+                    "$HOME/.secrets/themis-telegram.env и передать в окружение запуска")
     svoy = owner(c)
     if not svoy:
         beda.append(f"не задан чат владельца (переменная {c['bot'].get('chat_id_env')}) — "
@@ -366,7 +366,7 @@ def tg(c: dict, api_base: str, metod: str, telo: dict | None = None, taymaut: in
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
             raise Otkaz(f"Telegram не принял токен ({e.code}). Проверить значение "
-                        f"{c['bot'].get('token_env')} в ~/.secrets/themis-telegram.env — "
+                        f"{c['bot'].get('token_env')} в $HOME/.secrets/themis-telegram.env — "
                         "здесь его не печатаю.")
         raise Otkaz(f"Telegram ответил {e.code} на {metod}")
     except urllib.error.URLError as e:

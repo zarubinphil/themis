@@ -1,5 +1,5 @@
 #!/bin/bash
-# inbox-watcher.sh — обрабатывает новые файлы в ~/Desktop/inbox/
+# inbox-watcher.sh — обрабатывает новые файлы в $HOME/Desktop/inbox/
 #
 # Запускается автоматически через launchd (WatchPaths) при появлении файлов.
 # Для ручного запуска: $ROOT/scripts/inbox-watcher.sh

@@ -120,7 +120,7 @@
 - `--dangerously-skip-permissions` — никогда.
 - Имена папок из `cases/` в коде, комментариях и фикстурах — только вымышленные
   (`testfam-ab`, `testfam-cd`): репозиторий публичный.
-- Секреты только в `~/.secrets` и Keychain.
+- Секреты только в `$HOME/.secrets` и Keychain.
 - `scripts/stage9_spec.py` правит ТОЛЬКО координатор, ужесточая контракт
   отдельным коммитом ДО починки, с переякорением
   (`python3 scripts/loop_gate.py --anchor-spec scripts/stage9_spec.py`).

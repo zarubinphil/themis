@@ -1,0 +1,30 @@
+{
+  "schema_version": 2,
+  "family_id": "zarubinvibe-pantheon",
+  "catalog_version": "2026-08-26",
+  "project": {
+    "slug": "themis",
+    "deity": "Themis",
+    "symbol": "scales and sword"
+  },
+  "visuals": {
+    "style_anchor_sha256": "ce524f9d22cb0092cb17aa280832e1b2ab2a77a0e01602065ec502232a3bb2d2",
+    "column_reference_sha256": "9d32edd56ac55c4dd6d0425a28a2ac35035e9ab09073fc8ce0c1414b2edfb1bd",
+    "hero": {
+      "source_path": "docs/assets/pantheon/hero-source.png",
+      "source_sha256": "9fa6365e886c87ab15c621fedc6d04c9a5bf90aa44fcf9fd0de7610ac6001678",
+      "published_path": "docs/assets/pantheon/hero.png",
+      "published_sha256": "9fa6365e886c87ab15c621fedc6d04c9a5bf90aa44fcf9fd0de7610ac6001678"
+    },
+    "emblem": {
+      "source_path": "docs/assets/pantheon/emblem-source.png",
+      "source_sha256": "b86e46bab70357e34c8118ed09d68f5b1394067b8558aa4598474a6ef1e9432f",
+      "published_path": "docs/assets/pantheon/emblem.png",
+      "published_sha256": "d56e8483b02f8d715fe4f631ff78c746cfb6daacffc7d00331e025be688e1514"
+    }
+  },
+  "receipts": {
+    "generation_path": ".github/pantheon/generation-receipt.json",
+    "visual_judge_path": ".github/pantheon/visual-judge-receipt.json"
+  }
+}

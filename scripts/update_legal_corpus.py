@@ -156,7 +156,8 @@ SUDACT_PLENUM_CATALOG = "https://sudact.ru/law/authority/plenum-vs-rf/"
 # Кеш HTTP был бессрочным: один раз скачав страницу, скрипт больше НИКОГДА не шел
 # к источнику, а `--check` при этом рапортовал «без изменений». Проверка актуальности
 # по вечному кешу — не проверка. Держим срок жизни и режим обхода.
-CACHE_MAX_AGE = 86400  # сутки: внутри одного прогона повторы дешевы, между прогонами — нет
+CACHE_MAX_AGE = int(os.environ.get("LEGAL_CORPUS_CACHE_MAX_AGE", "86400"))
+# По умолчанию сутки: внутри одного прогона повторы дешевы, между прогонами — нет.
 
 
 HTTP_MARKER = "\n__HTTP__"          # curl -w дописывает код и тип в конец тела
@@ -458,9 +459,9 @@ def scope_to_chapter(entries: list, chapter_num: str) -> list:
     return out
 
 
-def build_kodeks_body(doc_id: int, entries: list, doc_id_str: str) -> tuple[str, int, int]:
-    """Тянет статьи по одному, возвращает (markdown, ok_count, fail_count)."""
-    lines, ok, fail = [], 0, 0
+def build_kodeks_body(doc_id: int, entries: list, doc_id_str: str) -> tuple[str, int, int, list[str]]:
+    """Тянет статьи по одному, возвращает (markdown, ok_count, fail_count, missing)."""
+    lines, ok, fail, missing = [], 0, 0, []
     for kind, num, title, h in entries:
         if kind == "heading":
             lines.append(f"\n## {title}\n")
@@ -470,6 +471,7 @@ def build_kodeks_body(doc_id: int, entries: list, doc_id_str: str) -> tuple[str,
         raw = http_get(url, cache_key)
         if raw is None:
             fail += 1
+            missing.append(f"Статья {num}. {title} — не удалось получить страницу; {url}")
             lines.append(f"\n### Статья {num}. {title}\n\n_не удалось получить со "
                           f"страницы {url} — требует ручной проверки._\n")
             continue
@@ -484,6 +486,8 @@ def build_kodeks_body(doc_id: int, entries: list, doc_id_str: str) -> tuple[str,
                             re.sub(r"<[^>]+>", " ", h1.group(1)))
             if got and got.group(1) != num.rstrip("."):
                 fail += 1
+                missing.append(f"Статья {num}. {title} — страница озаглавлена "
+                               f"«Статья {got.group(1)}»; {url}")
                 lines.append(f"\n### Статья {num}. {title}\n\n_НЕ СОВПАЛ НОМЕР: страница "
                              f"{url} озаглавлена «Статья {got.group(1)}». Текст не внесен, "
                              f"требует ручной проверки._\n")
@@ -491,12 +495,13 @@ def build_kodeks_body(doc_id: int, entries: list, doc_id_str: str) -> tuple[str,
         body = extract_article_text(raw)
         if not body:
             fail += 1
+            missing.append(f"Статья {num}. {title} — текст не распознан; {url}")
             lines.append(f"\n### Статья {num}. {title}\n\n_текст не распознан на "
                           f"странице {url} — требует ручной проверки._\n")
             continue
         ok += 1
         lines.append(f"\n### Статья {num}. {title}\n\n{body}\n")
-    return "".join(lines), ok, fail
+    return "".join(lines), ok, fail, missing
 
 
 def frontmatter(meta: dict, body_sha: str, extra: dict | None = None) -> str:
@@ -558,6 +563,16 @@ def read_frontmatter_dates(path: str) -> list[str] | None:
     return [m.group(1)] if m else None
 
 
+def read_frontmatter_list(path: str, field: str) -> list[str]:
+    if not os.path.exists(path):
+        return []
+    text = open(path, encoding="utf-8").read()
+    m = re.search(rf"^{re.escape(field)}:\n((?:  - .*\n)+)", text, re.M)
+    if not m:
+        return []
+    return [line[4:].strip() for line in m.group(1).splitlines()]
+
+
 def append_log(line: str) -> None:
     os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
     stamp = datetime.now().strftime("%d.%m.%Y %H:%M")
@@ -578,6 +593,13 @@ def cmd_check_one(entry: dict) -> str:
         return f"{entry['slug']}: НЕ ВЫГРУЖЕН (--init для загрузки)"
     old_dates = read_frontmatter_dates(path)
     new_dates = [m.get("redaction_date", "?") for m in metas]
+    missing = read_frontmatter_list(path, "пропущенные_статьи")
+    if missing:
+        brief = "; ".join(missing[:3])
+        if len(missing) > 3:
+            brief += "; ..."
+        return (f"{entry['slug']}: НЕПОЛНАЯ ВЫГРУЗКА — {len(missing)} пропущено. "
+                f"Нужен --update --doc {entry['slug']}. {brief}")
     if old_dates == new_dates:
         return f"{entry['slug']}: без изменений (ред. {', '.join(new_dates)})"
     return f"{entry['slug']}: ИЗМЕНИЛОСЬ ред. {old_dates} -> {new_dates} — нужен --update --doc {entry['slug']}"
@@ -589,6 +611,7 @@ def cmd_build_one(entry: dict, mode: str) -> None:
     path = os.path.join(KODEKSY_DIR, f"{slug}.md")
     parts_md, metas = [], []
     total_ok, total_fail = 0, 0
+    missing_articles = []
     labels = entry.get("part_labels", [None] * len(entry["doc_ids"]))
     for doc_id, label in zip(entry["doc_ids"], labels):
         meta, entries = fetch_toc(doc_id)
@@ -599,9 +622,10 @@ def cmd_build_one(entry: dict, mode: str) -> None:
             entries = scope_to_chapter(entries, entry["chapter_scope"])
         print(f"  doc {doc_id}: {len(entries)} записей ToC "
               f"(ред. {meta.get('redaction_date','?')})")
-        body, ok, fail = build_kodeks_body(doc_id, entries, str(doc_id))
+        body, ok, fail, missing = build_kodeks_body(doc_id, entries, str(doc_id))
         total_ok += ok
         total_fail += fail
+        missing_articles.extend(missing)
         if label:
             parts_md.append(f"\n# {label}\n{body}")
         else:
@@ -620,6 +644,8 @@ def cmd_build_one(entry: dict, mode: str) -> None:
         # только для человека, склеенную строку с ней не сверить надежно).
         fm_extra["даты_частей"] = [m.get("redaction_date", "?") for m in metas]
         fm_extra["источник"] = [m.get("source_url", "") for m in metas]
+    if missing_articles:
+        fm_extra["пропущенные_статьи"] = missing_articles
     content = frontmatter(metas[0], body_sha, fm_extra if fm_extra else None) + full_body
     old_sha = read_existing_sha(path)
     changed = old_sha != body_sha
@@ -627,17 +653,15 @@ def cmd_build_one(entry: dict, mode: str) -> None:
         archive_old(path)
         print(f"  редакция изменилась — старая версия в {ARCHIVE_DIR}/{TODAY.replace('.', '-')}/")
     os.makedirs(KODEKSY_DIR, exist_ok=True)
-    # Частичный сбой не должен затирать рабочий корпус: одна сетевая ошибка при
-    # прежней прямой записи оставляла на диске обрезанный кодекс вместо целого.
     if total_fail:
-        # Условие «только поверх существующего файла» оставляло дыру: ПЕРВЫЙ --init
-        # при обрывах писал дырявый корпус и возвращал 0. Дырявый корпус хуже пустого:
-        # cite.py отдаст «статья не найдена» там, где она есть.
-        where = "рабочий файл НЕ трогаем" if old_sha is not None else "файл НЕ создаем"
-        print(f"  ! {slug}: {total_fail} статей не скачалось — {where}. "
+        print(f"  ! {slug}: {total_fail} статей не скачалось — пишем файл с пометками. "
               f"Повторить: --update --doc {slug}")
-        FAILURES.append(f"{slug}: {total_fail} статей не скачалось, файл не обновлен")
-        return
+        for item in missing_articles:
+            print(f"    ! {item}")
+        brief = "; ".join(missing_articles[:5])
+        if len(missing_articles) > 5:
+            brief += "; ..."
+        FAILURES.append(f"{slug}: {total_fail} статей не скачалось: {brief}")
     write_atomic(path, content)
     status = "новый" if old_sha is None else ("обновлен" if changed else "без изменений")
     print(f"  -> {path} ({status}, статей ok={total_ok} fail={total_fail})")
@@ -1057,7 +1081,9 @@ def main() -> int:
         for e in targets:
             line = cmd_check_one(e)
             print(line)
-            if "?" in line:
+            if "НЕПОЛНАЯ ВЫГРУЗКА" in line:
+                FAILURES.append(line)
+            elif "?" in line:
                 unknown += 1
                 FAILURES.append(f"{e['slug']}: дата редакции неизвестна — сверка невозможна")
             else:

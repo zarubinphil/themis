@@ -236,12 +236,19 @@ def brief(case: Path, level: str) -> None:
     print()
 
 
-def korpus_predupredit(case: Path) -> None:
-    """Кричит, если корпуса права нет или он поредел. Дешево: считает файлы."""
+def _korpus_counts(case: Path) -> tuple[int, int]:
+    """Сколько кодексов и Пленумов на диске. Один источник счёта для предупреждения
+    (brief) и для кода возврата main — чтобы «неполный корпус» краснел, а не был фоном."""
     root = case.parents[2] if len(case.parents) > 2 else Path.cwd()
     kod, plen = root / "knowledge" / "kodeksy", root / "knowledge" / "plenumy"
     est = len(list(kod.glob("*.md"))) if kod.is_dir() else 0
     plenumov = len(list(plen.glob("*.md"))) if plen.is_dir() else 0
+    return est, plenumov
+
+
+def korpus_predupredit(case: Path) -> None:
+    """Кричит, если корпуса права нет или он поредел. Дешево: считает файлы."""
+    est, plenumov = _korpus_counts(case)
     if est == 0:
         print("  ⚠ КОРПУС ПРАВА ПУСТ: дословных цитат статей не будет, cite.py вернёт "
               "«не найдено», госпошлина не посчитается. Выгрузить: "
@@ -259,6 +266,83 @@ def read(f: Path) -> str:
         return f.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return ""
+
+
+def age_minutes(f: Path) -> float:
+    try:
+        mtime = datetime.datetime.fromtimestamp(f.stat().st_mtime)
+        return (datetime.datetime.now() - mtime).total_seconds() / 60
+    except OSError:
+        return 10.0**9
+
+
+def track_hint(case: Path) -> str:
+    """Грубый трек по объёму материалов — тот же счёт, что печатает brief()."""
+    intake = case / "00_intake"
+    files = [f for f in intake.rglob("*")
+             if f.is_file() and not f.name.startswith((".", "~$"))] if intake.is_dir() else []
+    scans = [f for f in files if f.suffix.lower() in SCAN_EXT]
+    done = extracted(files)
+    if len(files) <= 3 and not scans:
+        return "MICRO"
+    if len(files) <= 6 and (not scans or done >= len(scans)):
+        return "FAST"
+    return "FULL"
+
+
+def declared_track(case: Path) -> str:
+    """Трек, явно записанный в деле, сильнее грубой оценки по числу файлов."""
+    for f in [case / "_case.md", case / ".agent" / "context" / "_working" / "brief.md"]:
+        text = re.sub(r"[*_`]", "", read(f))
+        m = re.search(r"\b(?:ТРЕК|Трек|track)\s*[:：]\s*(MICRO|FAST|FULL)\b", text, re.I)
+        if m:
+            return m.group(1).upper()
+    return track_hint(case)
+
+
+def aktivnye_agenty(case: Path) -> str:
+    """Кто работает по делу СЕЙЧАС. Надёжный сигнал на диске — лок черновиков .owner
+    (его пишет/держит claude_guard). Субагенты живут ВНУТРИ процесса claude, отдельными
+    процессами ОС их не видно — ceiling: печатаем лок, не ps. Данных нет — так и говорим,
+    но строка обязана быть (25.08 статус молчал о том, кто ещё пишет в дело)."""
+    owner = case / ".agent" / "drafts" / ".owner"
+    if owner.is_file():
+        try:
+            who = " ".join(owner.read_text(encoding="utf-8", errors="ignore").split())
+        except OSError:
+            who = ""
+        who = who or "(лок без имени)"
+        stale = " ⚠ лок протух (>45 мин)" if age_minutes(owner) > 45 else ""
+        return f"активные агенты: лок черновиков держит {who}{stale}"
+    return "активные агенты: нет данных"
+
+
+def rashod_stroka(case: Path, track: str) -> tuple[str, bool, bool]:
+    """(строка, не_измерен, перерасход). Расход считает прибор token_ledger по свежей
+    сессии проекта — не глаз и не самоотчёт модели. Ledger недоступен/молчит — «не
+    измерен» и это ненулевой код (25.08 расход прочли как фон и продолжили)."""
+    try:
+        import token_ledger as tl
+    except Exception as e:  # noqa: BLE001 — любой сбой импорта = не измерено
+        return (f"расход: не измерен — token_ledger недоступен ({e})", True, False)
+    try:
+        path = tl.latest_session(str(case))
+    except Exception:
+        path = None
+    if not path or not os.path.isfile(path):
+        return ("расход: не измерен — session.jsonl проекта не найден", True, False)
+    try:
+        tot = tl.tokens(tl.collect(path)["total"])
+    except Exception as e:  # noqa: BLE001
+        return (f"расход: не измерен — ledger не разобрал сессию ({e})", True, False)
+    if tot <= 0:
+        return ("расход: не измерен — ledger дал 0 токенов по делу; "
+                "это не подтверждает бюджет", True, False)
+    budget = tl.TRACK_BUDGET.get(track) or tl.TRACK_BUDGET["FULL"]
+    over = tot > budget
+    line = (f"расход: {tot:,} ток. · цель {track} {budget:,} ток."
+            .replace(",", " "))
+    return (line, False, over)
 
 
 def main() -> int:
@@ -412,7 +496,33 @@ def main() -> int:
               "суммам, доказательства вручения, согласия и разрешения) и записать "
               "строку. Охота, запущенная до заморозки, переискивает по каждой новой "
               "порции материалов: прецедент 15.08.2026 — 51% расхода прогона.")
-    return 0
+
+    # ── Зубы прибора (ход 4 разбора): агенты, расход, корпус, источник проверки ──
+    # Раньше main() всегда возвращал 0, а неполный корпус был лишь предупреждением;
+    # 25.08 это прочли как фон и продолжили работу. Теперь состояние отражается в коде.
+    print()
+    print(f"  {aktivnye_agenty(case)}")
+    track = declared_track(case)
+    rline, ne_izmeren, pererashod = rashod_stroka(case, track)
+    print(f"  {rline}")
+    if pererashod:
+        print("  СТОП: перерасход, доложить владельцу")
+
+    est, plenumov = _korpus_counts(case)
+    korpus_nepolon = est < NUZHNO_KODEKSOV or plenumov == 0
+    if korpus_nepolon and not a.brief:   # в brief() korpus уже прокричал — не двоить
+        korpus_predupredit(case)
+
+    # Прибор обязан назвать, ЧТО он прочитал: вердикт без источника проверки — не вердикт.
+    print(f"\n  прочитано с диска: {case}")
+    print("  маркеров проверено: 4 (карта · практика · позиция · вердикт Кони)")
+
+    rc = 0
+    if pererashod:
+        rc = 3
+    elif ne_izmeren or korpus_nepolon:
+        rc = 2
+    return rc
 
 
 def selftest() -> int:
@@ -491,6 +601,38 @@ def selftest() -> int:
         ("отрицание не глушит маркер в других строках",
          has_marker(mixed, r"СОГЛАСОВАНО СОВЕТОМ")),
     ]
+    # Активные агенты по локу черновиков .agent/drafts/.owner (ремонт 25.08).
+    drafts = case / ".agent" / "drafts"
+    drafts.mkdir(parents=True, exist_ok=True)
+    net_owner = aktivnye_agenty(case)
+    (drafts / ".owner").write_text("Мейер · 25.08.2026 14:00", encoding="utf-8")
+    est_owner = aktivnye_agenty(case)
+    checks += [
+        ("нет .owner — активные агенты: нет данных", "нет данных" in net_owner),
+        ("есть .owner — назван держатель лока", "Мейер" in est_owner),
+        # Трек считается по объёму: два скана, извлечён один — ещё FULL.
+        ("трек по объёму — FULL", track_hint(case) == "FULL"),
+    ]
+    import token_ledger as tl
+    old_latest, old_collect, old_tokens = tl.latest_session, tl.collect, tl.tokens
+    seen = []
+    try:
+        (tmp / "session.jsonl").write_text("", encoding="utf-8")
+        tl.latest_session = lambda cwd: seen.append(cwd) or str(tmp / "session.jsonl")
+        tl.collect = lambda path: {"total": {"input": 0, "output": 0,
+                                             "cache_creation": 0, "cache_read": 0}}
+        tl.tokens = lambda u: 0
+        line, no_data, over = rashod_stroka(case, "FAST")
+        checks += [
+            ("расход привязан к пути дела, не cwd", seen == [str(case)]),
+            ("нулевой расход — не измерен", no_data and not over and "0 токенов" in line),
+        ]
+        (case / "_case.md").write_text(read(case / "_case.md") + "- **Трек:** FAST\n",
+                                       encoding="utf-8")
+        checks.append(("явный трек сильнее объёма", declared_track(case) == "FAST"))
+    finally:
+        tl.latest_session, tl.collect, tl.tokens = old_latest, old_collect, old_tokens
+
     for name, ok in checks:
         print(f"  {'✓' if ok else '✗'} {name}")
     bad = [n for n, ok in checks if not ok]

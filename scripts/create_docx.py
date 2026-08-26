@@ -593,12 +593,25 @@ class DocBuilder:
         self._quote_paragraphs.add(p._p)
         return p
 
-    def add_proshyu(self):
-        """Заголовок ПРОШУ: CENTER, bold, 12pt, sa=6."""
+    def add_proshyu(self, document_type="court"):
+        """Заголовок просительной части: для суда ПРОШУ, для письма ПРОСИМ."""
+        key = str(document_type or "court").strip().lower()
+        letter_types = {
+            "letter", "counterparty", "claim-letter", "pretrial-letter",
+            "письмо", "контрагент", "контрагенту", "претензия",
+            "письмо контрагенту",
+        }
+        court_types = {"court", "claim", "lawsuit", "иск", "суд", "судебный"}
+        if key in letter_types:
+            label = "ПРОСИМ"
+        elif key in court_types:
+            label = "ПРОШУ"
+        else:
+            raise ValueError(f"неизвестный тип документа для просительной части: {document_type}")
         p = self.doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p.paragraph_format.space_after = Pt(6)
-        _set_font(p.add_run("ПРОШУ:"), 12, bold=True, family=FONT_DISPLAY)
+        _set_font(p.add_run(f"{label}:"), 12, bold=True, family=FONT_DISPLAY)
         return p
 
     def add_request_item(self, text):
@@ -882,42 +895,8 @@ class DocBuilder:
 
         Вручную звать не обязательно: `save()` вызывает сам, если не вызвали.
         """
-        from copy import deepcopy
-
         self._paginated = True
-
-        section = self.doc.sections[0]
-        section.different_first_page_header_footer = hide_on_first
-        footer = section.footer
-        footer.is_linked_to_previous = False
-        # Номеру нужен СВОЙ абзац. Нижний колонтитул может быть уже занят —
-        # в образцах legal design туда пишут сноску («Образец, фактура вымышлена»),
-        # и номер, подсаженный в тот же абзац, вставал впритык к чужому тексту
-        # по центру. Занятый абзац не трогаем, берем следующий; абзац, где номер
-        # уже стоит, переиспользуем — иначе повторный вызов даст два номера.
-        for cand in footer.paragraphs:
-            if "PAGE" in cand._p.xml:
-                self._service_elements.add(cand._p)   # номер уже стоит — второй не ставим
-                return cand
-        p = next((c for c in footer.paragraphs
-                  if not c.text.strip() and not c.runs), None)
-        if p is None:
-            p = footer.add_paragraph()
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        probe = p.add_run("")
-        _set_font(probe, 12, family=FONT_DISPLAY)
-        rPr = probe._r.find(qn("w:rPr"))
-
-        fld = OxmlElement("w:fldSimple")
-        fld.set(qn("w:instr"), " PAGE ")
-        r = OxmlElement("w:r")
-        if rPr is not None:
-            r.append(deepcopy(rPr))
-        text_el = OxmlElement("w:t")
-        text_el.text = "2"
-        r.append(text_el)
-        fld.append(r)
-        p._p.append(fld)
+        p = apply_page_numbers(self.doc, hide_on_first)
         self._service_elements.add(p._p)
         return p
 
@@ -1155,7 +1134,7 @@ class DocBuilder:
 
         # Скилл едет ВНУТРИ репозитория, поэтому свежая установка на другом
         # устройстве работает сразу. Прецедент 21.08.2026: гейт искал скрипт
-        # только в ~/.claude/skills/, на второй машине его не было, и ни один
+        # только в $HOME/.claude/skills/, на второй машине его не было, и ни один
         # судебный документ не выпускался вовсе. Домашняя копия остаётся
         # запасным путём: у владельца скилл живёт там и правится там.
         scan = _P(__file__).resolve().parent.parent / \
@@ -1308,6 +1287,54 @@ class DocBuilder:
                     f"приложениях и повторите save()") from e
 
 
+def apply_page_numbers(doc, hide_on_first=True):
+    """Номер страницы в центре нижнего поля любого python-docx документа.
+
+    Вынесено из DocBuilder.add_page_numbers: тем же номером обязаны
+    обзаводиться документы, собранные не через DocBuilder (кадровые формы,
+    внутренние пакеты). «Обязательно в каждом документе без исключений»
+    не выдерживается, если постановщик доступен одному входу.
+
+    Возвращает абзац с номером; повторный вызов второй номер не ставит.
+    """
+    from copy import deepcopy
+
+
+    section = doc.sections[0]
+    section.different_first_page_header_footer = hide_on_first
+    footer = section.footer
+    footer.is_linked_to_previous = False
+    # Номеру нужен СВОЙ абзац. Нижний колонтитул может быть уже занят —
+    # в образцах legal design туда пишут сноску («Образец, фактура вымышлена»),
+    # и номер, подсаженный в тот же абзац, вставал впритык к чужому тексту
+    # по центру. Занятый абзац не трогаем, берем следующий; абзац, где номер
+    # уже стоит, переиспользуем — иначе повторный вызов даст два номера.
+    for cand in footer.paragraphs:
+        if "PAGE" in cand._p.xml:
+            return cand
+    p = next((c for c in footer.paragraphs
+              if not c.text.strip() and not c.runs), None)
+    if p is None:
+        p = footer.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    probe = p.add_run("")
+    _set_font(probe, 12, family=FONT_DISPLAY)
+    rPr = probe._r.find(qn("w:rPr"))
+
+    fld = OxmlElement("w:fldSimple")
+    fld.set(qn("w:instr"), " PAGE ")
+    r = OxmlElement("w:r")
+    if rPr is not None:
+        r.append(deepcopy(rPr))
+    text_el = OxmlElement("w:t")
+    text_el.text = "2"
+    r.append(text_el)
+    fld.append(r)
+    p._p.append(fld)
+    return p
+
+
+
 def _verdict_gate_checks(tmp):
     """Жизненный цикл документа: .docx собирается ОДИН раз, из редакции, одобренной Кони."""
     import sys as _s
@@ -1322,7 +1349,7 @@ def _verdict_gate_checks(tmp):
     md = _cp.drafts(case) / "isk_v1.md"
     # Сборка обязана воспроизводить одобренный текст (этап 9, круг 6): тело
     # фикстуры равно тексту .md, иначе гейт равенства правомерно не пустит.
-    md.write_text("# ИСКОВОЕ ЗАЯВЛЕНИЕ\n\nТекст документа без плейсхолдеров.\n",
+    md.write_text("# ИСКОВОЕ ЗАЯВЛЕНИЕ\n\nПервая редакция требует правок.\n",
                   encoding="utf-8")
     target = _cp.ready(case) / "isk_v1.docx"
 
@@ -1339,6 +1366,8 @@ def _verdict_gate_checks(tmp):
     build().save(str(target))
     not_ready = not target.exists()
 
+    md.write_text("# ИСКОВОЕ ЗАЯВЛЕНИЕ\n\nТекст документа без плейсхолдеров.\n",
+                  encoding="utf-8")
     _v.record(md, _v.READY, 2)
     build().save(str(target))
     saved = target.exists()
@@ -1413,6 +1442,17 @@ def selftest() -> int:
     d_plain, d_busy, d_twice = (Document(p) for p in (plain, busy, twice))
     foot_plain = d_plain.sections[0].footer
     foot_busy = d_busy.sections[0].footer
+    proshyu_default = DocBuilder()
+    proshyu_default.add_proshyu()
+    proshyu_letter = DocBuilder()
+    proshyu_letter.add_proshyu("letter")
+    proshyu_ru_letter = DocBuilder()
+    proshyu_ru_letter.add_proshyu("письмо контрагенту")
+    try:
+        DocBuilder().add_proshyu("письмо поставщику")
+        unknown_proshyu_rejected = False
+    except ValueError:
+        unknown_proshyu_rejected = True
 
     checks = [
         ("гарнитура в документе одна — PT Serif", fonts(plain) == {FONT_BODY}),
@@ -1436,6 +1476,14 @@ def selftest() -> int:
          d_twice.sections[0].footer._element.xml.count(" PAGE ") == 1),
         ("буква ё вычищена при сохранении", "ё" not in "".join(
             p.text for p in d_plain.paragraphs)),
+        ("просительная часть суда — ПРОШУ",
+         proshyu_default.doc.paragraphs[-1].text == "ПРОШУ:"),
+        ("письмо контрагенту просит от лица компании",
+         proshyu_letter.doc.paragraphs[-1].text == "ПРОСИМ:"),
+        ("русский тип письма контрагенту распознан",
+         proshyu_ru_letter.doc.paragraphs[-1].text == "ПРОСИМ:"),
+        ("неизвестный тип документа отвергнут",
+         unknown_proshyu_rejected),
     ] + _verdict_gate_checks(tmp)
 
     for name, ok in checks:

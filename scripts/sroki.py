@@ -319,7 +319,7 @@ def _notify_deadline(end: date) -> None:
     """Считанный срок → напоминание в Telegram, тем же путём, что и morning-briefing.sh:
     секрета нет либо бот выключен — молча пропускаем, вычисление срока от бота не зависит.
     Дата — единственное, что уходит наружу (themis_bot.cmd_notify_deadline сам режет ПД)."""
-    secret = os.path.expanduser("~/.secrets/themis-telegram.env")
+    secret = os.path.join(os.path.expanduser("~"), ".secrets", "themis-telegram.env")
     if not os.path.isfile(secret):
         return
     bot = os.path.join(os.path.dirname(os.path.abspath(__file__)), "themis_bot.py")

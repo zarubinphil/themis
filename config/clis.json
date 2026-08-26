@@ -1,0 +1,80 @@
+{
+  "_комментарий": "Уроки П26/справки-CLI 23.08.2026: kimi -y/-auto несовместимы с -p; зонд обязан быть настоящим прогоном, не provider list; у codex нет fetch произвольного URL.",
+  "claude": {
+    "invoke_read": [
+      "claude",
+      "-p",
+      "--allowedTools",
+      "Bash,Read,Grep,Glob"
+    ],
+    "invoke_write": [
+      "claude",
+      "-p",
+      "--permission-mode",
+      "acceptEdits",
+      "--allowedTools",
+      "Bash,Read,Edit,Write,Grep,Glob,TodoWrite"
+    ],
+    "stdin_prompt": true,
+    "roles": [
+      "execute",
+      "verify",
+      "advise",
+      "synthesize"
+    ],
+    "web": {
+      "search": "WebSearch",
+      "fetch": "WebFetch"
+    }
+  },
+  "codex": {
+    "invoke_read": [
+      "codex",
+      "--ask-for-approval",
+      "never",
+      "exec",
+      "--skip-git-repo-check",
+      "-s",
+      "read-only"
+    ],
+    "invoke_write": [
+      "codex",
+      "--ask-for-approval",
+      "never",
+      "exec",
+      "--skip-git-repo-check",
+      "-s",
+      "workspace-write"
+    ],
+    "stdin_prompt": true,
+    "roles": [
+      "execute",
+      "verify",
+      "advise",
+      "synthesize"
+    ],
+    "web": {
+      "search": "--search",
+      "fetch": null
+    },
+    "_почему_без_ephemeral": "с --ephemeral codex не пишет rollout, и замер расхода в helioz-gate --budget слепнет (поймано 24.08 живым прогоном)"
+  },
+  "kimi": {
+    "invoke_read": [
+      "kimi",
+      "-p"
+    ],
+    "invoke_write": null,
+    "_почему_без_write": "поведение kimi -p на запись без -y не проверено (справка-CLI §непроверенное); до пробы - только чтение",
+    "stdin_prompt": false,
+    "roles": [
+      "verify",
+      "advise"
+    ],
+    "web": {
+      "search": "WebSearch",
+      "fetch": "FetchURL"
+    }
+  },
+  "_урок_25.08.2026_право_на_bash": "acceptEdits без --allowedTools даёт агенту правку файлов, но НЕ Bash: в -p режиме запрос прав автоматически отклоняется, и исполнитель физически не может ни проверить себя, ни закоммитить. --dangerously-skip-permissions запрещён конституцией владельца (он сносит хуки). --allowedTools пре-одобряет named-инструменты и при этом НЕ отключает permissions.deny и хуки security-guard/claude_guard — они остаются последним словом."
+}

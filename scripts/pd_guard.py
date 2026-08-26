@@ -268,6 +268,17 @@ _STATIC_ASSET_EXT = (
     ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico",
     ".css", ".map", ".woff", ".woff2", ".ttf", ".otf",
 )
+_PUBLIC_HYGIENE_PATTERNS = (
+    ("абсолютный локальный путь", re.compile(
+        r"(?<![A-Za-z0-9])(?:/Users|/home)/[^\s`\"'<>)]*"
+    )),
+    ("домашний путь проекта", re.compile(
+        r"(?<![A-Za-z0-9])~/(?:Проекты|Projects|Мозг)\b[^\s`\"'<>)]*"
+    )),
+    ("прямой путь секрета", re.compile(
+        r"(?<![A-Za-z0-9])~/\.secrets\b[^\s`\"'<>)]*"
+    )),
+)
 
 
 def _skip_strong_pii_scan(where: str) -> bool:
@@ -279,6 +290,8 @@ def _skip_strong_pii_scan(where: str) -> bool:
     """
     path = where.replace("\\", "/")
     if any(path.startswith(f"cases/{demo}/") for demo in DEMO):
+        return True
+    if path in {"knowledge/kadry/_articles.json", "knowledge/kadry/_templates.sha256"}:
         return True
     return path.lower().endswith(_STATIC_ASSET_EXT)
 
@@ -306,6 +319,25 @@ def scan_pii(text: str, where: str) -> list[str]:
         line_no = text.count("\n", 0, start) + 1
         out.append(f"{where}:{line_no} — похоже на персональные данные ({cat}), "
                    "не имя папки дела. Само значение не печатается")
+    return out
+
+
+def scan_public_hygiene(text: str, where: str) -> list[str]:
+    """Публичный репозиторий не должен хранить машинные пути владельца.
+
+    Значение не печатаем по той же причине, что и фамилии: сторож не становится
+    вторым каналом утечки. Внутри используем только строгие формы, без догадок по
+    обычным словам документации.
+    """
+    if not text:
+        return []
+    out = []
+    normalized = normalize_public_scan(text)
+    for i, line in enumerate(normalized.splitlines(), 1):
+        for label, pat in _PUBLIC_HYGIENE_PATTERNS:
+            for m in pat.finditer(line):
+                out.append(f"{where}:{i} — публикационная утечка ({label}, "
+                           f"{len(m.group(0))} знаков). Само значение не печатается")
     return out
 
 
@@ -409,6 +441,7 @@ def _scan_file_text(path: str, blob: bytes, pat: re.Pattern | None) -> list[str]
     if not text:
         return []
     hits = scan_text(text, pat, path)
+    hits += scan_public_hygiene(text, path)
     if not _is_test_fixture_code(path):
         hits += scan_pii(text, path)
     return hits
@@ -433,6 +466,7 @@ def check_staged(pat: re.Pattern | None) -> list[str]:
     problems = []
     for f in staged_files():
         problems += scan_text(f, pat, "путь файла")
+        problems += scan_public_hygiene(f, "путь файла")
         blob = git_blob(f":{f}")
         if blob is None:
             problems.append(f"{f}:0 — файл есть в индексе, но blob не прочитан. "
@@ -463,8 +497,11 @@ def check_ref_txn(pat: re.Pattern | None, state: str, stdin: str | None = None) 
         if not ref.startswith("refs/tags/"):
             continue
         problems += scan_text(ref[len("refs/tags/"):], pat, "имя тега")
+        problems += scan_public_hygiene(ref[len("refs/tags/"):], "имя тега")
         if git("cat-file", "-t", new).strip() == "tag":   # тело только у аннотированного
-            problems += scan_text(git("cat-file", "-p", new), pat, "тело тега")
+            tag_body = git("cat-file", "-p", new)
+            problems += scan_text(tag_body, pat, "тело тега")
+            problems += scan_public_hygiene(tag_body, "тело тега")
     return problems
 
 
@@ -485,6 +522,7 @@ def check_push_refs(pat: re.Pattern | None, stdin: str | None = None) -> list[st
         refs.extend(x for x in git("tag", "--points-at", "HEAD").splitlines() if x)
     for ref in refs:
         problems += scan_text(ref, pat, "имя ветки/тега")
+        problems += scan_public_hygiene(ref, "имя ветки/тега")
     for row in rows:
         if len(row) < 4:
             continue
@@ -517,9 +555,12 @@ def check_push_content(pat: re.Pattern | None, local_sha: str, remote_sha: str) 
         return []
     problems = []
     meta_pat = name_pattern(client_names(), cyrillic=True) or pat
-    problems += scan_text(git("cat-file", "-p", commit), meta_pat, "метаданные коммита")
+    meta = git("cat-file", "-p", commit)
+    problems += scan_text(meta, meta_pat, "метаданные коммита")
+    problems += scan_public_hygiene(meta, "метаданные коммита")
     for f in _push_files(local_sha, remote_sha):
         problems += scan_text(f, pat, "путь файла")
+        problems += scan_public_hygiene(f, "путь файла")
         blob = git_blob(f"{commit}:{f}")
         if blob is None:
             problems.append(f"{f}:0 — blob уходящего коммита не прочитан. "
@@ -536,6 +577,7 @@ def check_tree(pat: re.Pattern | None) -> list[str]:
         if not os.path.isfile(path):
             continue
         problems += scan_text(f, pat, "путь файла")
+        problems += scan_public_hygiene(f, "путь файла")
         try:
             with open(path, "rb") as fh:
                 problems += _scan_file_text(f, fh.read(), pat)
@@ -644,7 +686,9 @@ def main() -> int:
         except OSError as e:
             print(f"сообщение коммита не прочитано ({e})", file=sys.stderr)
             return 0
-        return report(scan_text(text, pat, "сообщение коммита"), "сообщении коммита")
+        return report(scan_text(text, pat, "сообщение коммита") +
+                      scan_public_hygiene(text, "сообщение коммита"),
+                      "сообщении коммита")
     if a.local_logs:
         return report(check_local_logs(), "рабочих логах")
     if a.push:
@@ -690,6 +734,10 @@ def selftest() -> int:
     names = client_names(cases)
     pat = name_pattern(names)
     pat_msg = name_pattern(names, cyrillic=True)
+    abs_path = "/" + "Users/test/" + "Проекты/themis"
+    home_projects = "~/" + "Проекты/themis"
+    secret_path = "~/" + ".secrets/themis.env"
+    mixed_paths = "/" + "Users/test/x " + "~/" + ".secrets/a"
 
     def _docx_bytes(body: str) -> bytes:
         buf = io.BytesIO()
@@ -786,6 +834,15 @@ def selftest() -> int:
         ("рабочий лог, добавленный в git, ловится", _local_logs_probe(force_add=True) > 0),
         ("пустой список имён никого не ловит",
          scan_text("familiya-ab", name_pattern([]), "f") == []),
+        ("абсолютный путь владельца ловится публикационным сторожем",
+         len(scan_public_hygiene(abs_path, "f")) == 1),
+        ("домашний путь проекта ловится публикационным сторожем",
+         len(scan_public_hygiene(home_projects, "f")) == 1),
+        ("прямой путь секрета ловится публикационным сторожем",
+         len(scan_public_hygiene(secret_path, "f")) == 1),
+        ("публикационный сторож не печатает сам путь",
+         all(abs_path.rsplit("/", 1)[0] not in p and secret_path.split("/", 1)[0] not in p
+             for p in scan_public_hygiene(mixed_paths, "f"))),
         ("отчёт по находкам даёт код 1", report(["x"], "тесте") == 1),
         ("отчёт без находок даёт код 0", report([], "тесте") == 0),
         # Пара «утечка + обиход» для scan_pii (найдено прогоном 19.08.2026:

@@ -56,7 +56,7 @@ def _read_jsonl(path: str):
 
 def _project_dir(cwd: str) -> str:
     key = re.sub(r"[^A-Za-z0-9]", "-", cwd)
-    return os.path.join(os.path.expanduser("~/.claude/projects"), key)
+    return os.path.join(os.path.expanduser("$HOME/.claude/projects"), key)
 
 
 def _latest_session(cwd: str) -> str | None:

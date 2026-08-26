@@ -71,6 +71,40 @@ SPEC_INDENT_CM = 1.25
 TOLERANCE_MM = 1.0
 
 
+def _fmt_margins(m: dict) -> str:
+    return f"{m['top']}/{m['bottom']}/{m['left']}/{m['right']} мм"
+
+
+MACHINE_RULES = (
+    ("text.money", lambda: "каждая денежная сумма: цифры + пропись в круглых скобках; "
+     "пропись сверяется с числом, prefix-валюты и общая валюта перечня тоже проверяются; "
+     "сокращения тыс./млн./млрд. запрещены"),
+    ("text.dates", lambda: "даты только ДД.ММ.ГГГГ"),
+    ("text.yo", lambda: "буква ё/Ё запрещена"),
+    ("text.quotes", lambda: "прямые кавычки запрещены, нужны елочки"),
+    ("text.brackets", lambda: "квадратные скобки запрещены"),
+    ("text.placeholders", lambda: "плейсхолдеры {{...}}, ХХХ/XXX и [ЗАПОЛНИТЬ...] запрещены"),
+    ("text.blanks", lambda: "подчеркнутые пропуски ____ запрещены в процессуальных документах; "
+     "в договорах под --dogovor допустимы"),
+    ("docx.font", lambda: f"одна гарнитура: {SPEC_FONT_BODY}"),
+    ("docx.size", lambda: f"кегли судебного профиля: {sorted(SPEC_SIZES)}; "
+     f"адвокатский бланк: {sorted(SPEC_SIZES_ADVOKAT)}"),
+    ("docx.style", lambda: "курсив, подчёркивание и гиперссылки запрещены; "
+     "подчёркивание допустимо только в адвокатском бланке"),
+    ("docx.paragraph", lambda: f"тело по ширине, интервал {SPEC_LINE_SPACING}x "
+     f"({SPEC_LINE_SPACING_ADVOKAT}x для адвокатского бланка), отступ {SPEC_INDENT_CM} см "
+     f"({sorted(SPEC_INDENT_CM_ADVOKAT)} для адвокатского бланка)"),
+    ("docx.margins", lambda: f"поля: суд {_fmt_margins(SPEC_MARGINS_MM)}, "
+     f"L3 {_fmt_margins(SPEC_MARGINS_MM_L3)}, договор {_fmt_margins(SPEC_MARGINS_MM_DOGOVOR)}, "
+     f"адвокатский бланк {_fmt_margins(SPEC_MARGINS_MM_ADVOKAT)}"),
+    ("docx.page", lambda: "номер страницы: настоящее поле PAGE в нижнем колонтитуле, по центру; "
+     "первая страница без номера"),
+    ("docx.attachments", lambda: "приложения: сквозная нумерация, каждое непроцессуальное приложение "
+     "упомянуто в тексте"),
+    ("docx.md-parity", lambda: ".md и .docx совпадают по числам и длинным абзацам при --md"),
+)
+
+
 def iter_paragraphs(doc):
     """Все абзацы документа: тело, таблицы (рекурсивно) и колонтитулы.
 
@@ -398,27 +432,34 @@ def check_docx(path: str, l3: bool = False, dogovor: bool = False,
     # doc.element.xml его нет никогда. Прежняя проверка искала только там,
     # поэтому на корректном документе давала ложную тревогу, а на собранном
     # мимо DocBuilder — не давала никакой (баг найден 03.08.2026).
-    def xml_of(areas):
+    def page_paragraphs(area):
         out = []
-        for area in areas:
-            try:
-                out.append(area._element.xml)
-            except Exception:
-                pass
+        try:
+            for p in getattr(area, "paragraphs", []):
+                xml = p._p.xml
+                if re.search(r'<w:fldSimple[^>]+w:instr="[^"]*\bPAGE\b', xml) or "w:instrText" in xml and "PAGE" in xml:
+                    out.append(p)
+        except Exception:
+            pass
         return out
 
-    footers, headers = [], []
+    footer_pages, header_pages, first_footer_pages = [], [], []
     for sec in doc.sections:
-        footers += xml_of((sec.footer, sec.first_page_footer, sec.even_page_footer))
-        headers += xml_of((sec.header, sec.first_page_header, sec.even_page_header))
-    if not any("PAGE" in x for x in footers):
-        if any("PAGE" in x for x in headers):
+        footer_pages += page_paragraphs(sec.footer) + page_paragraphs(sec.even_page_footer)
+        first_footer_pages += page_paragraphs(sec.first_page_footer)
+        header_pages += page_paragraphs(sec.header) + page_paragraphs(sec.first_page_header) + page_paragraphs(sec.even_page_header)
+    if first_footer_pages:
+        problems.append("номер страницы стоит на первой странице — первая страница должна быть без номера")
+    if not footer_pages:
+        if header_pages:
             # Место номера — тоже часть стандарта, и проверять его должна машина.
             problems.append("номер страницы стоит в ВЕРХНЕМ колонтитуле — с 04.08.2026 "
                             "он ставится в нижнем, по центру")
         else:
             problems.append("нет поля номера страницы — нумерация обязательна в каждом "
                             "документе без исключений (протокол 03.08.2026)")
+    elif any(p.alignment != WD_ALIGN_PARAGRAPH.CENTER for p in footer_pages):
+        problems.append("номер страницы в нижнем колонтитуле стоит не по центру")
     return problems
 
 
@@ -459,6 +500,10 @@ _MONEY_ABBR_RE = re.compile(
     rf"\s+(?P<cur>{_MONEY_CUR}){_MONEY_CUR_END}",
     re.I)
 _ABBR_MULT = {"тыс": 1_000, "млн": 1_000_000, "млрд": 1_000_000_000}
+_MONEY_PREFIX_RE = re.compile(
+    rf"(?P<cur>{_MONEY_CUR})\s*(?P<num>{_MONEY_NUM})"
+    rf"(?:\s*\((?P<propis>[^()]*)\))?",
+    re.I)
 
 
 # Пропись ПЕРЕД числом — «двести тысяч (100 000) рублей» — та же
@@ -524,6 +569,29 @@ def check_money_propis(text: str, where: str) -> list[str]:
     # в хвосте нет — это не форма прописи (например, «расчет (100 000)
     # рублей») — число судит общий проход ниже.
     covered = []
+    for m in _MONEY_PREFIX_RE.finditer(text):
+        num_raw = m.group("num")
+        words_raw = m.group("propis") or ""
+        int_str, kop_str = _mr.money_int(num_raw)
+        if not int_str or int(int_str) == 0:
+            continue
+        cur_name = _mr.currency_of(m.group("cur"))
+        cur_info = _mr.CURRENCIES.get(cur_name) if cur_name else None
+        cur_show = m.group("cur")
+        gender = cur_info["gender"] if cur_info else "м"
+        variants = _mr.propis_variants(int(int_str), gender=gender)
+        words = re.sub(r"\s+", " ", words_raw.strip().lower()).split()
+        if not words:
+            problems.append(f"{where}: сумма {cur_show} {num_raw} без прописи в "
+                            f"круглых скобках — денежная сумма пишется цифрами "
+                            f"и прописью")
+            covered.append(m.span())
+            continue
+        if variants and not _mr.words_match(words, variants):
+            problems.append(f"{where}: пропись «{words_raw.strip()}» НЕ совпадает "
+                            f"с числом {num_raw} — ожидалось "
+                            f"«{_mr.propis_word(int(int_str), gender=gender)}»")
+        covered.append(m.span())
     for m in _MONEY_BEFORE_PROPIS_RE.finditer(text):
         words_all = re.sub(r"\s+", " ", m.group("words").strip().lower()).split()
         tail = _mr.numeral_tail(words_all)
@@ -543,10 +611,8 @@ def check_money_propis(text: str, where: str) -> list[str]:
                             f"с числом {m.group('num')} — ожидалось "
                             f"«{_mr.propis_word(n, gender=gender)}»")
     for m in _MONEY_ABBR_RE.finditer(text):
-        # «500 тыс. руб.» / «12 млн руб.» — без прописи в скобках нарушение;
-        # с прописью — форма редкая, но сумма читается и сверяется глазами.
-        if m.group("propis"):
-            continue
+        # «500 тыс. руб.» / «12 млн руб.» запрещены как сокращение суммы даже
+        # при прописи: правила требуют полную цифровую запись.
         int_str, _ = _mr.money_int(m.group("num"))
         full = int(int_str) * _ABBR_MULT[m.group("scale").lower()]
         full_show = f"{full:,}".replace(",", " ")
@@ -570,17 +636,33 @@ def check_money_propis(text: str, where: str) -> list[str]:
         inner_cur, words = _mr.strip_currency_tail(words)
         has_cur = has_cur or inner_cur
         if not has_cur:
-            continue  # не деньги: дата, статья, номер дела, ИНН, ставка
+            tail = text[m.end():m.end() + 120]
+            shared = words_raw and re.search(rf"\bи\s+{_MONEY_NUM}[^.;\n]{{0,80}}{_MONEY_CUR}{_MONEY_CUR_END}", tail, re.I)
+            if not shared:
+                continue  # не деньги: дата, статья, номер дела, ИНН, ставка
+            int_str, _ = _mr.money_int(num_raw)
+            if int_str and int(int_str):
+                variants = _mr.propis_variants(int(int_str), gender="м")
+                if variants and not _mr.words_match(words, variants):
+                    problems.append(f"{where}: пропись «{words_raw.strip()}» НЕ совпадает "
+                                    f"с числом {num_raw} при общей валюте в перечне сумм")
+            continue
         int_str, kop_str = _mr.money_int(num_raw)
         if not int_str or int(int_str) == 0:
             continue  # «рублей 00 копеек» — нулевые копейки цифрами это обиход
-        cur_show = cur or (words_raw or "").strip().split()[-1]
         # Валюта находки — каноническая, из единого словаря: род числительного
         # и склонение единицы параметром валюты («долларов», не «рублей»),
         # мелкая единица — её строкой словаря (рубль → копейка ж.р.,
-        # доллар/евро → цент м.р.).
-        cur_name = _mr.currency_of(cur or cur_show)
+        # доллар/евро → цент м.р.). При отсутствии слова СНАРУЖИ скобок валюта
+        # берётся по ОСНОВНОЙ единице прописи (inner_cur из strip_currency_tail),
+        # а НЕ по последнему слову хвоста копеек: иначе целое число согласуется
+        # по роду копейки и «два рубля» ожидается как «две» (причина 4 ремонта
+        # 25.08.2026 — форма арендодателя «…рубля девяносто одна копейка»).
+        cur_name = _mr.currency_of(cur) if cur else inner_cur
         cur_info = _mr.CURRENCIES.get(cur_name) if cur_name else None
+        # Показ валюты в подсказке: слово снаружи скобок как в тексте, иначе —
+        # каноническая форма основной единицы («рублей»), не хвост копеек.
+        cur_show = cur or (cur_info["forms"][2] if cur_info else "")
         gender = cur_info["gender"] if cur_info else "м"
         minor_info = (_mr.CURRENCIES[cur_info["minor"]]
                       if cur_info and cur_info.get("minor")
@@ -683,7 +765,9 @@ def _scan_quote(fragment: str, where: str) -> list[str]:
         int_str, kop_str = _mr.money_int(m.group("num"))
         if not int_str or int(int_str) == 0:
             continue
-        cur_name = _mr.currency_of(cur or (words_raw or "").strip().split()[-1])
+        # Валюта — по основной единице прописи (inner_cur), не по хвосту копеек
+        # (причина 4 ремонта 25.08.2026).
+        cur_name = _mr.currency_of(cur) if cur else inner_cur
         cur_info = _mr.CURRENCIES.get(cur_name) if cur_name else None
         gender = cur_info["gender"] if cur_info else "м"
         minor_info = (_mr.CURRENCIES[cur_info["minor"]]
@@ -748,6 +832,9 @@ def check_text(text: str, where: str, dogovor: bool = False) -> list[str]:
     if square:
         problems.append(f"{where}: квадратные скобки — {square} шт. В документах "
                         "практики их не пишут, ссылки и вставки только в круглых")
+    straight_quotes = text.count('"')
+    if straight_quotes:
+        problems.append(f"{where}: прямые кавычки — {straight_quotes} шт.; нужны елочки «...»")
     # Ряд подчеркиваний: в процессуальном документе — забытое поле, в договоре —
     # законное место подписи. Под флагом --dogovor это НЕ нарушение: прибор,
     # который сам пишет «в договоре норма» и тут же валит проверку, приучает
@@ -791,6 +878,25 @@ def docx_appendices(docx_path: str):
     return body, items
 
 
+def _mentioned_nums(text):
+    """Номера приложений, названные в тексте. Считает не только «Приложение 3»,
+    но и перечисление «Приложения 3, 4» и диапазон «Приложения 1—4» с любым тире.
+    Прежний разбор брал ТОЛЬКО первое число после слова и на документе с четырьмя
+    однотипными приложениями требовал упомянуть те, что уже названы диапазоном
+    (прогон 25.08.2026: текст говорил «Приложения 1—4», сторож требовал 2 и 4)."""
+    found = set()
+    for m in re.finditer(r"приложени[ияюе]\s*№?\s*([\d\s,;—–\-]{1,40})", text, re.I):
+        chunk = m.group(1)
+        # диапазон: 1—4 разворачиваем в 1,2,3,4
+        for a, b in re.findall(r"(\d{1,2})\s*[-—–]\s*(\d{1,2})", chunk):
+            a, b = int(a), int(b)
+            if a <= b and b - a < 50:
+                found.update(range(a, b + 1))
+        chunk_wo_ranges = re.sub(r"\d{1,2}\s*[-—–]\s*\d{1,2}", " ", chunk)
+        found.update(int(x) for x in re.findall(r"\d{1,2}", chunk_wo_ranges))
+    return found
+
+
 def check_attachments(text: str, items=None) -> list[str]:
     """Приложения: сквозная нумерация и упоминание каждого в тексте документа.
 
@@ -806,11 +912,10 @@ def check_attachments(text: str, items=None) -> list[str]:
                       "ордер", "выписка из един")
         procedural_nums = {n for n, title in items
                            if any(k in title.lower() for k in PROCEDURAL)}
-        mentioned = set(int(x) for x in re.findall(
-            r"(?:приложени[ияюе]\s*№?\s*(\d{1,2}))", text, re.I))
+        mentioned = _mentioned_nums(text)
         missing = [n for n in nums
                    if n not in mentioned and n not in procedural_nums]
-        if missing and mentioned:
+        if missing:
             problems.append(f"приложения {missing} не упомянуты в тексте документа")
         return problems
 
@@ -836,9 +941,9 @@ def check_attachments(text: str, items=None) -> list[str]:
     expected = list(range(1, len(nums) + 1))
     if nums != expected:
         problems.append(f"нумерация приложений не сквозная: {nums} (ожидалось {expected})")
-    mentioned = set(int(x) for x in re.findall(r"(?:приложени[ияюе]\s*№?\s*(\d{1,2}))", body, re.I))
+    mentioned = _mentioned_nums(body)
     missing = [n for n in nums if n not in mentioned and n not in procedural_nums]
-    if missing and mentioned:
+    if missing:
         problems.append(f"приложения {missing} не упомянуты в тексте документа")
     return problems
 
@@ -903,7 +1008,7 @@ def check_md_vs_docx(md_path: str, docx_path: str) -> list[str]:
     return problems
 
 
-def _add_page_field(doc, top=False):
+def _add_page_field(doc, top=False, center=True, first=False):
     """Поле PAGE в нижнем колонтитуле — как это делает DocBuilder.
 
     top=True — заведомо неверное место (верх): фикстура для проверки, что
@@ -912,12 +1017,23 @@ def _add_page_field(doc, top=False):
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
     sec = doc.sections[0]
-    area = sec.header if top else sec.footer
+    if first:
+        sec.different_first_page_header_footer = True
+    area = sec.first_page_footer if first else (sec.header if top else sec.footer)
     area.is_linked_to_previous = False
     p = area.paragraphs[0] if area.paragraphs else area.add_paragraph()
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    if center:
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     fld = OxmlElement("w:fldSimple")
     fld.set(qn("w:instr"), " PAGE ")
     p._p.append(fld)
+    return p
+
+
+def _add_fake_page_text(doc):
+    p = doc.sections[0].footer.paragraphs[0]
+    p.text = "PAGE"
     return p
 
 
@@ -949,7 +1065,8 @@ def selftest() -> int:
               right=15, italic=False, underline=False, spacing=1.15,
               indent=1.25, pages=True, pages_top=False, align=WD_ALIGN_PARAGRAPH.JUSTIFY,
               table=None, hyperlink=False, paragraphs=1,
-              text="Текст документа, достаточно длинный абзац для проверки выравнивания."):
+              text="Текст документа, достаточно длинный абзац для проверки выравнивания.",
+              fake_page_text=False, page_center=True, page_first=False):
         """Фикстура документа. КАЖДЫЙ параметр обязан быть покрыт проверкой.
 
         Прежняя версия объявляла spacing= и indent=, но ни одна фикстура их не
@@ -982,14 +1099,19 @@ def selftest() -> int:
             r.font.italic, r.font.underline = italic, underline
         if hyperlink:
             _add_fake_hyperlink(d)
-        if pages:
-            _add_page_field(d, top=pages_top)
+        if fake_page_text:
+            _add_fake_page_text(d)
+        elif pages:
+            _add_page_field(d, top=pages_top, center=page_center, first=page_first)
         d.save(path)
         return path
 
     good = build(os.path.join(tmp, "good.docx"))
     no_pages = build(os.path.join(tmp, "nopage.docx"), pages=False)
     pages_up = build(os.path.join(tmp, "pageup.docx"), pages_top=True)
+    page_fake = build(os.path.join(tmp, "pagefake.docx"), pages=False, fake_page_text=True)
+    page_left = build(os.path.join(tmp, "pageleft.docx"), page_center=False)
+    page_first = build(os.path.join(tmp, "pagefirst.docx"), page_first=True)
     bad_font = build(os.path.join(tmp, "font.docx"), font="Arial")
     bad_margin = build(os.path.join(tmp, "margin.docx"), left=25)
     l3_ok = build(os.path.join(tmp, "l3.docx"), left=35)
@@ -1005,6 +1127,9 @@ def selftest() -> int:
     att_ok = ("Прошу приобщить приложение 1 и приложение 2.\n\nПриложения:\n"
               "1. Договор\n2. Квитанция\n")
     att_gap = "Прошу приобщить приложение 1.\n\nПриложения:\n1. Договор\n3. Квитанция\n"
+    att_none = "Исковое заявление.\n\nПриложения:\n1. Договор\n2. Акт сверки\n"
+    txt_file = os.path.join(tmp, "not-md.txt")
+    open(txt_file, "w", encoding="utf-8").write("текст")
 
     # Шапка процессуального документа — плавающая таблица. До 04.08.2026 ни одна
     # фикстура таблиц не строила, и весь обход iter_paragraphs был не покрыт.
@@ -1078,15 +1203,23 @@ def selftest() -> int:
         ("буква ё поймана", any("«ё»" in p for p in check_docx(with_yo))),
         ("отсутствие нумерации страниц поймано",
          any("номера страницы" in p for p in check_docx(no_pages))),
+        ("обычный текст PAGE вместо поля пойман",
+         any("номера страницы" in p for p in check_docx(page_fake))),
         # Место номера — часть стандарта: с 04.08.2026 он внизу по центру.
         ("номер страницы наверху пойман",
          any("ВЕРХНЕМ" in p for p in check_docx(pages_up))),
+        ("номер страницы не по центру пойман",
+         any("не по центру" in p for p in check_docx(page_left))),
+        ("номер на первой странице пойман",
+         any("первой странице" in p for p in check_docx(page_first))),
         ("номер страницы внизу претензий не вызывает",
          not any("номер страницы" in p for p in check_docx(good))),
         ("совпадающие md и docx проходят", check_md_vs_docx(md_ok, good) == []),
         ("разошедшиеся md и docx пойманы", check_md_vs_docx(md_other, good) != []),
         ("сквозная нумерация приложений проходит", check_attachments(att_ok) == []),
         ("дыра в нумерации приложений поймана", any("сквозная" in p for p in check_attachments(att_gap))),
+        ("ноль упоминаний приложений пойман",
+         any("не упомянуты" in p for p in check_attachments(att_none))),
         ("плейсхолдер пойман", any("плейсхолдер" in p for p in check_text("Сумма {{amount}}", "t"))),
         ("голое ХХХ поймано", any("плейсхолдер" in p for p in check_text("Полис ХХХ выдан", "t"))),
         ("серия полиса ОСАГО претензий не вызывает",
@@ -1101,6 +1234,8 @@ def selftest() -> int:
          any("квадратные скобки" in p for p in check_text("(ст. 617 ГК РФ) [ст. 621 ГК РФ]", "t"))),
         ("круглые скобки претензий не вызывают",
          check_text("(ст. 617 ГК РФ)", "t") == []),
+        ("прямые кавычки пойманы",
+         any("прямые кавычки" in p for p in check_text('"Ромашка"', "t"))),
         # Пропись денежной суммы (этап 9.8): обе оси — сумма без прописи и
         # несовпадение ловятся, верная пропись и обиход молчат.
         ("сумма без прописи поймана",
@@ -1112,6 +1247,14 @@ def selftest() -> int:
         ("верная пропись проходит",
          check_text("Прошу взыскать 1 000 (одна тысяча) рублей неустойки "
                     "(ст. 330 ГК РФ).", "t") == []),
+        ("сокращение суммы запрещено даже с прописью",
+         any("сокращением" in p for p in check_text(
+             "Прошу взыскать 500 тыс. (пятьсот тысяч) руб.", "t"))),
+        ("prefix-валюта без прописи поймана",
+         any("без прописи" in p for p in check_text("Прошу взыскать $ 100 000.", "t"))),
+        ("общая валюта для нескольких сумм сверяет первую пропись",
+         any("общей валюте" in p for p in check_text(
+             "Прошу взыскать 100 000 (девятьсот) и 50 000 (пятьдесят тысяч) рублей.", "t"))),
         ("пропись с копейками проходит",
          not any("пропис" in p or "совпадает" in p for p in check_text(
              "Прошу взыскать 1 234,56 (одна тысяча двести тридцать четыре рубля "
@@ -1137,16 +1280,58 @@ def selftest() -> int:
         ("верная пропись в чужой валюте проходит",
          check_text("Прошу взыскать 200 000 (двести тысяч) долларов США "
                     "по контракту (ст. 317 ГК РФ).", "t") == []),
+        # Причина 4 ремонта 25.08.2026: сумма с копейками на «1» — валюта
+        # определялась по хвосту «копейка» (ж.р.), и целое «два» ждалось как
+        # «две». Классическая форма арендодателя обязана проходить в обоих видах.
+        ("копейки на «1»: классическая форма (валюта из прописи) проходит",
+         check_text("Прошу взыскать задолженность 356 462,91 (триста пятьдесят "
+                    "шесть тысяч четыреста шестьдесят два рубля девяносто одна "
+                    "копейка) по договору аренды.", "t") == []),
+        ("копейки на «1»: та же сумма с валютным словом после скобок проходит",
+         check_text("Прошу взыскать 356 462,91 (триста пятьдесят шесть тысяч "
+                    "четыреста шестьдесят два рубля девяносто одна копейка) руб.",
+                    "t") == []),
+        ("копейки на «1»: подмена целого в такой форме ловится",
+         any("НЕ совпадает" in p for p in check_text(
+             "Прошу взыскать 356 462,91 (триста пятьдесят шесть тысяч "
+             "четыреста шестьдесят три рубля девяносто одна копейка).", "t"))),
         ("даты, статьи, номера дел, ИНН, ставки и листы прописи НЕ требуют",
          check_text("Заседание назначено на 21.08.2026 (ст. 333 ГК РФ, п. 71) "
                     "по делу № А65-123/2026, ИНН 1655021805, ставка 7,5 % "
                     "годовых, лист дела 82.", "t") == []),
+        ("--md-only отвергает не .md",
+         __import__("subprocess").run([sys.executable, __file__, "--md-only", txt_file],
+                                      stdout=__import__("subprocess").DEVNULL,
+                                      stderr=__import__("subprocess").DEVNULL).returncode == 2),
+        ("--rules строится из MACHINE_RULES",
+         all(rid in rules_report() for rid, _ in MACHINE_RULES)),
     ]
     for name, ok in checks:
         print(f"  {'✓' if ok else '✗'} {name}")
     bad = [n for n, ok in checks if not ok]
     print(f"selftest {'пройден' if not bad else 'ПРОВАЛЕН'}: {len(checks) - len(bad)}/{len(checks)}")
     return 1 if bad else 0
+
+
+def rules_report() -> str:
+    """Свод требований строится из MACHINE_RULES, а не из второго текста."""
+    lines = [
+        "СВОД МАШИННЫХ ТРЕБОВАНИЙ К ДОКУМЕНТУ (document_guard.py)",
+        "Источник правил — MACHINE_RULES + константы SPEC_* этого же прибора.",
+        "",
+    ]
+    lines += [f"• {rid}: {describe()}" for rid, describe in MACHINE_RULES]
+    return "\n".join(lines)
+
+
+def _source_line(path: str, units: int, unit_word: str) -> str:
+    """Шапка вердикта: что именно прочитано. Вердикт без указания источника
+    проверки — не вердикт (Часть 9 ремонта 25.08.2026)."""
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        size = 0
+    return f"Проверено: {path} · {size} байт · {units} {unit_word}"
 
 
 def main() -> int:
@@ -1160,9 +1345,36 @@ def main() -> int:
                     help="бланк договора адвокатского центра (DOCX_FORMATTING.md §8): "
                          "поля 20/20/15/10 мм, кегли бланка, подчеркивание допустимо")
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--md-only", dest="md_only", metavar="ЧЕРНОВИК.md",
+                    help="проверить один .md без .docx (пропись, даты, «ё», скобки, "
+                         "пропуски) — размыкает круг «формат требует .docx» до сборки")
+    ap.add_argument("--rules", action="store_true",
+                    help="напечатать полный свод проверяемых требований и выйти")
     a = ap.parse_args()
     if a.selftest:
         return selftest()
+    if a.rules:
+        print(rules_report())
+        return 0
+    if a.md_only:
+        if not os.path.isfile(a.md_only):
+            print(f"нет файла {a.md_only}", file=sys.stderr)
+            return 2
+        if os.path.splitext(a.md_only)[1].lower() != ".md":
+            print(f"{a.md_only}: --md-only принимает только .md", file=sys.stderr)
+            return 2
+        text = open(a.md_only, encoding="utf-8").read()
+        units = sum(1 for ln in text.split("\n") if ln.strip())
+        print(_source_line(a.md_only, units, "непустых строк"))
+        problems = check_text(text, os.path.basename(a.md_only),
+                              dogovor=a.dogovor or a.advokat)
+        if not problems:
+            print(f"✓ {os.path.basename(a.md_only)}: текст в порядке")
+            return 0
+        print(f"⚠ {os.path.basename(a.md_only)}: нарушений {len(problems)}")
+        for p in problems:
+            print(f"   • {p}")
+        return 1
     if not a.docx:
         ap.print_help()
         return 2
@@ -1173,6 +1385,8 @@ def main() -> int:
         print(f"нет файла {a.docx}", file=sys.stderr)
         return 2
 
+    from docx import Document as _Doc
+    print(_source_line(a.docx, len(list(iter_paragraphs(_Doc(a.docx)))), "абзацев"))
     problems = check_docx(a.docx, a.l3, a.dogovor, a.advokat)
     body, items = docx_appendices(a.docx)
     if items:

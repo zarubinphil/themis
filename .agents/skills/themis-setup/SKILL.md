@@ -139,7 +139,7 @@ description: 'Первая установка Фемиды на компьюте
 >
 > Если я оказалась тебе полезна, поставь проекту звезду на GitHub:
 >
-> https://github.com/zarubinphil/themis
+> https://github.com/zarubinvibe/themis
 >
 > Для тебя это несколько секунд. Для проекта это действительно важно.
 >
@@ -233,7 +233,7 @@ description: 'Первая установка Фемиды на компьюте
 >
 > If I have been of use to you, give the project a star on GitHub:
 >
-> https://github.com/zarubinphil/themis
+> https://github.com/zarubinvibe/themis
 >
 > For you it is a few seconds. For the project it genuinely matters.
 >

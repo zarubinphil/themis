@@ -24,7 +24,7 @@ find cases -name '~$*' -delete
 
 ## 2. Бот Фемида — первый живой запуск (наружу, порядок в `knowledge/bot-protocol.md`)
 
-1. BotFather → создать бота, токен → `~/.secrets/themis-telegram.env`.
+1. BotFather → создать бота, токен → `$HOME/.secrets/themis-telegram.env`.
 2. `python3 scripts/themis_bot.py --chat-probe` → свой `chat_id` в `~/.themis/config.json`.
 3. `bot.enabled: true` в `~/.themis/config.json`.
 4. Аватар: `python3 scripts/bot_avatar.py` → загрузить в BotFather.
@@ -44,7 +44,7 @@ python3 scripts/intake_backup.py --dest /Volumes/<внешний-диск>
 ## 5. Живой клон на Windows и Linux
 
 `themis-setup` на чужой машине: проверить, что гейт humanizer-legal (живёт в
-`~/.claude/skills/` вне репозитория) честно останавливает, а не молча пропускает.
+`$HOME/.claude/skills/` вне репозитория) честно останавливает, а не молча пропускает.
 
 ## 6. Замер этапа 7 на настоящих Codex и Kimi
 
@@ -54,7 +54,7 @@ python3 scripts/intake_backup.py --dest /Volumes/<внешний-диск>
 ## 7. Решение по `/graphify`
 
 README и панель обещают `/graphify`, `graphify-out/` не создавался ни разу.
-Первый прогон дорогой. Решить: гнать (`graphify update ~/Проекты/themis`) или
+Первый прогон дорогой. Решить: гнать (`graphify update корень репозитория`) или
 убрать обещание из README/панели (уберёт цикл, если решение «убрать»).
 
 ## 9. Ложная остановка ночного прогона по отпечатку `cases/` — понаблюдать
@@ -108,7 +108,7 @@ python3 scripts/cite.py "ст. 333 ГК РФ"
 
 Гейт стиля стоит перед вердиктом «ГОТОВ К ПОДАЧЕ» и работает fail-closed: нет
 скрипта скилла — ни один судебный документ не выпускается. Скилл живёт вне
-репозитория (`~/.claude/skills/humanizer-legal/scripts/scan_legal.sh`), и
+репозитория (`$HOME/.claude/skills/humanizer-legal/scripts/scan_legal.sh`), и
 `install.sh` теперь предупреждает о нём вслух, но поставить его может только
 владелец. На этой машине он есть; на новой — поставить до первой работы по делу.
 

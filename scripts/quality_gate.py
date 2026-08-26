@@ -11,6 +11,7 @@ OCR-кеша, детектор потерянных таблиц, сверка �
     quality_gate.py --doc ЧЕРНОВИК.md --against ИСТОЧНИК.md [ИСТОЧНИК2.md ...]
     quality_gate.py --requisites FILE.requisites.json [--bik БИК]
     quality_gate.py --case cases/К/Д       всё, что применимо к делу
+    quality_gate.py --rules                напечатать исполняемые правила гейта
     quality_gate.py --selftest             проверка без сети
 
 Код возврата: 0 — чисто; 1 — есть замечания (блокирующие для приёмки).
@@ -319,6 +320,15 @@ def case_paths(case: str) -> dict:
             "requisites": case_requisite_files(case)}
 
 
+def print_rules() -> int:
+    print("quality_gate.py rules")
+    print("- OCR: страницы не должны быть пустыми, смешанными по алфавитам или ломаной кириллицей")
+    print("- DOC: каждое значимое число черновика должно быть в источниках дела")
+    print("- REQUISITES: ИНН, БИК и расчетные счета проходят контрольные суммы")
+    print("- CASE: черновики проверяются против карты, позиции, практики и рабочего контекста")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Механические проверки качества Фемиды")
     ap.add_argument("--ocr", help="папка OCR-кеша (page_*.png + page_*.txt)")
@@ -327,6 +337,7 @@ def main() -> int:
     ap.add_argument("--requisites", help="<sha>.requisites.json от роутера")
     ap.add_argument("--bik", help="БИК для проверки расчётного счёта")
     ap.add_argument("--case", help="папка дела — прогнать всё применимое")
+    ap.add_argument("--rules", action="store_true", help="напечатать правила гейта")
     ap.add_argument("--min-digits", type=int, default=4,
                     help="от скольких значащих цифр сверять числа (по умолчанию 4)")
     ap.add_argument("--selftest", action="store_true")
@@ -334,6 +345,8 @@ def main() -> int:
 
     if args.selftest:
         return selftest()
+    if args.rules:
+        return print_rules()
 
     report: list[tuple[str, list[str]]] = []
     if args.ocr:

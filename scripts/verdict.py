@@ -39,6 +39,32 @@ except ImportError:
     _mr = None
 
 READY = "ГОТОВ К ПОДАЧЕ"
+READY_VERDICTS = frozenset({
+    "ГОТОВ К ПОДАЧЕ",
+    "ПРОВЕРЕНО БЕЗ КОНИ (ГОТОВ К ПОДАЧЕ)",
+})
+
+# Закрытый словарь вердиктов — ОДИН объект уровня модуля. create_docx.py спрашивает
+# его, а не держит свою копию: 25.08 два прибора разошлись в словаре и это стоило круга.
+VERDICTS = frozenset({
+    "ГОТОВ К ПОДАЧЕ",
+    "ТРЕБУЕТ ПРАВОК",
+    "КРИТИЧЕСКИЕ ОШИБКИ",
+    "ПРОВЕРЕНО ЧАСТИЧНО",
+    "ПРОВЕРЕНО БЕЗ КОНИ (ГОТОВ К ПОДАЧЕ)",
+    "ПРОВЕРЕНО БЕЗ КОНИ (ПРОВЕРЕНО ЧАСТИЧНО)",
+    "ПРОВЕРЕНО БЕЗ КОНИ (ТРЕБУЕТ ПРАВОК)",
+    "ПРОВЕРЕНО БЕЗ КОНИ (КРИТИЧЕСКИЕ ОШИБКИ)",
+})
+# Рецензия — не более двух кругов. Раунд 3+ по документу не пишется, а эскалируется
+# владельцу (код 3): 25.08 восемь кругов по одному списку сожгли прогон.
+ROUND_LIMIT = 3
+
+
+class RoundLimitExceeded(Exception):
+    """Раунд 3+ по документу — стоп с эскалацией владельцу (код возврата 3)."""
+
+
 SCAN = Path.home() / ".claude/skills/humanizer-legal/scripts/scan_legal.sh"
 # Категории scan_legal.sh, при которых документ не выпускается. Источник один:
 # DocBuilder.HUMANIZER_BLOCKERS, чтобы verdict и сборка .docx не расходились.
@@ -66,7 +92,7 @@ def scan(md):
     """Гейт humanizer-legal по `.md`. Возвращает список сработавших блокирующих категорий.
 
     Скрипта нет → `None` (fail-closed), не пустой список. Скилл живёт вне репозитория
-    (`~/.claude/skills/`) — на чужой машине его может не быть, и пустой список
+    (`$HOME/.claude/skills/`) — на чужой машине его может не быть, и пустой список
     неотличим от «прогнали и чисто»: анти-AI-гейт молча пропускал бы всё (этап 9).
     """
     if not SCAN.is_file():
@@ -77,7 +103,7 @@ def scan(md):
                            text=True, timeout=300, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired) as e:
         print(f"ВНИМАНИЕ: humanizer-legal не отработал ({e})", file=sys.stderr)
-        return []
+        return None
     out = (p.stdout or "") + (p.stderr or "")
     hits = []
     for line in out.splitlines():
@@ -293,8 +319,44 @@ def format_problems(md):
     return problems
 
 
-def record(md, verdict, round_no):
-    if verdict == READY:
+def next_round(md):
+    rounds = [int(e.get("round") or 0) for e in history(md)]
+    return (max(rounds) + 1) if rounds else 1
+
+
+def record(md, verdict, round_no=None):
+    # Гейт 1 — закрытый словарь: вердикт вне списка не пишется, печатаем допустимое.
+    if verdict not in VERDICTS:
+        print(f"⛔ ВЕРДИКТ НЕ ЗАПИСАН — «{verdict}» вне закрытого словаря. Разрешены только:",
+              file=sys.stderr)
+        for v in sorted(VERDICTS):
+            print(f"   · {v}", file=sys.stderr)
+        return None
+    if round_no is None:
+        round_no = next_round(md)
+    max_round = max([int(e.get("round") or 0) for e in history(md)] or [0])
+    if round_no <= max_round:
+        print(f"⛔ ВЕРДИКТ НЕ ЗАПИСАН — r{round_no} уже не следующий раунд "
+              f"по документу «{Path(md).name}» (последний r{max_round}). "
+              "Сброс номера раунда не принимается.", file=sys.stderr)
+        return None
+    # Гейт 2 — лимит раундов: раунд 3+ по документу отбивается эскалацией (код 3).
+    if round_no >= ROUND_LIMIT:
+        raise RoundLimitExceeded(
+            f"⛔ РАУНД {round_no} НЕ ЗАПИСАН — лимит рецензии в {ROUND_LIMIT - 1} круга по "
+            f"документу «{Path(md).name}» исчерпан. Это эскалация владельцу, а не ещё один "
+            f"круг: 25.08 восемь кругов по одному списку сожгли прогон.")
+    # Гейт 3 — правка без изменения файла: та же редакция не получает новый раунд.
+    # Ключ — sha256: новый вердикт без нового текста не доказывает правку и снова
+    # запускает круг на том же материале.
+    now = sha(md)
+    for e in history(md):
+        if e.get("sha256") == now:
+            print(f"⛔ ВЕРДИКТ НЕ ЗАПИСАН — «{Path(md).name}» побайтно равен ранее сданной "
+                  f"редакции (r{e.get('round')}). Заявление о правке, "
+                  f"не подтверждённое файлом, не принимается.", file=sys.stderr)
+            return None
+    if verdict in READY_VERDICTS:
         problems = format_problems(md)
         if problems:
             print("⛔ ВЕРДИКТ «ГОТОВ К ПОДАЧЕ» НЕ ЗАПИСАН — брак формата:", file=sys.stderr)
@@ -370,7 +432,7 @@ def check(md):
     # по-прежнему собирается: последняя запись по её отпечатку — одобрение.
     same = [e for e in hist if e.get("sha256") == now]
     if same:
-        if same[-1].get("verdict") == READY:
+        if same[-1].get("verdict") in READY_VERDICTS:
             # Гейт на маршруте СБОРКИ тоже: журнал append-only, но строку в него
             # можно дописать руками мимо record() — и тогда анти-AI-гейт, стоящий
             # в record(), обходится. Перепроверяем текст перед допуском к сборке
@@ -385,13 +447,13 @@ def check(md):
                         f"прогнать humanizer-legal и повторить раунд"]
             return []
         v = same[-1]
-        if any(e.get("verdict") == READY for e in same):
+        if any(e.get("verdict") in READY_VERDICTS for e in same):
             return [f"{md.name}: одобрение этой редакции ОТОЗВАНО — последний вердикт "
                     f"по ней «{v.get('verdict')}» (r{v.get('round')}), не «{READY}»; "
                     f"закрыть замечания Кони и провести новый раунд"]
         return [f"{md.name}: последний вердикт по этой редакции «{v.get('verdict')}» "
                 f"(r{v.get('round')}) — не «{READY}»"]
-    approved = [e for e in hist if e.get("verdict") == READY]
+    approved = [e for e in hist if e.get("verdict") in READY_VERDICTS]
     if approved:
         last = approved[-1]
         return [f"{md.name}: вердикт «{READY}» есть, но выдан на ДРУГУЮ редакцию "
@@ -420,25 +482,24 @@ def selftest():
         assert check(md), "вердикт ТРЕБУЕТ ПРАВОК пропустил сборку"
         assert "не «ГОТОВ К ПОДАЧЕ»" in check(md)[0]
 
+        md.write_text("# Иск\n\nТекст второй редакции после правки.\n", encoding="utf-8")
         record(md, READY, 2)
         assert not check(md), f"одобренная редакция не пропущена: {check(md)}"
 
-        # Ровно тот случай, ради которого всё это: текст правится ПОСЛЕ одобрения
-        md.write_text("# Иск\n\nТекст первой редакции.\n\nДописанный абзац.\n", encoding="utf-8")
+        # Ровно тот случай, ради которого всё это: текст правится ПОСЛЕ одобрения —
+        # прежний вердикт по новой редакции сборку не пускает.
+        md.write_text("# Иск\n\nТекст второй редакции после правки.\n\nДописанный абзац.\n",
+                      encoding="utf-8")
         problems = check(md)
         assert problems, "изменённый после одобрения текст пропущен к сборке"
         assert "ДРУГУЮ редакцию" in problems[0], problems
 
-        # Новый раунд по новой редакции снова открывает сборку
-        record(md, READY, 3)
-        assert not check(md), "новый вердикт на новую редакцию не пропустил"
-
-        # Возврат к прежнему тексту не воскрешает прежний вердикт по ошибке:
-        # отпечаток совпадает — значит это буквально та самая одобренная редакция
-        md.write_text("# Иск\n\nТекст первой редакции.\n", encoding="utf-8")
+        # Возврат к одобренному тексту не воскрешает прежний вердикт по ошибке:
+        # отпечаток совпадает — значит это буквально та самая одобренная редакция.
+        md.write_text("# Иск\n\nТекст второй редакции после правки.\n", encoding="utf-8")
         assert not check(md), "возврат к ранее одобренному тексту заблокирован зря"
 
-        assert len(history(md)) == 3, history(md)   # r1 правки, r2 и r3 готов
+        assert len(history(md)) == 2, history(md)   # r1 правки, r2 готов; третьего круга нет
         assert check(d / "net.md"), "несуществующий файл признан готовым"
 
         # Гейт humanizer — fail-closed: нет скрипта, значит СТОП, а не тихий пропуск.
@@ -536,21 +597,58 @@ def selftest():
                         "Подписант: (Ф.И.О.).\n", encoding="utf-8")
         assert len(format_problems(dyra)) == 4, format_problems(dyra)
 
-        # Вердикт отзывается: «ТРЕБУЕТ ПРАВОК» на ту же редакцию закрывает
-        # сборку; повторное одобрение той же редакции — открывает (9.19).
+        # Повторно судить ТУ ЖЕ редакцию нельзя — гейт sha и лимит раундов держат
+        # (заявление о правке без правки не принимается).
         otzyv = d / "otzyv.md"
         otzyv.write_text("# Заявление\n\nТекст без брака и вставок.\n",
                          encoding="utf-8")
         assert record(otzyv, READY, 1) is not None
         assert not check(otzyv), f"одобренная редакция не пропущена: {check(otzyv)}"
-        record(otzyv, "ТРЕБУЕТ ПРАВОК", 2)
-        assert check(otzyv), "«ТРЕБУЕТ ПРАВОК» не отозвал одобрение той же редакции"
-        record(otzyv, READY, 3)
-        assert not check(otzyv), "повторное одобрение той же редакции не пропустило"
+        assert record(otzyv, "ТРЕБУЕТ ПРАВОК", 2) is None, \
+            "новый вердикт на неизменный sha записан"
+
+        # ── Три гейта цикла рецензии (ремонт 25.08) ──
+        # Гейт 1 — закрытый словарь: вердикт вне списка не пишется, разрешённый — пишется.
+        slovar = d / "slovar.md"
+        slovar.write_text("# Ходатайство\n\nЧистый текст без брака.\n", encoding="utf-8")
+        assert record(slovar, "ЧТО-УГОДНО", 1) is None, "вердикт вне словаря записан"
+        assert record(slovar, "ПРОВЕРЕНО БЕЗ КОНИ (ТРЕБУЕТ ПРАВОК)", 1) is not None, \
+            "разрешённый резервный вердикт отбит зря"
+
+        # Гейт 2 — правка без изменения файла: тот же sha не пишется,
+        # реальная правка — пишется.
+        dubl = d / "dubl.md"
+        dubl.write_text("# Иск\n\nПервая редакция.\n", encoding="utf-8")
+        assert record(dubl, "ТРЕБУЕТ ПРАВОК", 1) is not None, "первая запись отбита"
+        assert record(dubl, "ТРЕБУЕТ ПРАВОК", 2) is None, \
+            "неизменный файл с тем же вердиктом записан повторно"
+        assert record(dubl, "ПРОВЕРЕНО ЧАСТИЧНО", 2) is None, \
+            "неизменный файл с другим вердиктом записан повторно"
+        dubl.write_text("# Иск\n\nПервая редакция.\n\nПравка.\n", encoding="utf-8")
+        assert record(dubl, "ТРЕБУЕТ ПРАВОК", 2) is not None, "реальная правка отбита зря"
+
+        # Гейт 3 — лимит раундов: раунд 3 отбивается кодом 3 (исключение).
+        try:
+            record(dubl, "ТРЕБУЕТ ПРАВОК", 3)
+            assert False, "третий раунд не отбит"
+        except RoundLimitExceeded:
+            pass
+        auto = d / "auto.md"
+        auto.write_text("# Иск\n\nАвто r1.\n", encoding="utf-8")
+        assert record(auto, "ТРЕБУЕТ ПРАВОК")["round"] == 1, "авто-раунд не начал с r1"
+        auto.write_text("# Иск\n\nАвто r2.\n", encoding="utf-8")
+        assert record(auto, "ТРЕБУЕТ ПРАВОК")["round"] == 2, "авто-раунд не поднялся до r2"
+        auto.write_text("# Иск\n\nАвто r3.\n", encoding="utf-8")
+        try:
+            record(auto, "ТРЕБУЕТ ПРАВОК")
+            assert False, "третий авто-раунд не отбит"
+        except RoundLimitExceeded:
+            pass
     print("selftest: журнал рядом с черновиком, отказ без вердикта, отказ на ТРЕБУЕТ ПРАВОК, "
           "детект правки после одобрения, новый раунд, возврат к одобренному тексту, "
           "humanizer fail-closed, формат перед финальным вердиктом, "
-          "валюты «р.» и евро, скобки-реквизиты не дыры, отзыв вердикта — ок")
+          "валюты «р.» и евро, скобки-реквизиты не дыры, отзыв вердикта, "
+          "словарь·md5·лимит-раундов — ок")
     return 0
 
 
@@ -560,7 +658,8 @@ def main():
     ap.add_argument("--scan", action="store_true", help="гейт humanizer-legal по .md")
     ap.add_argument("--record", action="store_true", help="записать вердикт")
     ap.add_argument("--verdict", help="текст вердикта (с --record)")
-    ap.add_argument("-r", "--round", type=int, default=1, help="номер раунда (с --record)")
+    ap.add_argument("-r", "--round", type=int, default=None,
+                    help="номер раунда (с --record); если не задан — следующий по журналу")
     ap.add_argument("--check", action="store_true", help="можно ли собирать .docx")
     ap.add_argument("--log", action="store_true", help="история вердиктов")
     ap.add_argument("--selftest", action="store_true")
@@ -588,7 +687,11 @@ def main():
         if not a.verdict:
             print("--record требует --verdict", file=sys.stderr)
             return 2
-        e = record(a.md, a.verdict, a.round)
+        try:
+            e = record(a.md, a.verdict, a.round)
+        except RoundLimitExceeded as ex:
+            print(str(ex), file=sys.stderr)
+            return 3
         if e is None:
             return 1
         print(f"вердикт записан: {e['document']} r{e['round']} «{e['verdict']}» "

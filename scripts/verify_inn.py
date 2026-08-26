@@ -21,8 +21,8 @@
    арифметике, но организация ликвидирована либо называется иначе, чем указано
    в документе оппонента.
 
-Ключ берётся в порядке: env `DADATA_API_KEY` → `~/.secrets/dadata.env`
-(строка `DADATA_API_KEY=...`, каталог chmod 700). В код и в git ключ не попадает,
+	Ключ берётся в порядке: env `DADATA_API_KEY` → Keychain → файл из env
+	`THEMIS_DADATA_ENV` (строка `DADATA_API_KEY=...`). В код и в git ключ не попадает,
 в вывод не печатается. Ответы кешируются в `~/.cache/legal_inn/<инн>.json` —
 повторная проверка того же ИНН сети не трогает.
 
@@ -51,7 +51,7 @@ if SCRIPTS_DIR not in sys.path:
 import pii_gate  # noqa: E402
 
 CACHE = os.path.expanduser("~/.cache/legal_inn")
-SECRETS = os.path.expanduser("~/.secrets/dadata.env")
+SECRETS = os.environ.get("THEMIS_DADATA_ENV")
 KEYCHAIN_ITEM = "THEMIS_DADATA_API_KEY"
 API = "https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/party"
 
@@ -95,7 +95,7 @@ def ogrn_valid(ogrn: str) -> bool:
 
 
 def _key() -> str | None:
-    """Ключ: env → Keychain → ~/.secrets/dadata.env. В код и git не попадает."""
+    """Ключ: env → Keychain → файл из THEMIS_DADATA_ENV. В код и git не попадает."""
     k = os.environ.get("DADATA_API_KEY")
     if k:
         return k.strip()
@@ -109,9 +109,10 @@ def _key() -> str | None:
     except (OSError, subprocess.SubprocessError):
         pass
     try:
-        for line in open(SECRETS, encoding="utf-8"):
-            if line.startswith("DADATA_API_KEY"):
-                return line.split("=", 1)[1].strip().strip('"').strip("'")
+        if SECRETS:
+            for line in open(os.path.expanduser(SECRETS), encoding="utf-8"):
+                if line.startswith("DADATA_API_KEY"):
+                    return line.split("=", 1)[1].strip().strip('"').strip("'")
     except OSError:
         pass
     return None
@@ -165,6 +166,9 @@ def dadata(inn: str) -> dict:
         "state": (d.get("state") or {}).get("status"),
         "liquidation_date": (d.get("state") or {}).get("liquidation_date"),
         "address": (d.get("address") or {}).get("value"),
+        # unrestricted_value несет индекс и регион («420087, Респ Татарстан, ...»).
+        # В трудовом договоре адрес работодателя без индекса — неполный реквизит.
+        "address_full": (d.get("address") or {}).get("unrestricted_value"),
         "manager": (d.get("management") or {}).get("name"),
         "manager_post": (d.get("management") or {}).get("post"),
     }
@@ -366,6 +370,9 @@ def find_by_name(query: str, count: int = 5) -> list[dict]:
             "type": d.get("type"),
             "state": (d.get("state") or {}).get("status"),
             "address": (d.get("address") or {}).get("value"),
+        # unrestricted_value несет индекс и регион («420087, Респ Татарстан, ...»).
+        # В трудовом договоре адрес работодателя без индекса — неполный реквизит.
+        "address_full": (d.get("address") or {}).get("unrestricted_value"),
             "manager": (d.get("management") or {}).get("name"),
             "manager_post": (d.get("management") or {}).get("post"),
             "okved": d.get("okved"),

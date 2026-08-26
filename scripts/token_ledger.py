@@ -7,7 +7,7 @@
 Зачем: до этого скрипта единственным источником цифр было поле `usage`, которое субагент
 возвращает в основной поток, плюс оценка основного потока на глаз. Два дефекта такого учёта:
   1. Основной поток вообще не измерялся — а он даёт основную массу cache-read.
-  2. `~/.claude/scripts/token-spend.sh` суммирует КАЖДУЮ строку с usage, а одна и та же
+  2. `$HOME/.claude/scripts/token-spend.sh` суммирует КАЖДУЮ строку с usage, а одна и та же
      ассистентская реплика пишется в jsonl по нескольку раз с одним requestId.
      На живой сессии это давало 174 212 561 вместо 72 634 172 — завышение в 2,4 раза.
 
@@ -446,7 +446,7 @@ def track_verdict(track: str, spent: int) -> tuple[str, int]:
 
 def project_dir(cwd: str) -> str:
     key = re.sub(r"[^A-Za-z0-9]", "-", cwd)
-    return os.path.join(os.path.expanduser("~/.claude/projects"), key)
+    return os.path.join(os.path.expanduser("$HOME/.claude/projects"), key)
 
 
 def latest_session(cwd: str) -> str | None:

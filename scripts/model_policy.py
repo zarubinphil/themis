@@ -127,36 +127,58 @@ def check_brief(path: Path) -> int:
     level = m.group(1).upper()
 
     rows, bad = 0, []
+    canonical_header = ["Шаг", "Исполнитель", "Модель", "Прогноз"]
+    header = canonical_header[:]
+    executor_idx, model_idx = 1, 2
     for line in text.splitlines():
         line = line.strip()
         if not line.startswith("|") or set(line) <= set("|-: "):
             continue
         cells = [c.strip() for c in line.strip("|").split("|")]
-        if len(cells) < 3 or cells[0].lower().startswith("шаг"):
+        if len(cells) >= 3 and cells[0].lower().startswith("шаг"):
+            header = cells
+            normalized = {c.strip().lower(): i for i, c in enumerate(cells)}
+            if "исполнитель" not in normalized or "модель" not in normalized:
+                bad.append(("шапка таблицы должна содержать «Исполнитель» и «Модель»",
+                            cells))
+                continue
+            executor_idx = normalized["исполнитель"]
+            model_idx = normalized["модель"]
+            continue
+        if len(cells) <= max(executor_idx, model_idx):
             continue
         rows += 1
-        executor, model = cells[1], cells[2].lower()
+        executor, model = cells[executor_idx], cells[model_idx].lower()
         if not model:
-            bad.append(f"{executor}: колонка «Модель» пуста — решение о модели не принято")
+            bad.append((f"{executor}: колонка «Модель» пуста — решение о модели не принято",
+                        cells))
             continue
         step = _step_of(executor)
         if not step:
             continue
         want = model_for(level, step)
         if want == "-":
-            bad.append(f"{executor}: шаг «{step}» на уровне {level} запрещён триажем, "
-                       f"а в плане стоит")
+            bad.append((f"{executor}: шаг «{step}» на уровне {level} запрещён триажем, "
+                        f"а в плане стоит", cells))
         elif model != want:
             note = " (перерасход: Opus дороже Sonnet впятеро)" if model == "opus" else ""
-            bad.append(f"{executor}: в плане «{model}», политика на {level} — «{want}»{note}")
+            bad.append((f"{executor}: в плане «{model}», политика на {level} — «{want}»{note}",
+                        cells))
     if not rows:
         print("ERROR: в брифе нет строк таблицы ПЛАН — сверять нечего, бриф не принят.",
               file=sys.stderr)
         return 1
     if bad:
         print(f"расхождений с политикой моделей ({level}): {len(bad)}", file=sys.stderr)
-        for b in bad:
-            print("  · " + b, file=sys.stderr)
+        print("  ожидаемая шапка таблицы: | " + " | ".join(canonical_header) + " |",
+              file=sys.stderr)
+        for msg, cells in bad:
+            parsed = "; ".join(
+                f"{header[i] if i < len(header) else f'колонка{i + 1}'}={cell or '<пусто>'}"
+                for i, cell in enumerate(cells)
+            )
+            print("  · " + msg, file=sys.stderr)
+            print("    разобранная строка: " + parsed, file=sys.stderr)
         return 1
     print(f"план брифа сходится с политикой моделей ({level}), строк: {rows}")
     return 0
@@ -200,6 +222,12 @@ def selftest() -> int:
         p.write_text(ok.replace("doc-drafter", "Сперанский").replace("sonnet", "opus"),
                      encoding="utf-8")
         assert check_brief(p) == 1, "исполнитель-персона не узнан"
+        p.write_text("""КЛАССИФИКАЦИЯ  Уровень: L1 · Трек: FAST
+| Шаг | Исполнитель | Прогноз | Модель |
+|---|---|---|---|
+| 4 | doc-drafter | sonnet | opus |
+""", encoding="utf-8")
+        assert check_brief(p) == 1, "Opus в переставленной колонке Модель пропущен"
     print("selftest пройден: политика полна, бриф судится fail-closed")
     return 0
 

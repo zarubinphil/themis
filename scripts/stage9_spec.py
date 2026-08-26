@@ -3189,7 +3189,7 @@ def check_obihod_pervichki():
     intake = f"{case}/00_intake"
     fails = []
     razreshennoe = [
-        ("intake-mv-n", f'mv -n ~/Desktop/inbox/"skan.pdf" "{intake}/"'),
+        ("intake-mv-n", f'mv -n $HOME/Desktop/inbox/"skan.pdf" "{intake}/"'),
         ("intake-novoe-imya", f"cp /tmp/novyy-skan.pdf {intake}/skan-2026-08-20.pdf"),
         ("raspakovka-iz-dela", f"unzip -o {intake}/arhiv.zip -d /tmp/raspakovka"),
         ("chuzhaya-papka", "rm -rf /tmp/chuzhoy-proekt/00_intake"),
@@ -3218,7 +3218,7 @@ def check_raskhod_chuzhih_cli():
 
     Проба 20.08.2026: `token_ledger` по своей же документации читает
     session-JSONL Claude Code (основной поток плюс транскрипты субагентов).
-    Ролей на codex и kimi он не видит: у них свои журналы (`~/.codex/sessions`,
+    Ролей на codex и kimi он не видит: у них свои журналы (`$HOME/.codex/sessions`,
     `~/.kimi`). А `.autoloop/etap9.json` назначает три роли на ТРИ разных CLI.
     Значит сторож бюджета меряет одну сторону из трёх и выдаёт треть за целое —
     молча, тем же числом, каким считал бы полную картину.
@@ -4304,8 +4304,8 @@ def check_heredoc_home_i_intake():
                           f"({name}): тело исполняемого heredoc и путь через переменную "
                           f"окружения обязаны судиться так же, как обычная команда"))
     obihod = [
-        ("intake-mv-i-ls", f'mv -n ~/Desktop/inbox/skan.pdf {intake}/ && ls -la {intake}/'),
-        ("intake-ciklom", f'for f in ~/Desktop/inbox/*.pdf; do mv -n "$f" {intake}/; done'),
+        ("intake-mv-i-ls", f'mv -n $HOME/Desktop/inbox/skan.pdf {intake}/ && ls -la {intake}/'),
+        ("intake-ciklom", f'for f in $HOME/Desktop/inbox/*.pdf; do mv -n "$f" {intake}/; done'),
         ("rezervnyy-arhiv", f"tar -czf /tmp/rezerv.tgz -C {case} 00_intake"),
         ("chtenie-v-tmp", f"python3 -c \"print(open('{intake}/skan.txt').read())\" "
                           f"> /tmp/out.txt"),

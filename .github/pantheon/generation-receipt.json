@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "kind": "pantheon-generation",
+  "selection_mode": "managed-frontier",
+  "runtime": "codex",
+  "tool": "image_gen",
+  "route_id": "codex:image_gen:managed-frontier",
+  "model": {
+    "id": "provider-managed",
+    "revision": "provider-managed",
+    "tier": "frontier"
+  },
+  "quality": "highest",
+  "generation_id": "01a03d85-2ee4-7ab3-9e38-cab42e4a51fb",
+  "generated_at": "2026-08-26T12:00:00.000Z",
+  "capability_snapshot": {
+    "checked_at": "2026-08-26T12:00:00.000Z",
+    "routes": [
+      {
+        "id": "codex:image_gen:managed-frontier",
+        "rank": 1,
+        "available": true,
+        "tier": "frontier",
+        "quality": "highest",
+        "model": {
+          "id": "provider-managed",
+          "revision": "provider-managed",
+          "tier": "frontier"
+        }
+      }
+    ]
+  },
+  "prompt": {
+    "path": ".github/pantheon/prompt.txt",
+    "sha256": "b9d92fde1768e5e382311a82f2f4eb50d807d8a16d33489e6b129ef1f2b343be"
+  },
+  "references": [
+    {
+      "role": "style-anchor",
+      "sha256": "ce524f9d22cb0092cb17aa280832e1b2ab2a77a0e01602065ec502232a3bb2d2"
+    },
+    {
+      "role": "column-reference",
+      "sha256": "9d32edd56ac55c4dd6d0425a28a2ac35035e9ab09073fc8ce0c1414b2edfb1bd"
+    }
+  ],
+  "candidates": [
+    {
+      "id": "codex-managed",
+      "route_id": "codex:image_gen:managed-frontier",
+      "generation_id": "01a03d85-2ee4-7ab3-9e38-cab42e4a51fb",
+      "prompt_sha256": "b9d92fde1768e5e382311a82f2f4eb50d807d8a16d33489e6b129ef1f2b343be",
+      "reference_sha256": [
+        "ce524f9d22cb0092cb17aa280832e1b2ab2a77a0e01602065ec502232a3bb2d2",
+        "9d32edd56ac55c4dd6d0425a28a2ac35035e9ab09073fc8ce0c1414b2edfb1bd"
+      ],
+      "outputs": [
+        {
+          "role": "hero",
+          "source_sha256": "9fa6365e886c87ab15c621fedc6d04c9a5bf90aa44fcf9fd0de7610ac6001678",
+          "published_sha256": "9fa6365e886c87ab15c621fedc6d04c9a5bf90aa44fcf9fd0de7610ac6001678"
+        },
+        {
+          "role": "emblem",
+          "source_sha256": "b86e46bab70357e34c8118ed09d68f5b1394067b8558aa4598474a6ef1e9432f",
+          "published_sha256": "d56e8483b02f8d715fe4f631ff78c746cfb6daacffc7d00331e025be688e1514"
+        }
+      ]
+    }
+  ],
+  "winner_id": "codex-managed"
+}

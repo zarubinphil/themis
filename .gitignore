@@ -54,6 +54,7 @@ scripts/_build_*.py
 scripts/gen_*.py
 scripts/_merge_prilozhenia.py
 # Виртуальные окружения и кеши — не в репо.
+.venv/
 .cache/
 
 # ── Локальный корпус права: регенерируется update_legal_corpus.py, 24 МБ ──
@@ -89,3 +90,7 @@ knowledge/redlines.md
 
 # Автономный цикл: журнал, отчёт и рабочие копии ролей — рантайм
 .autoloop/
+
+# контрольный прогон ремонта конвейера — копия живого дела, в репозиторий не идёт
+cases/_control-run/
+.helioz/state/

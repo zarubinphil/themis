@@ -165,6 +165,17 @@ def frontmatter_list(text: str, field: str) -> list[str]:
     return [ln[4:].strip().strip('"') for ln in m.group(1).splitlines()]
 
 
+def missing_article_note(text: str, num: str) -> str | None:
+    """Статья есть в оглавлении, но не скачалась: это не «не найдено»."""
+    wanted = num.replace(" ", "")
+    for item in frontmatter_list(text, "пропущенные_статьи"):
+        normalized = re.sub(r"(?<=\d)\.\s+(?=\d)", ".", item).replace(" ", "")
+        numbers = re.findall(r"(?i)статья(\d+(?:\.\d+)*(?:-\d+)?)", normalized)
+        if wanted in numbers:
+            return item
+    return None
+
+
 def _found_label(heading_line: str, kind: str) -> str:
     """Ярлык по НАЙДЕННОМУ заголовку: «Глава 25.3» → «глава 25.3»."""
     m = re.search(r"(?i)(?:глава|п\.)\s*(\d+(?:\.\d+)*)", heading_line or "")
@@ -191,6 +202,12 @@ def find_article(num: str, code_word: str) -> dict:
     text = read(path)
     if text is None:
         result["error"] = f"файл {path} не найден — корпус не выгружен (scripts/update_legal_corpus.py --init)"
+        return result
+    missing = missing_article_note(text, num)
+    if missing:
+        result["error"] = (f"статья {num} отсутствует в выгрузке — докачать: "
+                           f"python3 scripts/update_legal_corpus.py --update --doc {slug}. "
+                           f"{missing}")
         return result
     heading_re = re.compile(rf"^###\s+Статья\s+{re.escape(num)}\.\s", re.M)
     m = heading_re.search(text)
@@ -384,15 +401,22 @@ def selftest() -> int:
     os.makedirs(PLENUMY_DIR)
     fresh = (datetime.date.today() - datetime.timedelta(days=30)).strftime("%d.%m.%Y")
 
-    def write_fixture(slug, red, body):
+    def write_fixture(slug, red, body, missing=None):
         head = (f'---\nдата_редакции: "{red}"\nисточник: "тест"\n'
-                f'sha256: "{hashlib.sha256(body.encode()).hexdigest()}"\n---\n')
+                f'sha256: "{hashlib.sha256(body.encode()).hexdigest()}"\n')
+        if missing:
+            head += "пропущенные_статьи:\n"
+            for item in missing:
+                head += f"  - {item}\n"
+        head += "---\n"
         open(os.path.join(KODEKSY_DIR, f"{slug}.md"), "w", encoding="utf-8").write(head + body)
 
     body_ok = ("## Глава 25.3\n\n### Статья 683. Срок договора\n\n1. Договор найма "
                "заключается на срок, не превышающий пяти лет.\n\n### Статья 152.1. Изображение\n\n"
-               "Обнародование изображения допускается с согласия гражданина.\n")
-    write_fixture("gk-rf", fresh, body_ok)
+               "Обнародование изображения допускается с согласия гражданина.\n\n"
+               "### Статья 123.20. Управление фондом\n\nФонд управляется органами фонда.\n")
+    write_fixture("gk-rf", fresh, body_ok,
+                  missing=["Статья 123. 20-1, статья 123.20-2, статья 123.20-3. Утратили силу — тест"])
     # 25.3 стоит ПЕРЕД 25 намеренно: так подмена видна. При снятой границе поиск
     # «глава 25» находит первое совпадение — то есть 25.3 — и выдаёт чужую главу.
     write_fixture("zk-rf", fresh,
@@ -438,6 +462,7 @@ def selftest() -> int:
     r_no_code = resolve("ст. 1 МПК")
     r_merged = resolve("ст. 7 КоАП")
     r_alive = resolve("ст. 7.1 КоАП")
+    r_missing = resolve("ст. 123.20-3 ГК")
     r_plenum = resolve("п. 21 Пленума ВС РФ от 19.06.2012 № 13")
     r_junk = resolve("что там про алименты")
 
@@ -491,6 +516,9 @@ def selftest() -> int:
         ("склейка утративших силу не цитируется", not r_merged["found"]),
         ("причина отказа названа склейкой", "склеенный" in r_merged.get("error", "")),
         ("отдельная статья рядом со склейкой цитируется", r_alive["found"]),
+        ("пропуск 123.20-1 не скрывает живую 123.20", resolve("ст. 123.20 ГК")["found"]),
+        ("пропуск 123.20-3 назван неполной выгрузкой", not r_missing["found"]
+         and "отсутствует в выгрузке" in r_missing.get("error", "")),
     ]
     KODEKSY_DIR, PLENUMY_DIR = real
     for name, ok in checks:

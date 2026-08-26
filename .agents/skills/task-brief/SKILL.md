@@ -32,7 +32,7 @@ description: 'Шаг 0 протокола — переработка задач�
 ```bash
 python3 scripts/themis_status.py cases/{клиент}/{дело} --brief   # сводка старта + состояние + валидность frontmatter
 python3 scripts/preflight_search.py                       # каналы поиска
-ls ~/Desktop/inbox/                                       # новые материалы
+ls $HOME/Desktop/inbox/                                       # новые материалы
 ```
 
 Сломан frontmatter — чинить до работы: агент с невалидным YAML молча не попадет в реестр (прецедент 02.08.2026, конвейер встал на шаге 4). Внешних каналов нет — охота не запускается, работаем по `knowledge/practice_index.md`.

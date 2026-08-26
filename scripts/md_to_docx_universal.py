@@ -17,9 +17,9 @@ from docx.oxml import OxmlElement
 # Гарнитура стандарта практики (DOCX_FORMATTING.md §1, решение владельца
 # 03.08.2026). Берем из DocBuilder, чтобы не разъехалось при следующей правке.
 try:
-    from scripts.create_docx import FONT_BODY as FONT
+    from scripts.create_docx import FONT_BODY as FONT, apply_page_numbers
 except ImportError:  # запуск из каталога scripts/
-    from create_docx import FONT_BODY as FONT
+    from create_docx import FONT_BODY as FONT, apply_page_numbers
 
 
 def _set_font(run, size_pt, bold=False):
@@ -116,7 +116,15 @@ def _refuse_gotovo(out_path):
         sys.exit(2)
 
 
-def md_to_docx(md_path, out_path):
+def md_to_docx(md_path, out_path, margins_mm=None, page_numbers=True):
+    """margins_mm — (верх, низ, лево, право) в миллиметрах; по умолчанию
+    судебный профиль 20/30/30/15 (нижнее поле 30 мм — зона штампа суда).
+    Кадровым и договорным документам штамп не нужен: они зовут с (20, 20, 25, 20).
+
+    page_numbers по умолчанию включены: «номера страниц обязательны в каждом
+    документе без исключений» (DOCX_FORMATTING.md), а этот вход их не ставил
+    вовсе — внутренние пакеты уходили без нумерации.
+    """
     md_path = Path(md_path)
     out_path = Path(out_path)
     _refuse_gotovo(out_path)
@@ -128,10 +136,11 @@ def md_to_docx(md_path, out_path):
     section = doc.sections[0]
     section.page_width = Cm(21)
     section.page_height = Cm(29.7)
-    section.top_margin = Cm(2)
-    section.bottom_margin = Cm(3)   # 30 мм: зона штампа суда, DOCX_FORMATTING.md
-    section.left_margin = Cm(3)
-    section.right_margin = Cm(1.5)
+    verh, niz, levo, pravo = margins_mm or (20, 30, 30, 15)
+    section.top_margin = Cm(verh / 10)
+    section.bottom_margin = Cm(niz / 10)   # 30 мм: зона штампа суда, DOCX_FORMATTING.md
+    section.left_margin = Cm(levo / 10)
+    section.right_margin = Cm(pravo / 10)
 
     # удалить дефолтный пустой параграф
     for p in doc.paragraphs:
@@ -230,6 +239,8 @@ def md_to_docx(md_path, out_path):
             _set_font(p.add_run(part), 12, bold=bold)
         i += 1
 
+    if page_numbers:
+        apply_page_numbers(doc)
     _strip_yo(doc)
     doc.save(out_path)
     print(f"Создано: {out_path}")

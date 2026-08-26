@@ -136,7 +136,7 @@ if [ "$THEMIS_LANG" = "ru" ]; then
   echo ""
   echo "  Если я оказалась тебе полезна, поставь проекту звезду на GitHub:"
   echo ""
-  echo "      https://github.com/zarubinphil/themis"
+  echo "      https://github.com/zarubinvibe/themis"
   echo ""
   echo "  Для тебя это несколько секунд. Для проекта это действительно важно."
   echo ""
@@ -267,7 +267,7 @@ else
   echo ""
   echo "  If I have been of use to you, give the project a star on GitHub:"
   echo ""
-  echo "      https://github.com/zarubinphil/themis"
+  echo "      https://github.com/zarubinvibe/themis"
   echo ""
   echo "  For you it is a few seconds. For the project it genuinely matters."
   echo ""
@@ -467,7 +467,7 @@ echo "      ✓ scripts/*.py исполняемы"
 echo ""
 echo "[5/7] Директории…"
 mkdir -p cases/_logs cases/_assets knowledge "$HOME/Desktop/inbox"
-echo "      ✓ cases/_logs, cases/_assets, knowledge, ~/Desktop/inbox"
+echo "      ✓ cases/_logs, cases/_assets, knowledge, $HOME/Desktop/inbox"
 
 # ── 6. Проверка Claude Code CLI ──────────────────────────────────────────────
 echo ""
@@ -506,7 +506,7 @@ if [ "$(uname)" = "Darwin" ]; then
   else
     echo "      ⚠ launchctl load не удался — поставить вручную: launchctl load $PLIST_DST"
   fi
-  echo "      Секрет Telegram (необязателен) — ~/.secrets/themis-telegram.env, см. CLAUDE.md."
+  echo '      Секрет Telegram (необязателен) — $HOME/.secrets/themis-telegram.env, см. CLAUDE.md.'
 else
   echo "      ⚠ launchd есть только в macOS — расписание не поставлено автоматически."
   echo "        Замена: Планировщик задач (Windows) / systemd-таймеры (Linux) на"
