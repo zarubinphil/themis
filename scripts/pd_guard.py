@@ -621,8 +621,21 @@ exec python3 "$(git rev-parse --show-toplevel)/scripts/pd_guard.py" %s
 
 
 def install() -> int:
-    hooks = git("rev-parse", "--git-path", "hooks").strip() or ".git/hooks"
-    hooks = hooks if os.path.isabs(hooks) else os.path.join(ROOT, hooks)
+    common_dir = git("rev-parse", "--git-common-dir").strip()
+    if not common_dir:
+        print("не удалось найти git common dir", file=sys.stderr)
+        return 1
+    common_dir = common_dir if os.path.isabs(common_dir) else os.path.join(ROOT, common_dir)
+    hooks = os.path.join(os.path.abspath(common_dir), "hooks")
+    configured = subprocess.run(
+        ["git", "config", "--local", "core.hooksPath", hooks],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if configured.returncode != 0:
+        print(f"не удалось включить локальные git-хуки: {configured.stderr.strip()}", file=sys.stderr)
+        return 1
     os.makedirs(hooks, exist_ok=True)
     for name, arg in (("pre-commit", "--staged"),
                       ("commit-msg", '--msg "$1"'),

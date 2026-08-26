@@ -23,11 +23,15 @@
 ```bash
 git clone https://github.com/zarubinvibe/themis.git
 cd themis
-bash install.sh
-python3 cockpit/app.py
+claude
 ```
 
-Панель откроется на `http://localhost:8800`. Обновление существующего клона:
+В Claude Code запусти `/themis-setup`. Скилл задаст вопросы по одному, проверит
+окружение и попросит разрешение перед установкой. Технический путь без интервью:
+`bash install.sh`.
+
+После установки панель запускается командой `python3 cockpit/app.py` и открывается
+на `http://localhost:8800`. Обновление существующего клона:
 
 ```bash
 bash scripts/update.sh
@@ -47,26 +51,38 @@ bash scripts/update.sh
 
 ## Безопасность и приватность
 
-Материалы дел не публикуются. Папки доверителей, локальные секреты, токены, runtime-состояние и персональные данные должны оставаться вне git. Перед публикацией запускается `scripts/pd_guard.py`, а публичный релиз проверяется `public-repo-gate`.
+Материалы дел не публикуются. Основное извлечение и распознавание идут локально.
+Поиск практики отправляет наружу обезличенный запрос. Облачная проверка страницы
+допускается только для пустого локального OCR, спорного критичного реквизита,
+рукописи, печати или угасшего текста; молчаливого переключения нет. Папки
+доверителей, секреты, токены, runtime-состояние и персональные данные должны
+оставаться вне git. Перед публикацией запускается `scripts/pd_guard.py`, а
+публичный релиз проверяется `public-repo-gate`.
 
-## Статус
+## Статус, roadmap и ограничения
 
-Проект предназначен для работы вместе с юристом. Он не заменяет юридическое решение, не отправляет документы без проверки человека и не должен использоваться как единственный источник правовой позиции.
+Фемида находится в активной разработке и работает под контролем юриста. Основной
+workflow рассчитан на Claude Code. Текстовые PDF, DOCX и XLSX читаются на macOS,
+Windows и Linux, но локальный OCR сканов зависит от Apple Vision и доступен только
+на macOS. Поиск практики зависит от внешнего источника и иногда недоступен. Красный
+гейт или отсутствующий агент останавливает workflow. Подготовленный документ
+остается черновиком, пока его не проверит юрист.
+
+- Сейчас: локальное извлечение, карта дела, проверяемый workflow документов,
+  механические расчеты и локальная панель.
+- Дальше: проверить чистую установку на Windows и Linux, упростить развертывание
+  панели и проверить необязательные интеграции. Дат релиза у этих работ пока нет.
 
 <!-- pantheon-family:start -->
-## Семья Pantheon
+## Семья Olympuz
 
-Этот репозиторий входит в [семью проектов Pantheon](https://github.com/zarubinvibe?tab=repositories). Для каждого публичного проекта даны прямые ссылки на репозиторий и ZIP с исходниками.
+Это один из публичных [проектов семьи Olympuz](https://github.com/zarubinvibe/athena#olympuz-family). Из таблицы можно открыть репозиторий или сразу скачать исходники в ZIP.
 
 | Тип | Название | Что внутри | Скачать |
 |---|---|---|---|
 | проект | Athena | Переносимая агентная ОС: разворачивает рабочую среду Claude и Codex на новом Mac. | [Репозиторий](https://github.com/zarubinvibe/athena) · [ZIP](https://github.com/zarubinvibe/athena/archive/refs/heads/main.zip) |
-| проект | Claude Code Setup OS | Bootstrap-скилл для экономной среды Claude Code и локальной LLM-вики. | [Репозиторий](https://github.com/zarubinvibe/claude-code-setup-os) · [ZIP](https://github.com/zarubinvibe/claude-code-setup-os/archive/refs/heads/main.zip) |
 | проект | Helioz | Конвейер работы агентов 24/7 с проверяемыми отметками готовности и ночными решениями по цели владельца. | [Репозиторий](https://github.com/zarubinvibe/helioz) · [ZIP](https://github.com/zarubinvibe/helioz/archive/refs/heads/main.zip) |
-| проект | Humanizer | Агентный скилл, который убирает типичные следы AI из английского текста. | [Репозиторий](https://github.com/zarubinvibe/humanizer) · [ZIP](https://github.com/zarubinvibe/humanizer/archive/refs/heads/main.zip) |
-| проект | Humanizer RU | Русский редакторский скилл: находит и убирает 58 типичных следов AI-текста. | [Репозиторий](https://github.com/zarubinvibe/humanizer-ru) · [ZIP](https://github.com/zarubinvibe/humanizer-ru/archive/refs/heads/main.zip) |
 | проект | Mnemazine | Локальная система памяти: превращает сырьё в проверенные знания для повторного использования. | [Репозиторий](https://github.com/zarubinvibe/mnemazine) · [ZIP](https://github.com/zarubinvibe/mnemazine/archive/refs/heads/main.zip) |
-| проект | Smltlk | Приложение для строки меню macOS: чинит раскладку, распознаёт речь офлайн и превращает голос в промпт. | [Репозиторий](https://github.com/zarubinvibe/smltlk) · [ZIP](https://github.com/zarubinvibe/smltlk/archive/refs/heads/main.zip) |
 | проект | Themis | Многоагентный помощник по российским судебным делам с локальным OCR и советом из пяти юристов. | [Репозиторий](https://github.com/zarubinvibe/themis) · [ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip) |
 | проект | Zeuz | Фабрика многоагентных workflow: собирает систему с правилами, гейтами, наблюдаемостью и replay. | [Репозиторий](https://github.com/zarubinvibe/zeuz) · [ZIP](https://github.com/zarubinvibe/zeuz/archive/refs/heads/main.zip) |
 <!-- pantheon-family:end -->

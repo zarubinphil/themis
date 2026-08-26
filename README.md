@@ -152,24 +152,46 @@ Tools и [Claude Code](https://claude.com/claude-code).
 ```bash
 git clone https://github.com/zarubinvibe/themis.git
 cd themis
-bash install.sh
+claude
 ```
 
-Дальше я всё объясню сама и спрошу разрешения, прежде чем что-то ставить.
+В открывшемся Claude Code запусти `/themis-setup`. Я задам вопросы по одному,
+проверю окружение и перед установкой попрошу разрешение.
+
+Опытный пользователь может запустить технический установщик напрямую:
+`bash install.sh`. Он ставит зависимости после общего подтверждения, но не
+проводит интервью о практике.
 
 Панель, где видно ход работы: `python3 cockpit/app.py` → http://localhost:8800
 Обновиться до свежей версии: `bash scripts/update.sh` — данные дел не трогаются.
 
 ### Приватность
 
-Материалы дел не покидают твой компьютер. Папки доверителей закрыты от
-публикации на уровне репозитория, наружу уходят только шаблоны и один
-вымышленный пример. Распознавание и чтение — локальные.
+Основное чтение и распознавание идут на твоем компьютере. Папки доверителей
+закрыты от публикации на уровне репозитория, наружу уходят только шаблоны и один
+вымышленный пример. Для поиска практики система отправляет обезличенный запрос.
+Облачная проверка страницы допускается точечно: если локальное распознавание
+вернуло пустой результат, нужно сверить критичный реквизит или прочитать
+рукопись, печать либо угасший текст. Молчаливого переключения в облако нет.
 
 Напоминания в Telegram — твой личный бот, не мой и не общий. Наружу уходят
 только даты и слово «готово»: ни фамилий, ни номеров дел, ни сумм. За этим
 следит отдельная проверка, а не добрая воля. Не нужен бот — я работаю без него
 точно так же.
+
+### Статус, roadmap и ограничения
+
+Фемида находится в активной разработке и рассчитана на работу под контролем
+юриста. Основной workflow работает в Claude Code. Текстовые PDF, DOCX и XLSX
+читаются на macOS, Windows и Linux, но локальное распознавание сканов зависит от
+Apple Vision и доступно только на macOS. Поиск практики зависит от внешнего
+источника и иногда недоступен. Красный гейт или отсутствующий агент останавливает
+workflow.
+
+- Сейчас: локальное извлечение, карта дела, проверяемый workflow документов,
+  механические расчеты и локальная панель.
+- Дальше: проверить чистую установку на Windows и Linux, упростить развертывание
+  панели и проверить необязательные интеграции. Дат релиза у этих работ пока нет.
 
 ### Лицензия
 
@@ -311,23 +333,42 @@ and [Claude Code](https://claude.com/claude-code).
 ```bash
 git clone https://github.com/zarubinvibe/themis.git
 cd themis
-bash install.sh
+claude
 ```
 
-From there I explain everything myself and ask before installing anything.
+Inside Claude Code, run `/themis-setup`. It asks about your practice one question
+at a time, checks the environment, and asks before installing anything.
+
+Experienced users can run `bash install.sh` directly. That installs dependencies
+after one confirmation, but it skips the practice interview.
 
 Panel: `python3 cockpit/app.py` → http://localhost:8800
 Update: `bash scripts/update.sh` — your case data is untouched.
 
 ### Privacy
 
-Case material never leaves your computer. Client folders are excluded from
-publication at the repository level; only templates and one fictional example go
-out. Extraction and recognition are local.
+Most extraction and recognition run on your computer. Client folders are excluded
+from publication at the repository level; only templates and one fictional example
+are tracked. Case law search sends a masked query to an external source. Cloud vision
+is reserved for an empty local OCR result, a disputed critical detail, handwriting,
+stamps, or faded text. The system does not switch to it silently.
 
 Telegram reminders use your own bot, never mine. What goes out is dates and the
 word "done": no names, no case numbers, no amounts. A separate check enforces
 that. No bot, no problem — I work the same without it.
+
+### Status, roadmap and limits
+
+Themis is under active development and expects a lawyer to supervise every case.
+The main workflow runs in Claude Code. Text PDFs, DOCX, and XLSX work on macOS,
+Windows, and Linux, but local scan OCR depends on Apple Vision and is available only
+on macOS. Case law search depends on an external source and sometimes fails. A red
+gate or a missing agent stops the workflow.
+
+- Current: local extraction, case mapping, a checked document workflow,
+  deterministic calculators, and a local cockpit.
+- Next: test clean installs on Windows and Linux, simplify cockpit deployment, and
+  check optional integrations. These items have no promised release date.
 
 ### Licence
 
@@ -357,19 +398,15 @@ And if I was useful, leave a star. A few seconds for you; rather more than that
 for the project.
 
 <!-- pantheon-family:start -->
-## Pantheon family
+## Olympuz family
 
-Part of the [Pantheon project family](https://github.com/zarubinvibe?tab=repositories). Every public project links directly to its repository and source ZIP.
+This is one of the public [Olympuz projects](https://github.com/zarubinvibe/athena#olympuz-family). Each row opens the repository or downloads its source as a ZIP.
 
 | Type | Name | What it does | Source |
 |---|---|---|---|
 | project | Athena | Portable agent OS that restores a complete Claude and Codex setup on a new Mac. | [Repository](https://github.com/zarubinvibe/athena) · [ZIP](https://github.com/zarubinvibe/athena/archive/refs/heads/main.zip) |
-| project | Claude Code Setup OS | Bootstrap skill for a token-efficient Claude Code workspace and a local LLM wiki. | [Repository](https://github.com/zarubinvibe/claude-code-setup-os) · [ZIP](https://github.com/zarubinvibe/claude-code-setup-os/archive/refs/heads/main.zip) |
 | project | Helioz | 24/7 agent work conveyor with verified completion markers and goal-based overnight decisions. | [Repository](https://github.com/zarubinvibe/helioz) · [ZIP](https://github.com/zarubinvibe/helioz/archive/refs/heads/main.zip) |
-| project | Humanizer | Agent skill that removes common AI writing patterns from English text. | [Repository](https://github.com/zarubinvibe/humanizer) · [ZIP](https://github.com/zarubinvibe/humanizer/archive/refs/heads/main.zip) |
-| project | Humanizer RU | Russian writing skill that detects and removes 58 common AI text patterns. | [Repository](https://github.com/zarubinvibe/humanizer-ru) · [ZIP](https://github.com/zarubinvibe/humanizer-ru/archive/refs/heads/main.zip) |
 | project | Mnemazine | Local-first memory system that turns raw inputs into verified reusable knowledge. | [Repository](https://github.com/zarubinvibe/mnemazine) · [ZIP](https://github.com/zarubinvibe/mnemazine/archive/refs/heads/main.zip) |
-| project | Smltlk | macOS menu bar app for keyboard-layout repair, offline dictation, and speech-to-prompt. | [Repository](https://github.com/zarubinvibe/smltlk) · [ZIP](https://github.com/zarubinvibe/smltlk/archive/refs/heads/main.zip) |
 | project | Themis | Multi-agent assistant for Russian litigation with local OCR and review by a five-jurist council. | [Repository](https://github.com/zarubinvibe/themis) · [ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip) |
 | project | Zeuz | Factory that turns an idea into a governed multi-agent workflow with gates, observability, and replay. | [Repository](https://github.com/zarubinvibe/zeuz) · [ZIP](https://github.com/zarubinvibe/zeuz/archive/refs/heads/main.zip) |
 <!-- pantheon-family:end -->
