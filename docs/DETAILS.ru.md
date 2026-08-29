@@ -4,12 +4,12 @@
 
 Фемида - локальный многоагентный помощник для российской судебной практики: читает материалы, считает сроки и суммы, собирает позицию и проверяет себя перед юристом.
 
-[English](README.md)
+[English](../README.md)
 
 <p align="center">
-  <img src="docs/assets/pantheon/hero.png" width="820" alt="Фемида Pantheon: статуя Фемиды с весами, мечом, правовыми документами, карточками агентной проверки и общей мраморной колонной">
+  <img src="../docs/assets/pantheon/hero.png" width="820" alt="Фемида Pantheon: статуя Фемиды с весами, мечом, правовыми документами, карточками агентной проверки и общей мраморной колонной">
   <br>
-  <img src="docs/assets/pantheon/emblem.png" width="220" alt="Эмблема Фемиды Pantheon: Фемида, весы, меч и колонна">
+  <img src="../docs/assets/pantheon/emblem.png" width="220" alt="Эмблема Фемиды Pantheon: Фемида, весы, меч и колонна">
 </p>
 
 ## Что умеет
@@ -47,9 +47,9 @@ bash scripts/update.sh
 
 ## Документация
 
-- [Как я работаю](docs/HOW-IT-WORKS.ru.md)
-- [Правила публикации и приватности](knowledge/server-protocol.md)
-- [Полная лицензия](LICENSE.ru.md)
+- [Как я работаю](../docs/HOW-IT-WORKS.ru.md)
+- [Правила публикации и приватности](../knowledge/server-protocol.md)
+- [Полная лицензия](../LICENSE.ru.md)
 
 ## Безопасность и приватность
 
@@ -79,4 +79,4 @@ Windows и Linux, но локальный OCR сканов зависит от A
 
 ## Лицензия
 
-Частному юристу бесплатно. Организации - по договору. Полный текст: [LICENSE.ru.md](LICENSE.ru.md) и [LICENSE](LICENSE).
+Частному юристу бесплатно. Организации - по договору. Полный текст: [LICENSE.ru.md](../LICENSE.ru.md) и [LICENSE](../LICENSE).

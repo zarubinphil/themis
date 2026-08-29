@@ -2,18 +2,18 @@
 
 <div align="center">
 
-<img src="docs/assets/pantheon/emblem.png" alt="Themis Pantheon emblem" width="220"/>
+<img src="../docs/assets/pantheon/emblem.png" alt="Themis Pantheon emblem" width="220"/>
 
 # Фемида · Themis
 
 **Я веду судебные дела вместе с юристом. Не вместо него.**
 **I work cases alongside a lawyer. Not instead of one.**
 
-**[Русский](README.ru.md) · [English](#english)**
+**[Русский](../README.ru.md) · [English](#english)**
 
 </div>
 
-![Themis Pantheon hero: Themis with scales, sword, legal documents, agent review cards and the shared marble column](docs/assets/pantheon/hero.png)
+![Themis Pantheon hero: Themis with scales, sword, legal documents, agent review cards and the shared marble column](../docs/assets/pantheon/hero.png)
 
 ---
 
@@ -125,7 +125,7 @@ Word и Excel беру текст напрямую, без распознава�
 **Учусь на твоих правках.** Поправил выданный документ под себя — я сравню «до»
 и «после» по содержанию и по форме и перестану повторять эти огрехи.
 
-📖 **[Как я работаю на самом деле](docs/HOW-IT-WORKS.ru.md)** — подробный разбор
+📖 **[Как я работаю на самом деле](../docs/HOW-IT-WORKS.ru.md)** — подробный разбор
 без рекламы: что происходит внутри, где я себя проверяю, чего я не делаю и где
 нужен ты. Каждое утверждение там проверено запуском.
 
@@ -208,8 +208,8 @@ workflow.
 Правообладатель — **Зарубин Филипп Андреевич**. Все права, прямо не
 предоставленные лицензией, сохраняются за ним.
 
-Полный текст: **[LICENSE.ru.md](LICENSE.ru.md)** (основной) и
-[LICENSE](LICENSE) (английский). До 21.08.2026 я распространялась по MIT; копии,
+Полный текст: **[LICENSE.ru.md](../LICENSE.ru.md)** (основной) и
+[LICENSE](../LICENSE) (английский). До 21.08.2026 я распространялась по MIT; копии,
 полученные до этой даты, остаются под MIT в отношении той версии.
 
 Построена на [Claude Code](https://claude.com/claude-code).
@@ -323,7 +323,7 @@ from the one that wrote it.
 **I learn from your edits.** Correct a document I gave you and I compare before
 and after, in substance and in form, and stop repeating those mistakes.
 
-📖 **[How I actually work](docs/HOW-IT-WORKS.en.md)** — the long version without
+📖 **[How I actually work](../docs/HOW-IT-WORKS.en.md)** — the long version without
 the marketing: what happens inside, where I check myself, what I do not do and
 where you are still required. Every claim there was verified by running it.
 
@@ -384,7 +384,7 @@ offered to clients as a service, a commercial licence is required.
 Rights holder: **Philipp Andreevich Zarubin**. Every right not expressly granted
 by the licence stays with him.
 
-Full text: **[LICENSE](LICENSE)** (English) and [LICENSE.ru.md](LICENSE.ru.md)
+Full text: **[LICENSE](../LICENSE)** (English) and [LICENSE.ru.md](../LICENSE.ru.md)
 (Russian, governing). Until 21.08.2026 I was distributed under the MIT Licence;
 copies obtained before that date remain under MIT for that version.
 
