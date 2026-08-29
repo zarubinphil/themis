@@ -22,7 +22,7 @@
       "better": "Interest under article 395, procedural deadlines, court fees, and amounts in words are calculated by programs. Statutes are quoted from the corpus on your disk, so a paraphrase cannot silently replace the text.",
       "how": "A case moves through named stages. Each stage has its own agents, and a document never leaves without a second pair of eyes.",
       "quick_intro": "You need a Mac for local scan recognition, Python 3.11 or newer, Xcode Command Line Tools, and Claude Code.",
-      "quick_extra": "Prefer the plain installer? Run `bash install.sh` in the same folder; it installs dependencies after one confirmation but skips the interview about your practice. No Git? Take [the ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip). The local dashboard starts with `python3 cockpit/app.py` on port 8800.",
+      "quick_extra": "Prefer the plain installer? Run `bash install.sh` in the same folder; it installs dependencies after one confirmation but skips the interview about your practice. No Git? Take [the ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip). The local dashboard starts with `python3 cockpit/app.py` on port 8800. First time here? Open the project in Claude Code and run `/themis-setup`: the install goes as a conversation, one question at a time, and nothing is installed without your yes.",
       "quick_result": "the setup asks about your practice one question at a time, downloads the codes you need first, and finishes by testing itself on a real document of yours.",
       "compare": [
         [
@@ -78,7 +78,8 @@
         "A clean install on Windows and Linux has not been verified yet."
       ],
       "docs": "Deeper reading: [how it really works](docs/HOW-IT-WORKS.ru.md), in Russian and without advertising, and [the full reference](docs/DETAILS.md) with the agent roster and the setup interview.",
-      "license": "Themis Community Licence 1.0: free for an individual lawyer, including private practice. Organisations need a commercial licence. See [LICENSE](LICENSE) and [LICENSE.ru.md](LICENSE.ru.md)."
+      "license": "Themis Community Licence 1.0: free for an individual lawyer, including private practice. Organisations need a commercial licence. See [LICENSE](LICENSE) and [LICENSE.ru.md](LICENSE.ru.md).",
+      "welcome": "Hello. I am a practising lawyer, and too much of my time went into mechanics: two hundred pages of scans, dates to reconcile, citations to check, one detail buried somewhere in the file.\n\nThemis takes that work and leaves me the part that needs judgement. She does not decide anything, and neither should she."
     },
     "ru": {
       "title": "Фемида",
@@ -91,7 +92,7 @@
       "better": "Проценты по статье 395, процессуальные сроки, госпошлина и суммы прописью считаются программами. Нормы цитируются из корпуса на вашем диске, поэтому пересказ не подменит текст незаметно.",
       "how": "Дело идёт по названным стадиям. У каждой свои агенты, и документ не выходит без вторых глаз.",
       "quick_intro": "Нужны Mac для локального распознавания сканов, Python 3.11 или новее, Xcode Command Line Tools и Claude Code.",
-      "quick_extra": "Хотите обычный установщик? Запустите `bash install.sh` в той же папке: он ставит зависимости после одного подтверждения, но не проводит интервью о вашей практике. Нет Git? Возьмите [ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip). Локальная панель запускается командой `python3 cockpit/app.py` на порту 8800.",
+      "quick_extra": "Хотите обычный установщик? Запустите `bash install.sh` в той же папке: он ставит зависимости после одного подтверждения, но не проводит интервью о вашей практике. Нет Git? Возьмите [ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip). Локальная панель запускается командой `python3 cockpit/app.py` на порту 8800. Первый раз? Откройте проект в Claude Code и запустите `/themis-setup`: установка пройдёт разговором, по одному вопросу, и ничего не поставится без вашего «да».",
       "quick_result": "установка спрашивает о вашей практике по одному вопросу, скачивает нужные вам кодексы первыми и в конце проверяет себя на вашем настоящем документе.",
       "compare": [
         [
@@ -147,7 +148,8 @@
         "Чистая установка на Windows и Linux пока не проверена."
       ],
       "docs": "Глубже: [как я работаю на самом деле](docs/HOW-IT-WORKS.ru.md), без рекламы, и [полный разбор](docs/DETAILS.ru.md) с составом агентов и вопросами установки.",
-      "license": "Themis Community Licence 1.0: частному юристу бесплатно, включая личную практику. Организации нужна коммерческая лицензия. Тексты в [LICENSE.ru.md](LICENSE.ru.md) и [LICENSE](LICENSE)."
+      "license": "Themis Community Licence 1.0: частному юристу бесплатно, включая личную практику. Организации нужна коммерческая лицензия. Тексты в [LICENSE.ru.md](LICENSE.ru.md) и [LICENSE](LICENSE).",
+      "welcome": "Привет. Я практикующий юрист, и слишком много моего времени уходило на механику: двести страниц сканов, сверка дат, проверка ссылок, одна деталь, зарытая где-то в материалах.\n\nФемида забирает эту работу и оставляет мне ту часть, где нужно суждение. Она ничего не решает, и не должна."
     },
     "zh": {
       "title": "Themis",
@@ -160,7 +162,7 @@
       "better": "民法典第 395 条的利息、诉讼期限、国家规费和金额大写都由程序计算。法条从你磁盘上的法规库里逐字引用，转述不会悄悄替换原文。",
       "how": "一个案件按命名好的阶段推进。每个阶段有自己的智能体，文书不经过第二双眼睛不会出门。",
       "quick_intro": "你需要一台 Mac 来本地识别扫描件，Python 3.11 以上，Xcode 命令行工具，以及 Claude Code。",
-      "quick_extra": "更喜欢普通安装脚本？在同一个目录里执行 `bash install.sh`：它在一次确认之后安装依赖，但不会做关于你执业方向的访谈。没有 Git？拿 [ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip)。本地面板用 `python3 cockpit/app.py` 启动，端口 8800。",
+      "quick_extra": "更喜欢普通安装脚本？在同一个目录里执行 `bash install.sh`：它在一次确认之后安装依赖，但不会做关于你执业方向的访谈。没有 Git？拿 [ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip)。本地面板用 `python3 cockpit/app.py` 启动，端口 8800。 第一次用？在 Claude Code 里打开项目并运行 `/themis-setup`：安装以对话方式进行，一次问一个问题，没有你的同意不会装任何东西。",
       "quick_result": "安装过程会一次一个问题地了解你的执业方向，先下载你最需要的法典，最后用你自己的一份真实文书来自检。",
       "compare": [
         [
@@ -216,7 +218,8 @@
         "Windows 和 Linux 上的干净安装还没有验证过。"
       ],
       "docs": "想看得更深：[它到底怎么工作](docs/HOW-IT-WORKS.ru.md)（俄语，没有广告）和 [完整参考](docs/DETAILS.md)（智能体名单与安装访谈）。",
-      "license": "Themis Community Licence 1.0：个人律师免费使用，包括个人执业；组织需要商业许可。见 [LICENSE](LICENSE) 与 [LICENSE.ru.md](LICENSE.ru.md)。"
+      "license": "Themis Community Licence 1.0：个人律师免费使用，包括个人执业；组织需要商业许可。见 [LICENSE](LICENSE) 与 [LICENSE.ru.md](LICENSE.ru.md)。",
+      "welcome": "你好。我是执业律师，太多时间花在机械活上：两百页扫描件、核对日期、检查引用、在卷宗里找那一个细节。\n\n忒弥斯把这部分工作拿走，把需要判断的那部分留给我。她不做任何决定，也不该做。"
     }
   },
   "stages": {
@@ -360,5 +363,10 @@
         "alt": "Pantheon 宽幅大理石场景：Themis 工作流程第 7 步，开庭准备与提醒"
       }
     }
+  },
+  "owner_display_name": {
+    "en": "Filipp Zarubin",
+    "ru": "Филипп Зарубин",
+    "zh": "Filipp Zarubin"
   }
 }

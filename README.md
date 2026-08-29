@@ -8,6 +8,16 @@ Themis works a Russian court case beside a lawyer: it reads the file, hunts case
 
 <p align="center"><img src="docs/assets/pantheon/hero.png" alt="Themis in white marble with scales and sword beside the classical column, legal documents and agent review cards laid out in daylight" width="100%"></p>
 
+<!-- owner-welcome:start -->
+
+> Hello. I am a practising lawyer, and too much of my time went into mechanics: two hundred pages of scans, dates to reconcile, citations to check, one detail buried somewhere in the file.
+>
+> Themis takes that work and leaves me the part that needs judgement. She does not decide anything, and neither should she.
+>
+> — Filipp Zarubin
+
+<!-- owner-welcome:end -->
+
 ## Contents
 
 - [What This Is](#what-this-is)
@@ -122,7 +132,9 @@ claude
 # inside Claude Code run: /themis-setup
 ```
 
-Prefer the plain installer? Run `bash install.sh` in the same folder; it installs dependencies after one confirmation but skips the interview about your practice. No Git? Take [the ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip). The local dashboard starts with `python3 cockpit/app.py` on port 8800.
+Prefer the plain installer? Run `bash install.sh` in the same folder; it installs dependencies after one confirmation but skips the interview about your practice. No Git? Take [the ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip). The local dashboard starts with `python3 cockpit/app.py` on port 8800. First time here? Open the project in Claude Code and run `/themis-setup`: the install goes as a conversation, one question at a time, and nothing is installed without your yes.
+
+Never done this before? [The onboarding](docs/ONBOARDING.md) walks the whole first run step by step and says what you see after every command.
 
 **You get:** the setup asks about your practice one question at a time, downloads the codes you need first, and finishes by testing itself on a real document of yours.
 

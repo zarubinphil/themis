@@ -162,7 +162,7 @@ else
   echo "  line up facts, find connections, test versions and notice the thing a"
   echo "  person misses in their tenth hour of work."
   echo ""
-  echo "  I was created by Philipp Zarubin, a practising lawyer."
+  echo "  I was created by Filipp Zarubin, a practising lawyer."
   echo ""
   echo "  The reason was fairly plain: too much of a good lawyer's time goes not"
   echo "  into the law and not into thinking, but into the mechanics around them."

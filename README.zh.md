@@ -8,6 +8,16 @@ Themis 陪着律师办俄罗斯的诉讼案件：读卷宗、找判例、并且�
 
 <p align="center"><img src="docs/assets/pantheon/hero.png" alt="白色大理石的忒弥斯手持天平与放下的剑，站在古典石柱旁，案卷与审阅卡片摊在日光里" width="100%"></p>
 
+<!-- owner-welcome:start -->
+
+> 你好。我是执业律师，太多时间花在机械活上：两百页扫描件、核对日期、检查引用、在卷宗里找那一个细节。
+>
+> 忒弥斯把这部分工作拿走，把需要判断的那部分留给我。她不做任何决定，也不该做。
+>
+> — Filipp Zarubin
+
+<!-- owner-welcome:end -->
+
 ## 目录
 
 - [这是什么](#这是什么)
@@ -122,7 +132,9 @@ claude
 # inside Claude Code run: /themis-setup
 ```
 
-更喜欢普通安装脚本？在同一个目录里执行 `bash install.sh`：它在一次确认之后安装依赖，但不会做关于你执业方向的访谈。没有 Git？拿 [ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip)。本地面板用 `python3 cockpit/app.py` 启动，端口 8800。
+更喜欢普通安装脚本？在同一个目录里执行 `bash install.sh`：它在一次确认之后安装依赖，但不会做关于你执业方向的访谈。没有 Git？拿 [ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip)。本地面板用 `python3 cockpit/app.py` 启动，端口 8800。 第一次用？在 Claude Code 里打开项目并运行 `/themis-setup`：安装以对话方式进行，一次问一个问题，没有你的同意不会装任何东西。
+
+第一次做这件事？[上手引导](docs/ONBOARDING.zh.md) 会一步一步带你走完第一次运行，并写清楚每条命令之后你会看到什么。
 
 **你会得到：** 安装过程会一次一个问题地了解你的执业方向，先下载你最需要的法典，最后用你自己的一份真实文书来自检。
 

@@ -51,6 +51,8 @@ description: 'Первая установка Фемиды на компьюте
 словами, не «делать живее» — он написан голосом Фемиды и это её представление
 себя, а не служебная строка. Допустима только правка опечатки.
 
+<!-- setup-welcome:start -->
+
 **Русский:**
 
 > Привет. Я Фемида.
@@ -157,7 +159,7 @@ description: 'Первая установка Фемиды на компьюте
 >
 > What I hold now is not only the law but an enormous world of information: codes, judgments, books, documents, registries, research and everything else the digital world will let me reach. I can read thousands of pages, line up facts, find connections, test versions and notice the thing a person misses in their tenth hour of work.
 >
-> I was created by Philipp Zarubin, a practising lawyer.
+> I was created by Filipp Zarubin, a practising lawyer.
 >
 > The reason was fairly plain: too much of a good lawyer's time goes not into the law and not into thinking, but into the mechanics around them. Reading hundreds of documents, carrying facts from one place to another, hunting case law, checking dates, verifying citations, and going through the file again for one detail you know is in there somewhere.
 >
@@ -242,6 +244,9 @@ description: 'Первая установка Фемиды на компьюте
 Тот же текст печатает `install.sh` (язык берёт из настроек компьютера). Пришедший
 через установщик увидит его там, пришедший через Claude Code — здесь. Двух
 приветствий подряд не бывает: у человека один вход.
+
+
+<!-- setup-welcome:end -->
 
 ## 1. Разрешение на установку — ЖЁСТКОЕ ПРАВИЛО
 

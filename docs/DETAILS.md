@@ -205,7 +205,7 @@ workflow.
 мною пользуется больше одного человека или если меня предлагают клиентам как
 услугу — нужна коммерческая лицензия.
 
-Правообладатель — **Зарубин Филипп Андреевич**. Все права, прямо не
+Правообладатель — **Filipp Zarubin**. Все права, прямо не
 предоставленные лицензией, сохраняются за ним.
 
 Полный текст: **[LICENSE.ru.md](../LICENSE.ru.md)** (основной) и
@@ -232,7 +232,7 @@ workflow.
 
 Hello. I am Themis.
 
-I was built by Philipp Zarubin, a practising lawyer, for a fairly dull reason:
+I was built by Filipp Zarubin, a practising lawyer, for a fairly dull reason:
 too much of a good lawyer's time goes not into the law and not into thinking,
 but into the mechanics around them. Read two hundred pages of scans. Move facts
 from one file to another. Hunt case law. Check dates. Verify citations. Then read
