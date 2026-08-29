@@ -1,6 +1,6 @@
 #!/bin/bash
 cd "$(dirname "$0")"
-# Бьём старый сервер по ПОРТУ, не по имени: cmdline = "python3 app.py" (cwd=cockpit),
+# Бьем старый сервер по ПОРТУ, не по имени: cmdline = "python3 app.py" (cwd=cockpit),
 # паттерн "cockpit/app.py" не совпадал → старый процесс с устаревшим кодом держал порт.
 OLD=$(lsof -nP -iTCP:8800 -sTCP:LISTEN -t 2>/dev/null)
 [ -n "$OLD" ] && kill -9 $OLD 2>/dev/null

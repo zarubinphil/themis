@@ -21,7 +21,7 @@ def main() -> None:
     if len(sys.argv) < 4:
         sys.exit("usage: render_tail.py FILE OCR_DIR START [END]")
     path, outdir, start = sys.argv[1], sys.argv[2], int(sys.argv[3])
-    m.guard_render_dir(outdir)   # рендер внутрь дела запрещён; проверка одна на все приборы
+    m.guard_render_dir(outdir)   # рендер внутрь дела запрещен; проверка одна на все приборы
     if not os.path.isfile(path):
         sys.exit(f"файл не найден: {path}")
     # Инвариант local-first: движка OCR нет → СТОП, не деградировать на облако.

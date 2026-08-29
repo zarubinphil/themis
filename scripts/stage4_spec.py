@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""stage4_spec.py — приёмка этапа 4 «дисциплина и деньги». Пишет КООРДИНАТОР, не исполнитель.
+"""stage4_spec.py — приемка этапа 4 «дисциплина и деньги». Пишет КООРДИНАТОР, не исполнитель.
 
-Инвариант роя: generator ≠ verifier. Контракт задаётся снаружи и проверяется чёрным
+Инвариант роя: generator ≠ verifier. Контракт задается снаружи и проверяется черным
 ящиком — только через командную строку и сетевой запрос к панели, без импорта потрохов.
-Исполнитель этот файл НЕ ПРАВИТ: прибор подстраивается под приёмку, не наоборот.
+Исполнитель этот файл НЕ ПРАВИТ: прибор подстраивается под приемку, не наоборот.
 Правку ловит loop_gate (`spec:tampered`) сверкой с git.
 
 Четыре работы этапа:
@@ -11,9 +11,9 @@
   2. растровые рендеры под cases/ вне первички блокируются, существующие вывезены
      в кеш обратимо (первичка неприкосновенна);
   3. модель шага выводится прибором из уровня и сверяется по брифу;
-  4. загрузка в панель ограничена по числу файлов, размеру файла и объёму запроса,
+  4. загрузка в панель ограничена по числу файлов, размеру файла и объему запроса,
      отказ громкий (413), а не молчаливый пропуск.
-Плюс инвариант денег: независимый счётчик сходится с ledger в пределах 2%.
+Плюс инвариант денег: независимый счетчик сходится с ledger в пределах 2%.
 
 Выход: 0 — этап принят; 1 — есть несданное (список с контрактами).
 """
@@ -33,7 +33,7 @@ CASES = ROOT / "cases"
 NO_NET = {**os.environ, "HTTPS_PROXY": "http://127.0.0.1:1", "HTTP_PROXY": "http://127.0.0.1:1",
           "ALL_PROXY": "http://127.0.0.1:1", "NO_PROXY": "127.0.0.1,localhost"}
 RASTER = ("png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp")
-INTAKE = "00_" + "intake"   # склейкой: строка-триггер собственного сторожа в теле приёмки
+INTAKE = "00_" + "intake"   # склейкой: строка-триггер собственного сторожа в теле приемки
 
 
 def run(argv, cwd=ROOT, timeout=300, env=None, stdin_text=None):
@@ -77,7 +77,7 @@ PY_CONTRACT = """  scripts/claude_guard.py — PreToolUse-хук
     Блокирует (код 2) запись исполняемого кода (.py, .sh) в любое место под cases/:
     Write/Edit по такому пути и Bash-команду, кладущую туда файл (редирект, heredoc,
     cp/mv/tee). Причина: генератор документа внутри дела обходит DocBuilder и гейты
-    формата — так под cases/ завелись 84 скрипта, 15 из них с запрещённым шрифтом.
+    формата — так под cases/ завелись 84 скрипта, 15 из них с запрещенным шрифтом.
     НЕ блокирует (код 0): .py под scripts/, чтение и ЗАПУСК существующего файла,
     слово «cases» и имя .py внутри прозы команды (сообщение коммита, grep, python3
     scripts/... по материалам дела). Сторож, срабатывающий на обиходе, будет снят."""
@@ -97,7 +97,7 @@ def check_py_under_cases():
         ("Edit существующего .py в деле",
          {"tool_name": "Edit", "tool_input": {"file_path": c + "/build_docx.py",
                                               "old_string": "a", "new_string": "b"}}, 2),
-        ("Bash heredoc кладёт .py в дело",
+        ("Bash heredoc кладет .py в дело",
          {"tool_name": "Bash", "tool_input": {"command":
           "cat > " + c + "/.agent/context/_working/build.py <<'EOF'\nprint(1)\nEOF"}}, 2),
         ("Bash cp .py в дело",
@@ -154,17 +154,17 @@ def check_py_under_cases():
 PNG_CONTRACT = """  scripts/claude_guard.py + scripts/render_gc.py + scripts/markdown_extract.py
     Хук блокирует (код 2) запись растра (png/jpg/jpeg/tif/tiff/bmp/webp) под cases/
     ВНЕ первички: рендер страницы — производный кеш, его место вне дела. Первичка
-    не трогается вовсе, доказательство-картинка кладётся туда как новый файл
+    не трогается вовсе, доказательство-картинка кладется туда как новый файл
     (уже разрешено правилом пополнения).
     НЕ блокирует: растр в /tmp и в ~/.cache, ЧТЕНИЕ картинки под cases (облачный
     фолбэк vision обязан работать), .md/.txt-сайдкары рядом с рендерами.
     markdown_extract.py FILE --render-dir ПУТЬ_ПОД_cases — отказ с ненулевым кодом
-    и без создания каталога; тот же вызов с каталогом вне cases/ такого отказа не даёт.
+    и без создания каталога; тот же вызов с каталогом вне cases/ такого отказа не дает.
     scripts/render_gc.py — вывоз уже накопленного, обратимо:
       --dry-run КОРЕНЬ            печатает число найденных, диск НЕ меняет
       --move КОРЕНЬ --manifest F  переносит растр вне первички в кеш, пишет манифест
       --restore F                 возвращает файлы на место побайтово
-      первичка не трогается ни в одном режиме; --selftest даёт 0 без сети.
+      первичка не трогается ни в одном режиме; --selftest дает 0 без сети.
     Итог на боевом дереве: растровых файлов под cases/ вне первички — ноль."""
 
 
@@ -181,7 +181,7 @@ def check_png_guard():
           "cp /tmp/a.jpg " + c + "/.agent/context/_practice/foto.jpg"}}, 2),
         ("Bash редирект tiff в дело",
          {"tool_name": "Bash", "tool_input": {"command": "convert a.pdf > " + c + "/scan.tiff"}}, 2),
-        ("рендер в /tmp разрешён",
+        ("рендер в /tmp разрешен",
          {"tool_name": "Bash", "tool_input": {"command":
           "python3 scripts/markdown_extract.py " + c + "/" + INTAKE
           + "/isk.pdf --render-dir /tmp/ivanov/isk"}}, 0),
@@ -216,7 +216,7 @@ def check_png_guard():
             ("перенос каталога с рендерами в дело",
              {"tool_name": "Bash", "tool_input": {
                  "command": f"mv {full} {c}/.agent/context/_working/ocr"}}, 2),
-            ("перенос каталога без растра и кода разрешён",
+            ("перенос каталога без растра и кода разрешен",
              {"tool_name": "Bash", "tool_input": {
                  "command": f"mv {empty} {c}/.agent/context/_working/zametki"}}, 0),
         ])
@@ -235,7 +235,7 @@ def check_png_guard():
                 fails.append(("render_tail.py", f"каталог рендера под cases/ создан: {bad}"))
             if "cases" not in (out + err).lower():
                 fails.append(("render_tail.py", f"отказ не назвал причину cases/: {(out + err).strip()[:200]}"))
-    # markdown_extract обязан отказать до работы, если каталог рендера ведёт в дело
+    # markdown_extract обязан отказать до работы, если каталог рендера ведет в дело
     with tempfile.TemporaryDirectory() as td:
         src = Path(td) / "obrazec.png"
         src.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 64)
@@ -296,7 +296,7 @@ def check_render_gc():
         if not (intake / "skan.png").exists() or (intake / "skan.png").read_bytes() != b"PERVICHKA":
             fails.append(("render_gc.py", "первичка тронута — запрещено"))
         if not (work / "page_001.txt").exists():
-            fails.append(("render_gc.py", "сайдкар OCR .txt удалён вместе с рендером"))
+            fails.append(("render_gc.py", "сайдкар OCR .txt удален вместе с рендером"))
         if not manifest.is_file():
             fails.append(("render_gc.py", "манифест не записан — откат невозможен"))
 
@@ -307,7 +307,7 @@ def check_render_gc():
             fails.append(("render_gc.py", "--restore не вернул файлы на место"))
         elif (work / "page_001.png").read_bytes() != b"RENDER-1" or \
                 (work / "page_002.png").read_bytes() != b"RENDER-2":
-            fails.append(("render_gc.py", "--restore вернул файлы с изменённым содержимым"))
+            fails.append(("render_gc.py", "--restore вернул файлы с измененным содержимым"))
     return fails
 
 
@@ -336,14 +336,14 @@ def check_tree_clean():
 MODEL_CONTRACT = """  scripts/model_policy.py — модель шага выводится из уровня, а не из пина
     --level MICRO|L1|L2|L3 --step ШАГ  → печатает алиас (haiku|sonnet|opus), код 0
         draft  review : MICRO,L1 → sonnet ; L2,L3 → opus
-        hunt          : sonnet ; на MICRO запрещён (код 1, причина со словом «запрещ»)
+        hunt          : sonnet ; на MICRO запрещен (код 1, причина со словом «запрещ»)
         council-role  : sonnet ; council-chair: opus ; оба запрещены на MICRO и L1
         read-text classify : haiku ; read-scan : sonnet
-    --brief ФАЙЛ — сверка плана брифа: уровень берётся из строки КЛАССИФИКАЦИЯ,
+    --brief ФАЙЛ — сверка плана брифа: уровень берется из строки КЛАССИФИКАЦИЯ,
         каждая строка таблицы ПЛАН сверяется с политикой. Код 0 — сходится;
         код 1 — назвать нарушителя (Opus на L1 — пятикратная цена типового документа).
         Fail-closed: нет уровня либо пустая колонка «Модель» — код 1, не 0.
-    --selftest даёт 0 без сети. Скилл task-brief обязан звать этот прибор:
+    --selftest дает 0 без сети. Скилл task-brief обязан звать этот прибор:
     «модель автоматом из брифа» значит из прибора, а не из головы."""
 
 MATRIX = [("MICRO", "draft", "sonnet"), ("L1", "draft", "sonnet"),
@@ -367,7 +367,7 @@ BRIEF_OK = """## БРИФ — типовое ходатайство             
 BRIEF_BAD = BRIEF_OK.replace("| 4 | doc-drafter | sonnet | 40k |", "| 4 | doc-drafter | opus | 40k |")
 BRIEF_NOLEVEL = "\n".join(l for l in BRIEF_OK.splitlines() if "КЛАССИФИКАЦИЯ" not in l)
 BRIEF_NOMODEL = BRIEF_OK.replace("| 4 | doc-drafter | sonnet | 40k |", "| 4 | doc-drafter |  | 40k |")
-# Бриф зовёт исполнителя как в чате — персоной или персоной с именем агента.
+# Бриф зовет исполнителя как в чате — персоной или персоной с именем агента.
 # Политика, знающая только машинное имя, молча пропускает такую строку.
 BRIEF_PERSONA = BRIEF_OK.replace("| 4 | doc-drafter | sonnet | 40k |",
                                  "| 4 | Сперанский | opus | 40k |")
@@ -391,7 +391,7 @@ def check_model_policy():
     for level, step in FORBIDDEN:
         code, out, err = run([tool("model_policy.py"), "--level", level, "--step", step])
         if code == 0:
-            fails.append(("model_policy.py", f"{level}/{step} обязан быть запрещён, вышел код 0"))
+            fails.append(("model_policy.py", f"{level}/{step} обязан быть запрещен, вышел код 0"))
         elif "запрещ" not in (out + err).lower():
             fails.append(("model_policy.py",
                           f"{level}/{step}: отказ не назвал причину: {(out + err).strip()[:150]}"))
@@ -411,7 +411,7 @@ def check_model_policy():
                                                  f"вышло {code} — {why}. {(out + err).strip()[:200]}"))
     skill = ROOT / ".claude" / "skills" / "task-brief" / "SKILL.md"
     if not skill.is_file() or "model_policy.py" not in skill.read_text(encoding="utf-8"):
-        fails.append(("task-brief", "скилл не зовёт model_policy.py — «модель автоматом из брифа» "
+        fails.append(("task-brief", "скилл не зовет model_policy.py — «модель автоматом из брифа» "
                                     "осталась обещанием"))
     code, out, err = run([tool("sync_prompts.py")])
     if code != 0:
@@ -422,17 +422,17 @@ def check_model_policy():
 
 # ── 4. Лимиты загрузки в панель ─────────────────────────────────────────────
 UPLOAD_CONTRACT = """  cockpit/app.py — POST /api/upload
-    Ограничен по трём осям, отказ ГРОМКИЙ (413 + причина), а не молчаливый пропуск:
+    Ограничен по трем осям, отказ ГРОМКИЙ (413 + причина), а не молчаливый пропуск:
       · размер одного файла      (по умолчанию 50 МБ)
       · число файлов в запросе   (по умолчанию 30)
-      · суммарный объём запроса  (по умолчанию 200 МБ)
+      · суммарный объем запроса  (по умолчанию 200 МБ)
     Пороги задаются переменными окружения THEMIS_UPLOAD_MAX_BYTES,
-    THEMIS_UPLOAD_MAX_FILES, THEMIS_UPLOAD_MAX_TOTAL — иначе приёмка вынуждена
+    THEMIS_UPLOAD_MAX_FILES, THEMIS_UPLOAD_MAX_TOTAL — иначе приемка вынуждена
     гонять сотни мегабайт, чтобы проверить лимит.
     При отказе в инбокс не попадает НИ ОДИН файл запроса (частичная запись хуже
-    отказа: юрист видит половину дела и считает, что загрузил всё).
-    Каталог инбокса берётся из THEMIS_INBOX, если задан, — иначе приёмка пишет
-    в боевой инбокс владельца. Нормальная загрузка по-прежнему даёт 200 и список."""
+    отказа: юрист видит половину дела и считает, что загрузил все).
+    Каталог инбокса берется из THEMIS_INBOX, если задан, — иначе приемка пишет
+    в боевой инбокс владельца. Нормальная загрузка по-прежнему дает 200 и список."""
 
 
 def _free_port():
@@ -450,7 +450,7 @@ def check_upload_limits():
     try:
         import httpx
     except ImportError:
-        return [("cockpit/app.py", "для приёмки нужен httpx (уже стоит в окружении панели)")]
+        return [("cockpit/app.py", "для приемки нужен httpx (уже стоит в окружении панели)")]
     fails = []
     with tempfile.TemporaryDirectory() as td:
         inbox = Path(td) / "inbox"
@@ -488,7 +488,7 @@ def check_upload_limits():
             elif len(r.json().get("saved", [])) != 2:
                 fails.append(("upload", f"нормальная загрузка сохранила не два файла: {r.text[:150]}"))
             if inbox.is_dir() and len(list(inbox.iterdir())) != 2:
-                fails.append(("upload", f"THEMIS_INBOX не соблюдён: {[p.name for p in inbox.iterdir()][:3]}"))
+                fails.append(("upload", f"THEMIS_INBOX не соблюден: {[p.name for p in inbox.iterdir()][:3]}"))
 
             before = sorted(p.name for p in inbox.iterdir()) if inbox.is_dir() else []
             r = post([("files", ("big.bin", b"z" * 5000, "application/octet-stream"))])
@@ -499,10 +499,10 @@ def check_upload_limits():
                 fails.append(("upload", f"число файлов сверх лимита: ждали 413, вышло {r.status_code}"))
             r = post([("files", (f"g{i}.txt", b"w" * 1500, "text/plain")) for i in range(3)])
             if r.status_code != 413:
-                fails.append(("upload", f"объём запроса сверх лимита: ждали 413, вышло {r.status_code}"))
+                fails.append(("upload", f"объем запроса сверх лимита: ждали 413, вышло {r.status_code}"))
             after = sorted(p.name for p in inbox.iterdir()) if inbox.is_dir() else []
             if after != before:
-                fails.append(("upload", f"при отказе файлы всё же записаны: было {before}, стало {after}"))
+                fails.append(("upload", f"при отказе файлы все же записаны: было {before}, стало {after}"))
         finally:
             proc.terminate()
             try:
@@ -512,11 +512,11 @@ def check_upload_limits():
     return fails
 
 
-# ── 5. Деньги: независимый счётчик ──────────────────────────────────────────
+# ── 5. Деньги: независимый счетчик ──────────────────────────────────────────
 MONEY_CONTRACT = """  scripts/token_audit.py --compare
-    Независимый счётчик расхода сходится с token_ledger в пределах 2%.
+    Независимый счетчик расхода сходится с token_ledger в пределах 2%.
     Расхождение = баг в одном из двух: цифра, на которой стоят бюджетные гейты,
-    перестаёт быть основанием для решения."""
+    перестает быть основанием для решения."""
 
 
 def check_money():
@@ -535,12 +535,12 @@ CHECKS = [
     ("боевое дерево чисто от рендеров", check_tree_clean, PNG_CONTRACT),
     ("модель выводится из уровня", check_model_policy, MODEL_CONTRACT),
     ("загрузка в панель ограничена", check_upload_limits, UPLOAD_CONTRACT),
-    ("счёт денег сходится", check_money, MONEY_CONTRACT),
+    ("счет денег сходится", check_money, MONEY_CONTRACT),
 ]
 
 
 def selftest():
-    """Приёмка обязана краснеть на отсутствующем приборе — иначе она не приёмка."""
+    """Приемка обязана краснеть на отсутствующем приборе — иначе она не приемка."""
     global SCRIPTS
     saved = SCRIPTS
     try:
@@ -551,12 +551,12 @@ def selftest():
             assert check_money(), "пропавший token_audit.py не пойман"
     finally:
         SCRIPTS = saved
-    print("selftest: приёмка краснеет на отсутствующих приборах — ок")
+    print("selftest: приемка краснеет на отсутствующих приборах — ок")
     return 0
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Приёмка этапа 4 (пишет координатор).")
+    ap = argparse.ArgumentParser(description="Приемка этапа 4 (пишет координатор).")
     ap.add_argument("--contracts", action="store_true", help="напечатать контракты и выйти")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()

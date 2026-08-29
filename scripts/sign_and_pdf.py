@@ -24,7 +24,7 @@ def docx_to_pdf_via_word(docx_path: str, pdf_path: str) -> bool:
     docx_abs = os.path.abspath(docx_path)
     pdf_abs = os.path.abspath(pdf_path)
     # Документ, уже открытый владельцем, Word повторно не открывает: `open`
-    # возвращает ничто, theDoc остаётся неопределённой (-2753). Делать `save as`
+    # возвращает ничто, theDoc остается неопределенной (-2753). Делать `save as`
     # на его открытом окне тоже нельзя — Word переназначит окно на PDF, а у
     # владельца в Word держится два десятка документов. Поэтому конвертируем
     # копию под другим именем: оригинал и открытое окно не трогаются.
@@ -45,7 +45,7 @@ def docx_to_pdf_via_word(docx_path: str, pdf_path: str) -> bool:
     script = f'''
 tell application "Microsoft Word"
     open POSIX file "{tmp_docx}"
-    -- `open` в Word ничего не возвращает: `set theDoc to open ...` даёт -2753.
+    -- `open` в Word ничего не возвращает: `set theDoc to open ...` дает -2753.
     -- Документ, присвоенный переменной, не принимает `save as` (-1708).
     -- Работает только адресация «active document» прямо в команде.
     set thePath to POSIX file "{tmp_pdf}" as string
@@ -116,7 +116,7 @@ def overlay_signature(pdf_path: str, sign_path: str) -> bool:
     doc = fitz.open(pdf_path)
 
     # Word нередко оставляет в хвосте пустую страницу — на ней только колонцифра.
-    # Подписывать её нельзя (подпись уедет с листа с реквизитами), и подавать
+    # Подписывать ее нельзя (подпись уедет с листа с реквизитами), и подавать
     # документ с пустым листом тоже нельзя: удаляем хвост до последней с текстом.
     def is_blank(page):
         words = [w for w in page.get_text().split() if not w.isdigit()]

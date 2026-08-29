@@ -12,7 +12,7 @@
 `python3 -c "import markitdown"`. Не «сеть работает», а curl к конкретному
 адресу с проверкой HTTP-кода.
 
-МОЛЧАЛИВАЯ ДЕГРАДАЦИЯ ЗАПРЕЩЕНА. Проверка либо зелёная, либо красная с точной
+МОЛЧАЛИВАЯ ДЕГРАДАЦИЯ ЗАПРЕЩЕНА. Проверка либо зеленая, либо красная с точной
 командой починки. Нет промежуточного «вроде бы работает»: у каждой красной
 строки есть поле «как починить» с командой, которую можно скопировать.
 
@@ -22,12 +22,12 @@
 Затронуты: OCR-маршрут markdown_extract.py, фоновые агенты (launchd на macOS,
 Планировщик задач на Windows, systemd-таймеры на Linux), пути с кириллицей.
 
-    python3 scripts/setup_doctor.py            # отчёт человеку
+    python3 scripts/setup_doctor.py            # отчет человеку
     python3 scripts/setup_doctor.py --json     # машинный вывод для скилла setup
     python3 scripts/setup_doctor.py --offline  # без сетевых проверок
     python3 scripts/setup_doctor.py --selftest # проверка самого доктора
 
-Код возврата: 0 — всё критичное на месте; 1 — есть КРИТИЧНОЕ; 2 — только
+Код возврата: 0 — все критичное на месте; 1 — есть КРИТИЧНОЕ; 2 — только
 предупреждения (система работает, часть возможностей недоступна).
 """
 import argparse
@@ -61,7 +61,7 @@ NET_CHECKS = [
 ]
 
 # Шрифт стандарта оформления (DOCX_FORMATTING.md §1) — ОДИН, решение владельца
-# 04.08.2026. Без него .docx соберётся, но Word подставит свой — документ уйдёт
+# 04.08.2026. Без него .docx соберется, но Word подставит свой — документ уйдет
 # в суд не в том виде, в каком проверялся.
 FONTS = ["PT Serif"]
 
@@ -86,9 +86,9 @@ def check(name: str, status: str, detail: str = "", fix: str = "") -> dict:
 def platform_id() -> str:
     """Один словарь платформ на весь проект: darwin | windows | linux.
 
-    Раньше macOS звалась здесь «macos», а в отчётах и промптах — «darwin»; два имени
+    Раньше macOS звалась здесь «macos», а в отчетах и промптах — «darwin»; два имени
     одного и того же расходятся ровно тогда, когда по ним что-то сравнивают.
-    Подстановка чужой платформы (--platform) нужна и разбору с владельцем, и приёмке:
+    Подстановка чужой платформы (--platform) нужна и разбору с владельцем, и приемке:
     доктор, выдающий на Windows тот же ответ, что на Маке, ничего не проверил.
     """
     forced = (os.environ.get("THEMIS_PLATFORM") or "").strip().lower()
@@ -145,7 +145,7 @@ def check_ocr(plat: str) -> list[dict]:
             "варианта два: (1) вести дела со сканами на macOS; (2) подключить свой "
             "движок OCR — реализовать интерфейс bin/vision-doc (вход: файл, "
             "выход: page_NNN.txt и page_NNN.md с таблицами) и указать путь в "
-            "THEMIS_VISION_DOC. Прежде чем ставить чужую модель, сравнить её на "
+            "THEMIS_VISION_DOC. Прежде чем ставить чужую модель, сравнить ее на "
             "реальных сканах дела с текущим движком: PaddleOCR, Surya, MinerU и "
             "Unlimited-OCR уже отклонены по замеру (knowledge/lessons-log.md)")]
     out = []
@@ -185,7 +185,7 @@ def check_fonts(plat: str) -> dict:
     if missing:
         return check("шрифты .docx", WARN, "не установлен: " + ", ".join(missing),
                      "поставить PT Serif (бесплатный, SIL OFL: fonts.google.com или "
-                     "paratype.ru); без него Word подставит свой, и документ уйдёт "
+                     "paratype.ru); без него Word подставит свой, и документ уйдет "
                      "в суд не в том виде, в каком проверялся")
     return check("шрифты .docx", OK, "PT Serif на месте")
 
@@ -217,12 +217,12 @@ def check_corpus() -> list[dict]:
                          "" if n >= need else
                          "выгрузить: python3 scripts/update_legal_corpus.py --init "
                          "(кодексы) и --plenums (Пленумы). Без корпуса cite.py не "
-                         "отдаёт дословных норм, а doc-drafter обязан их цитировать"))
+                         "отдает дословных норм, а doc-drafter обязан их цитировать"))
     return out
 
 
 # Скилл едет внутри репозитория; домашняя копия — запасной путь (у владельца
-# он живёт и правится там). Ищем в обоих местах, иначе свежая установка на
+# он живет и правится там). Ищем в обоих местах, иначе свежая установка на
 # другом устройстве краснеет на ровном месте (прецедент 21.08.2026).
 _SCAN_REL = ".claude/skills/humanizer-legal/scripts/scan_legal.sh"
 _SCAN_V_REPO = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), _SCAN_REL)
@@ -232,7 +232,7 @@ HUMANIZER_SCAN = _SCAN_V_REPO if os.path.isfile(_SCAN_V_REPO) \
 
 def check_humanizer() -> dict:
     """Гейт humanizer-legal (verdict.py --scan) работает fail-closed: нет скрипта —
-    вердикт «ГОТОВ К ПОДАЧЕ» не выдаётся вовсе ни на одном документе. Скилл живёт
+    вердикт «ГОТОВ К ПОДАЧЕ» не выдается вовсе ни на одном документе. Скилл живет
     вне репозитория ($HOME/.claude/skills/) — свежий клон обязан узнать об этом здесь,
     а не молчаливой деградацией на первом же документе (этап 9)."""
     if os.path.isfile(HUMANIZER_SCAN):
@@ -263,7 +263,7 @@ def check_selftests() -> dict:
         return check("самопроверки скриптов", CRIT, "; ".join(bad),
                      "запустить проваленный selftest вручную и прочитать вывод — "
                      "он называет конкретную сломанную проверку")
-    return check("самопроверки скриптов", OK, f"{len(names)}/{len(names)} зелёные")
+    return check("самопроверки скриптов", OK, f"{len(names)}/{len(names)} зеленые")
 
 
 def probe_cli() -> list[dict]:
@@ -317,7 +317,7 @@ def unavailable_on(plat: str) -> list[dict]:
                          "распознавания речи на Linux, звук не уходит на сторону); "
                          "текст класть в voice-to-brief как обычно")},
         {"what": "подпись документа и сборка PDF",
-         "why": "sign_and_pdf.py идёт через Word и AppleScript; способ подписи на Linux "
+         "why": "sign_and_pdf.py идет через Word и AppleScript; способ подписи на Linux "
                 "не разрабатывается (решение владельца 18.08.2026)",
          "replacement": ("Word через COM-автоматизацию вместо AppleScript"
                          if plat == "windows" else
@@ -331,7 +331,7 @@ def unavailable_on(plat: str) -> list[dict]:
     else:
         obshchee.append(
             {"what": "пути с кириллицей при не-UTF-8 локали",
-             "why": "os.listdir отдаёт битые имена дел",
+             "why": "os.listdir отдает битые имена дел",
              "replacement": "выставить локаль UTF-8 (LANG=ru_RU.UTF-8 либо C.UTF-8)"})
     return obshchee
 
@@ -364,7 +364,7 @@ def smltlk_on(plat: str) -> dict:
                         "моделью" if est_istochnik else
                        "исходников smltlk на этой машине нет — взять их у владельца "
                        "проекта, затем bash install.sh --with-smltlk"),
-                "why": "приложение строки меню macOS, Neural Engine распознаёт локально",
+                "why": "приложение строки меню macOS, Neural Engine распознает локально",
                 "replacement": ""}
     zamena = ("«Голосовой ввод» Windows либо локальный распознаватель речи"
               if plat == "windows" else
@@ -374,7 +374,7 @@ def smltlk_on(plat: str) -> dict:
             "installed": False,
             "how": "",
             "why": "SMLTLK — приложение строки меню macOS, здесь оно не запускается",
-            "replacement": f"{zamena}; дальше текст идёт в voice-to-brief как обычно"}
+            "replacement": f"{zamena}; дальше текст идет в voice-to-brief как обычно"}
 
 
 def collect(offline: bool = False) -> dict:
@@ -402,7 +402,7 @@ def collect(offline: bool = False) -> dict:
     warn = [c for c in checks if c["статус"] == WARN]
     return {"платформа": plat, "планировщик задач": scheduler_of(plat),
             "python": sys.version.split()[0], "корень": ROOT,
-            # Машинные ключи: их читает приёмка и онбординг, поэтому имена латиницей
+            # Машинные ключи: их читает приемка и онбординг, поэтому имена латиницей
             # и значения фактами, а не пересказом.
             "platform": plat,
             "os_version": platform.mac_ver()[0] or platform.release() or platform.version(),
@@ -437,7 +437,7 @@ def platform_notes(plat: str) -> list[str]:
         ]
     else:
         common += ["ПУТИ С КИРИЛЛИЦЕЙ: проверить локаль (`locale`) — нужна UTF-8, "
-                   "иначе os.listdir отдаёт битые имена дел."]
+                   "иначе os.listdir отдает битые имена дел."]
     return common
 
 
@@ -446,7 +446,7 @@ def main() -> int:
     ap.add_argument("--json", action="store_true", help="машинный вывод")
     ap.add_argument("--offline", action="store_true", help="без сетевых проверок")
     ap.add_argument("--platform", choices=("darwin", "windows", "linux", "macos"),
-                    help="разбирать чужую платформу (для онбординга и приёмки)")
+                    help="разбирать чужую платформу (для онбординга и приемки)")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.platform:
@@ -479,7 +479,7 @@ def main() -> int:
     if rep["предупреждений"]:
         print("Система работает, часть возможностей недоступна — см. ⚠ выше.")
         return 2
-    print("Готово: всё критичное на месте.")
+    print("Готово: все критичное на месте.")
     return 0
 
 
@@ -492,18 +492,18 @@ def selftest() -> int:
 
     checks = [
         ("humanizer-legal без скрипта — КРИТИЧНО", humanizer_missing["статус"] == CRIT),
-        ("humanizer-legal без скрипта несёт команду починки",
+        ("humanizer-legal без скрипта несет команду починки",
          bool(humanizer_missing["как починить"])),
-        ("платформа опознаётся", platform_id() in ("darwin", "windows", "linux")),
+        ("платформа опознается", platform_id() in ("darwin", "windows", "linux")),
         ("планировщик назван для каждой платформы",
          all("неизвестен" not in scheduler_of(p) for p in ("darwin", "windows", "linux"))),
         # Молчаливая деградация запрещена: у каждой красной строки есть команда починки.
-        ("критичная строка несёт команду починки",
+        ("критичная строка несет команду починки",
          bool(check_binary("нетакого", ["нетакогобинаря", "--version"], "зачем",
                            "поставить так-то")["как починить"])),
-        ("отсутствие команды даёт КРИТИЧНО",
+        ("отсутствие команды дает КРИТИЧНО",
          check_binary("нетакого", ["нетакогобинаря", "--version"], "зачем", "fix")["статус"] == CRIT),
-        ("некритичное отсутствие даёт ПРЕДУПРЕЖДЕНИЕ",
+        ("некритичное отсутствие дает ПРЕДУПРЕЖДЕНИЕ",
          check_binary("нетакого", ["нетакогобинаря", "--version"], "зачем", "fix",
                       critical=False)["статус"] == WARN),
         ("существующая команда проходит",
@@ -513,7 +513,7 @@ def selftest() -> int:
         ("существующий пакет проходит", check_module("json", "зачем")["статус"] == OK),
         ("run() возвращает 127 на отсутствующей команде", run(["нетакогобинаря"])[0] == 127),
         # ГЛАВНОЕ ПРО ПЛАТФОРМЫ: на не-macOS отсутствие OCR обязано быть НАЗВАНО
-        # критичным и объяснённым, а не пропущено молча.
+        # критичным и объясненным, а не пропущено молча.
         ("на Windows отсутствие OCR — критично и объяснено",
          check_ocr("windows")[0]["статус"] == CRIT
          and "НЕТ" in check_ocr("windows")[0]["что видно"]),
@@ -521,7 +521,7 @@ def selftest() -> int:
          check_ocr("linux")[0]["статус"] == CRIT),
         ("на не-macOS предложен путь замены движка",
          "THEMIS_VISION_DOC" in check_ocr("linux")[0]["как починить"]),
-        ("на не-macOS сказано, что именно перестаёт работать",
+        ("на не-macOS сказано, что именно перестает работать",
          "СКАНЫ" in check_ocr("windows")[0]["что видно"]),
         ("платформенные особенности непусты на каждой платформе",
          all(platform_notes(p) for p in ("darwin", "windows", "linux"))),

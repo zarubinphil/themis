@@ -148,7 +148,7 @@ def check_pd(root=ROOT):
 
 
 def _anchor_paths(root=ROOT):
-    """Якорь приёмки лежит ВНЕ рабочего дерева git — HEAD двигает сам исполнитель
+    """Якорь приемки лежит ВНЕ рабочего дерева git — HEAD двигает сам исполнитель
     атомарным коммитом, а якорь двигает только координатор явной командой."""
     d = os.path.join(root, ".autoloop")
     return d, os.path.join(d, "spec-anchors.json"), os.path.join(d, "spec-anchor-log.jsonl")
@@ -166,7 +166,7 @@ def _load_anchors(store_path):
 
 def _load_anchors_strict(store_path):
     """None — файл есть, но не читается: испорченное хранилище якорей это не
-    «якорей нет», а сломанный контур приёмки."""
+    «якорей нет», а сломанный контур приемки."""
     try:
         with open(store_path, encoding="utf-8") as f:
             data = json.load(f)
@@ -176,7 +176,7 @@ def _load_anchors_strict(store_path):
 
 
 def _log_remembers(log_path, rel):
-    """Журнал якорений помнит дайджест этой приёмки — значит, якорь БЫЛ, и его
+    """Журнал якорений помнит дайджест этой приемки — значит, якорь БЫЛ, и его
     исчезновение из хранилища это удаление, а не отсутствие (проба 20.08.2026:
     подмена контракта обходилась двумя командами — правка и удаление файла)."""
     try:
@@ -194,10 +194,10 @@ def _log_remembers(log_path, rel):
 
 
 def anchor_spec(spec, root=ROOT):
-    """Фиксирует текущую редакцию приёмки как базу сверки, оставляет след в журнале."""
+    """Фиксирует текущую редакцию приемки как базу сверки, оставляет след в журнале."""
     path = os.path.join(root, spec) if not os.path.isabs(spec) else spec
     if not os.path.isfile(path):
-        print(f"приёмка {spec} не найдена — нечего якорить", file=sys.stderr)
+        print(f"приемка {spec} не найдена — нечего якорить", file=sys.stderr)
         return 1
     with open(path, encoding="utf-8", errors="replace") as f:
         content = f.read()
@@ -211,7 +211,7 @@ def anchor_spec(spec, root=ROOT):
         json.dump(anchors, f, ensure_ascii=False, indent=1)
     with open(log_path, "a", encoding="utf-8") as f:
         f.write(json.dumps({"spec": rel, "sha256": digest}, ensure_ascii=False) + "\n")
-    print(f"приёмка {rel} заякорена: {digest[:12]}…")
+    print(f"приемка {rel} заякорена: {digest[:12]}…")
     return 0
 
 
@@ -232,9 +232,9 @@ MATCHER_VSEOHVAT = {"*", ".*", ".+", "(.*)", "(.+)"}
 
 
 def _matched_doors(matcher):
-    """Множество защищаемых дверей, на которые ЗОВЁТСЯ сторож этой записи.
+    """Множество защищаемых дверей, на которые ЗОВЕТСЯ сторож этой записи.
 
-    matcher — строка-регулярка ИЛИ список имён (Claude Code принимает и такую
+    matcher — строка-регулярка ИЛИ список имен (Claude Code принимает и такую
     форму записи). Список склеиваем в альтернацию, как читал бы перечисление
     дверей харнесс: он НЕ должен ронять гейт трассировкой — падающий гейт хуже
     красного, по нему нельзя принять решение. Иной тип — пустое множество, а не
@@ -255,7 +255,7 @@ def _matched_doors(matcher):
 
 
 def _matcher_covers(matcher):
-    """matcher покрывает все защищаемые двери — списком имён либо всеохватным шаблоном.
+    """matcher покрывает все защищаемые двери — списком имен либо всеохватным шаблоном.
 
     matcher в Claude Code — регулярка по имени инструмента. Покрытие проверяется
     так же: каждая обязательная дверь обязана совпасть целиком. Пустой matcher
@@ -272,12 +272,12 @@ def _claude_guard_registered(path):
     """Сторож ВЫЗЫВАЕТСЯ на защищаемых дверях, а не упомянут словом в файле.
 
     Две ошибки закрываются разом. Первая: слово в комментарии ловится подстрокой и
-    выглядит как регистрация — читаем структуру PreToolUse, как её читает харнесс.
+    выглядит как регистрация — читаем структуру PreToolUse, как ее читает харнесс.
     Вторая: сторож повешен не на те двери (matcher «Read», «WebFetch», пустая
-    строка) — на записи и команды он тогда не зовётся вовсе. Регистрацией считается
+    строка) — на записи и команды он тогда не зовется вовсе. Регистрацией считается
     только запись, где claude_guard стоит командой И matcher покрывает двери — по
     отдельности либо НЕСКОЛЬКИМИ записями вместе (разносить правила по записям это
-    обиход конфигурации, а не дыра). Неполное покрытие остаётся красным.
+    обиход конфигурации, а не дыра). Неполное покрытие остается красным.
     """
     try:
         with open(path, encoding="utf-8", errors="ignore") as f:
@@ -297,7 +297,7 @@ def _claude_guard_registered(path):
         guard_seen = True
         matcher = entry.get("matcher", "")
         if _matcher_covers(matcher):
-            return True                     # одна запись покрывает всё
+            return True                     # одна запись покрывает все
         covered |= _matched_doors(matcher)  # ...или несколько записей вместе
     return guard_seen and covered >= set(GUARD_DOORS)
 
@@ -306,9 +306,9 @@ def _hook_calls(text, marker):
     """Хук жив, если сторож реально ВЫЗЫВАЕТСЯ до любого безусловного выхода.
 
     Проба 20.08.2026: «exit 0» первой строкой и слово marker в комментарии
-    выключали сторож при зелёном гейте — подстрока по файлу этого не различает.
+    выключали сторож при зеленом гейте — подстрока по файлу этого не различает.
     Читаем тело как шелл: пустые строки и комментарии (включая шебанг) не
-    исполняются; первый же безусловный exit до вызова хоронит всё ниже.
+    исполняются; первый же безусловный exit до вызова хоронит все ниже.
     """
     for raw in text.splitlines():
         line = raw.strip()
@@ -325,11 +325,11 @@ def _required_hooks(root=ROOT):
     """Обязательные git-хуки = ровно то, что ставит установщик pd_guard.
 
     База — pre-commit и commit-msg: без ПД-сторожа содержимого и сообщения коммит
-    нельзя. Если установщик (`scripts/pd_guard.py`) на месте, он ставит ещё pre-push
+    нельзя. Если установщик (`scripts/pd_guard.py`) на месте, он ставит еще pre-push
     (имя ветки/тега — публичная ссылка) и reference-transaction (тело тега уезжает
     при push, а git-хука на создание тега нет), и гейт обязан требовать весь его
     комплект: что установщик ставит, то гейт требует. Проба 20.08.2026: pre-push
-    стоял в песочнице установщика, но отсутствовал в боевом репозитории при зелёном
+    стоял в песочнице установщика, но отсутствовал в боевом репозитории при зеленом
     гейте — списки обязательного и ставимого разъехались.
     """
     hooks = ["pre-commit", "commit-msg"]
@@ -341,12 +341,12 @@ def _required_hooks(root=ROOT):
 def check_hooks(root=ROOT):
     """Сторож РЕАЛЬНО СРАБОТАЕТ, а не лежит на диске.
 
-    Правило смотрит на цель, а не на имя файла: git зовёт хуки из каталога,
+    Правило смотрит на цель, а не на имя файла: git зовет хуки из каталога,
     который называет он сам (`core.hooksPath` уводит их куда угодно, вплоть до
     /dev/null), и только исполняемые. Проба 20.08.2026: при `core.hooksPath
     /dev/null`, при снятом бите исполняемости и при `claude_guard`, упомянутом
     словом в комментарии рядом с пустым `PreToolUse`, прежняя проверка «файл
-    есть и содержит слово» возвращала зелёный — состояние, неотличимое от
+    есть и содержит слово» возвращала зеленый — состояние, неотличимое от
     рабочего, хотя ни один сторож не сторожил.
     """
     fails = []
@@ -360,7 +360,7 @@ def check_hooks(root=ROOT):
             os.path.join(root, os.path.expanduser(cfg.strip()))).startswith(os.path.realpath(root)):
         fails.append(("hooks:hookspath",
                       f"core.hooksPath уводит хуки вне репозитория ({cfg.strip()}) — "
-                      f"файлы на месте, но git зовёт не их"))
+                      f"файлы на месте, но git зовет не их"))
 
     for name in _required_hooks(root):
         path = os.path.join(hooks_dir, name)
@@ -378,7 +378,7 @@ def check_hooks(root=ROOT):
             text = ""
         if not _hook_calls(text, "pd_guard.py"):
             fails.append((f"hooks:empty-{name}",
-                          f"{name} есть, но pd_guard в нём не вызывается — слово в "
+                          f"{name} есть, но pd_guard в нем не вызывается — слово в "
                           f"комментарии или выход до вызова сторожом не считаются"))
 
     settings = os.path.join(root, ".claude", "settings.json")
@@ -392,12 +392,12 @@ def check_hooks(root=ROOT):
 
 
 def check_spec(spec, root=ROOT):
-    """Внешняя приёмка этапа: контракт задан координатором, исполнитель его не правит."""
+    """Внешняя приемка этапа: контракт задан координатором, исполнитель его не правит."""
     if not spec:
         return []
     path = os.path.join(root, spec) if not os.path.isabs(spec) else spec
     if not os.path.isfile(path):
-        return [("spec:missing", f"приёмка {spec} не найдена")]
+        return [("spec:missing", f"приемка {spec} не найдена")]
 
     rel = os.path.relpath(path, root)
     with open(path, encoding="utf-8", errors="replace") as f:
@@ -411,7 +411,7 @@ def check_spec(spec, root=ROOT):
         if anchors is None:
             return [("spec:anchor-corrupt",
                      f"файл якорей {os.path.relpath(store_path, root)} испорчен — "
-                     f"это подмена контура приёмки, а не отсутствие якоря. "
+                     f"это подмена контура приемки, а не отсутствие якоря. "
                      f"Восстановить вправе только координатор: --anchor-spec {rel}")]
     else:
         anchors = {}
@@ -419,25 +419,25 @@ def check_spec(spec, root=ROOT):
         digest = hashlib.sha256(current.encode("utf-8")).hexdigest()
         if digest != anchors[rel]:
             return [("spec:tampered",
-                     f"{rel} изменён относительно заякоренной редакции — приёмку правит "
+                     f"{rel} изменен относительно заякоренной редакции — приемку правит "
                      f"только координатор. Переякорить: --anchor-spec {rel}")]
     elif _log_remembers(log_path, rel):
         return [("spec:anchor-lost",
                  f"журнал якорений помнит дайджест {rel}, а в файле якорей его нет — "
-                 f"якорь удалён, приёмка обойдена. Восстановить вправе только "
+                 f"якорь удален, приемка обойдена. Восстановить вправе только "
                  f"координатор: --anchor-spec {rel}")]
     else:
         # Без якоря — прежнее поведение: сверка с зафиксированной в git редакцией.
         code, committed = run(["git", "show", f"HEAD:{rel}"], cwd=root)
         if code == 0 and committed and current != committed:
             return [("spec:tampered",
-                     f"{rel} изменён относительно зафиксированного в git — приёмку правит "
+                     f"{rel} изменен относительно зафиксированного в git — приемку правит "
                      f"только координатор. Вернуть: git checkout HEAD -- {rel}")]
     code, out = run([sys.executable, path], cwd=root, timeout=1800)
     if code == 0:
         return []
     head = next((l.strip() for l in out.splitlines() if "сдано" in l), "")
-    return [("spec:failed", f"приёмка этапа не пройдена ({head or 'код ' + str(code)}). "
+    return [("spec:failed", f"приемка этапа не пройдена ({head or 'код ' + str(code)}). "
                             f"Подробно: python3 {spec}")]
 
 
@@ -456,8 +456,8 @@ def gate(base="HEAD", root=ROOT, every=False, spec=None, spec_only=False,
     # Селфтесты гоняются ВСЕ, а не только «затронутые от base»: база по умолчанию
     # HEAD, а HEAD двигает сам исполнитель атомарным коммитом — `touched_scripts`
     # тогда пуст, и сломанный прибор, закоммиченный ролью, гейт не красит. «Кто
-    # менялся, тот и доказывает» держится якорем приёмки (вне HEAD), но у селфтестов
-    # такого якоря нет: значит гоняем все — герметично и дёшево (та же болезнь, от
+    # менялся, тот и доказывает» держится якорем приемки (вне HEAD), но у селфтестов
+    # такого якоря нет: значит гоняем все — герметично и дешево (та же болезнь, от
     # которой --selftests-only уже герметичен).
     fails += check_selftests(base, root, every=True)
     fails += check_smoke(root)
@@ -478,7 +478,7 @@ def fingerprint(fails):
 
 
 def _spec_tamper_probe():
-    """Свой git-репозиторий: чистая приёмка проходит, подменённая краснеет.
+    """Свой git-репозиторий: чистая приемка проходит, подмененная краснеет.
 
     Проверка обязана быть герметичной — оглядка на состояние боевого репозитория
     делает результат selftest зависимым от того, что сейчас лежит на диске.
@@ -494,16 +494,16 @@ def _spec_tamper_probe():
                     ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "spec"]):
             subprocess.run(["git", *cmd], cwd=tmp, capture_output=True)
         assert check_spec("scripts/priemka.py", tmp) == [], \
-            "чистая приёмка объявлена подменённой"
+            "чистая приемка объявлена подмененной"
         with open(spec, "a", encoding="utf-8") as f:
             f.write("# подгонка под результат\n")
         ids = {i for i, _ in check_spec("scripts/priemka.py", tmp)}
-        assert "spec:tampered" in ids, f"подмена приёмки не поймана: {ids}"
+        assert "spec:tampered" in ids, f"подмена приемки не поймана: {ids}"
         _sh.rmtree(os.path.join(tmp, ".git"), ignore_errors=True)
 
 
 def selftest():
-    """Проверяет сам гейт: зелёное дерево проходит, сломанный прибор ловится, отпечаток устойчив."""
+    """Проверяет сам гейт: зеленое дерево проходит, сломанный прибор ловится, отпечаток устойчив."""
     import shutil
     import tempfile
     with tempfile.TemporaryDirectory(prefix="loopgate-selftest-") as tmp:
@@ -530,7 +530,7 @@ def selftest():
         b = fingerprint([("y", "СОВСЕМ другой текст"), ("x", "и тут другой")])
         assert a == b, "отпечаток пляшет от текста провала — спин не задетектится"
         assert fingerprint([("x", "")]) != a, "отпечаток не отличает разные наборы провалов"
-        assert fingerprint([]) != a, "зелёный вердикт неотличим от красного"
+        assert fingerprint([]) != a, "зеленый вердикт неотличим от красного"
 
         # Компиляция ловит битый синтаксис
         with open(os.path.join(tmp, "scripts", "slomano.py"), "w", encoding="utf-8") as f:
@@ -540,10 +540,10 @@ def selftest():
         # Smoke: сторожа на месте нет → гейт обязан покраснеть, а не промолчать
         assert check_smoke(os.path.join(tmp, "нет-такого")), "smoke на пустом дереве промолчал"
 
-        # Отсутствующая приёмка обязана красить гейт, а не тихо пропускаться
-        assert check_spec("scripts/net-takoy-priemki.py", tmp), "пропавшая приёмка не поймана"
+        # Отсутствующая приемка обязана красить гейт, а не тихо пропускаться
+        assert check_spec("scripts/net-takoy-priemki.py", tmp), "пропавшая приемка не поймана"
         _spec_tamper_probe()
-        assert check_spec(None, tmp) == [], "без приёмки гейт обязан работать как прежде"
+        assert check_spec(None, tmp) == [], "без приемки гейт обязан работать как прежде"
 
         # Расхождение промптов с каноном обязано красить гейт
         shutil.copy(os.path.join(SCRIPTS, "sync_prompts.py"), os.path.join(tmp, "scripts"))
@@ -553,7 +553,7 @@ def selftest():
         assert check_prompts(tmp), "отсутствующее производное не покрасило гейт"
 
         # Регистрация сторожей: пара «сторож работает» + три обхода, при которых
-        # он лежит на диске, но git его не зовёт (проба 20.08.2026).
+        # он лежит на диске, но git его не зовет (проба 20.08.2026).
         subprocess.run(["git", "init", "-q"], cwd=tmp, capture_output=True)
         assert check_hooks(tmp), "голое дерево без хуков объявлено зарегистрированным"
         hp = os.path.join(tmp, ".git", "hooks")
@@ -567,7 +567,7 @@ def selftest():
         cl = os.path.join(tmp, ".claude")
         os.makedirs(cl, exist_ok=True)
         settings = os.path.join(cl, "settings.json")
-        # matcher обязан покрывать ВСЕ защищаемые двери, иначе сторож на них не зовётся.
+        # matcher обязан покрывать ВСЕ защищаемые двери, иначе сторож на них не зовется.
         rabochiy = {"hooks": {"PreToolUse": [
             {"matcher": "Write|Edit|Bash|Read|NotebookEdit", "hooks": [
                 {"type": "command", "command": "python3 scripts/claude_guard.py"}]}]}}
@@ -575,7 +575,7 @@ def selftest():
             json.dump(rabochiy, f)
         assert check_hooks(tmp) == [], f"рабочие сторожа не признаны: {check_hooks(tmp)}"
 
-        # Пол регистрации: ровно `Write` признаётся, полу-список `Write|Edit` — нет.
+        # Пол регистрации: ровно `Write` признается, полу-список `Write|Edit` — нет.
         assert _matcher_covers("Write"), "канонный пол Write отвергнут"
         assert not _matcher_covers("Write|Edit"), "полу-список Write|Edit принят за покрытие"
         assert not _matcher_covers("Read"), "одна дверь чтения принята за покрытие"
@@ -583,7 +583,7 @@ def selftest():
         subprocess.run(["git", "config", "core.hooksPath", "/dev/null"], cwd=tmp,
                        capture_output=True)
         assert any(i == "hooks:hookspath" for i, _ in check_hooks(tmp)), \
-            "core.hooksPath /dev/null не пойман — git не зовёт хуки, гейт зелен"
+            "core.hooksPath /dev/null не пойман — git не зовет хуки, гейт зелен"
         subprocess.run(["git", "config", "--unset", "core.hooksPath"], cwd=tmp,
                        capture_output=True)
 
@@ -601,7 +601,7 @@ def selftest():
             json.dump(rabochiy, f)
         assert check_hooks(tmp) == [], "восстановленная регистрация не признана"
 
-    # Якорь приёмки: своя песочница-репозиторий, вне текущего tmp выше (нужен git).
+    # Якорь приемки: своя песочница-репозиторий, вне текущего tmp выше (нужен git).
     with tempfile.TemporaryDirectory(prefix="loopgate-anchor-") as agit:
         os.makedirs(os.path.join(agit, "scripts"))
         spec_path = os.path.join(agit, "scripts", "priemka.py")
@@ -610,10 +610,10 @@ def selftest():
         for cmd in (["init", "-q"], ["add", "-A"],
                     ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "spec"]):
             subprocess.run(["git", *cmd], cwd=agit, capture_output=True)
-        assert anchor_spec("scripts/priemka.py", agit) == 0, "якорение чистой приёмки отказало"
+        assert anchor_spec("scripts/priemka.py", agit) == 0, "якорение чистой приемки отказало"
         anchors_log = [p for p in os.listdir(os.path.join(agit, ".autoloop")) if "anchor" in p]
         assert anchors_log, "якорение не оставило следа в .autoloop/"
-        assert check_spec("scripts/priemka.py", agit) == [], "заякоренная нетронутая приёмка красна"
+        assert check_spec("scripts/priemka.py", agit) == [], "заякоренная нетронутая приемка красна"
 
         # Подгонка + обычный коммит — HEAD двигается, якорь нет.
         with open(spec_path, "a", encoding="utf-8") as f:
@@ -622,17 +622,17 @@ def selftest():
                     "commit", "-qm", "podgonka"]):
             subprocess.run(["git", *cmd], cwd=agit, capture_output=True)
         ids = {i for i, _ in check_spec("scripts/priemka.py", agit)}
-        assert "spec:tampered" in ids, "подмена приёмки после коммита не поймана якорем"
+        assert "spec:tampered" in ids, "подмена приемки после коммита не поймана якорем"
 
         # Легитимное переякорение снимает провал.
         assert anchor_spec("scripts/priemka.py", agit) == 0
-        assert check_spec("scripts/priemka.py", agit) == [], "переякоренная приёмка не принята"
+        assert check_spec("scripts/priemka.py", agit) == [], "переякоренная приемка не принята"
 
-        # gate(spec_only=True) изолирует ТОЛЬКО приёмку — без smoke/compile/pd.
+        # gate(spec_only=True) изолирует ТОЛЬКО приемку — без smoke/compile/pd.
         assert gate(root=agit, spec="scripts/priemka.py", spec_only=True) == []
 
     print("selftest: детект приборов, устойчивость отпечатка, компиляция, smoke, "
-         "регистрация сторожей, якорь приёмки — ок")
+         "регистрация сторожей, якорь приемки — ок")
     return 0
 
 
@@ -641,11 +641,11 @@ def main():
     ap.add_argument("--base", default="HEAD", help="точка отсчета изменений (по умолчанию HEAD)")
     ap.add_argument("--all-selftests", action="store_true",
                     help="гонять selftest ВСЕХ приборов, а не только затронутых")
-    ap.add_argument("--spec", help="внешняя приёмка этапа (например scripts/stage5_spec.py)")
+    ap.add_argument("--spec", help="внешняя приемка этапа (например scripts/stage5_spec.py)")
     ap.add_argument("--spec-only", action="store_true",
-                    help="гонять ТОЛЬКО приёмку из --spec, без компиляции/smoke/селфтестов")
+                    help="гонять ТОЛЬКО приемку из --spec, без компиляции/smoke/селфтестов")
     ap.add_argument("--anchor-spec", metavar="SPEC",
-                    help="заякорить текущую редакцию приёмки вне HEAD (журнал в .autoloop/) и выйти")
+                    help="заякорить текущую редакцию приемки вне HEAD (журнал в .autoloop/) и выйти")
     ap.add_argument("--selftests-only", action="store_true",
                     help="гонять ТОЛЬКО селфтесты, герметично — все, а не только затронутые")
     ap.add_argument("--hooks-only", action="store_true",

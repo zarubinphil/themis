@@ -2,7 +2,7 @@
 """case_code_gc.py — вывоз файлов кода из-под cases/ в карантин. Обратимо, с манифестом.
 
 Зачем. Под `cases/` исторически лежат 84 файла кода (.py/.sh — генераторы и
-служебные скрипты прошлых сессий) и 28 мёртвых `practice_context.md` (шаг 4.5
+служебные скрипты прошлых сессий) и 28 мертвых `practice_context.md` (шаг 4.5
 снят). Код в дереве дел — не доказательство: он уезжает в бэкап первички
 наравне с ней и путает глаз. Вывоз — владельцу (касание cases/ заморожено
 для автономного цикла), прибор лишь делает его безопасным: план → перенос
@@ -15,7 +15,7 @@
     --plan                  показать, что уедет; диск не меняется
     --apply                 вывезти в карантин, записать манифест отката
     --practice-context      добавить в план practice_context.md (по умолчанию нет)
-    --undo МАНИФЕСТ         вернуть всё по манифесту на прежние места
+    --undo МАНИФЕСТ         вернуть все по манифесту на прежние места
     --selftest              проверка на временном дереве, cases/ не затрагивается
 
 Карантин: `<родитель cases>/cases_quarantine/<путь относительно cases>`.
@@ -40,7 +40,7 @@ import claude_guard
 # файлы под cases/, а уборщик обязан видеть уже лежащие в дереве: две копии списка
 # круг за кругом давали полузакрытые дыры (.php/.lua/.go/.rs/.bat сторож блокировал,
 # уборщик к вывозу не брал). Импортируем эталон, а не переписываем — с ведущей точкой,
-# как отдаёт Path.suffix.
+# как отдает Path.suffix.
 CODE_EXT = {"." + e for e in claude_guard.CODE_EXT}
 PRACTICE_CONTEXT = "practice_context.md"
 INTAKE = "00_intake"          # неприкосновенная первичка
@@ -100,7 +100,7 @@ def do_apply(root: Path, practice_context: bool) -> int:
         dst = quarantine / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         i = 1
-        while dst.exists():                  # тёзка из прошлого вывоза не затирается
+        while dst.exists():                  # тезка из прошлого вывоза не затирается
             dst = dst.with_name(f"{dst.stem}__{i}{dst.suffix}")
             i += 1
         shutil.move(str(src), str(dst))
@@ -161,12 +161,12 @@ def selftest() -> int:
         code = case / "gen_doc.py"
         code.write_text("print('генератор')\n", encoding="utf-8")
         pc = case / ".agent" / "context" / PRACTICE_CONTEXT
-        # practice_context в .agent не вывозится никогда — кладём боевой вариант
+        # practice_context в .agent не вывозится никогда — кладем боевой вариант
         pc.parent.mkdir(parents=True)
         pc.write_text("служебный\n", encoding="utf-8")
         pc2 = case / "01_context" / PRACTICE_CONTEXT
         pc2.parent.mkdir(parents=True)
-        pc2.write_text("мёртвый шаг 4.5\n", encoding="utf-8")
+        pc2.write_text("мертвый шаг 4.5\n", encoding="utf-8")
         # Нецели: первичка, шаблоны, документ, .agent
         intake_py = case / INTAKE / "scan_notes.py"
         intake_py.write_text("# заметка клиента\n", encoding="utf-8")
@@ -235,7 +235,7 @@ def main() -> int:
     ap.add_argument("--apply", action="store_true", help="вывезти по манифесту")
     ap.add_argument("--practice-context", action="store_true",
                     help="добавить practice_context.md в план вывоза")
-    ap.add_argument("--undo", metavar="МАНИФЕСТ", help="вернуть всё по манифесту")
+    ap.add_argument("--undo", metavar="МАНИФЕСТ", help="вернуть все по манифесту")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
 

@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/claude_guard.py\""
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}/scripts/claude_guard.py\""
           }
         ]
       }
@@ -53,7 +53,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "mkdir -p \"$CLAUDE_PROJECT_DIR/cases/_logs\" && echo \"Session ended: $(date '+%d.%m.%Y %H:%M')\" >> \"$CLAUDE_PROJECT_DIR/cases/_logs/_session_history.txt\""
+            "command": "mkdir -p \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}/cases/_logs\" && echo \"Session ended: $(date '+%d.%m.%Y %H:%M')\" >> \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}/cases/_logs/_session_history.txt\""
           },
           {
             "type": "command",

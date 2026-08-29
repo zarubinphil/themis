@@ -196,7 +196,7 @@ def main():
                     os.environ.get("THEMIS_SIGN_DATE", ""))
 
     # DocBuilder.save() при отказе печатает причину и молча возвращает None, файл
-    # не пишет. «Создано» после отказа = ложь: юрист идёт за несуществующим
+    # не пишет. «Создано» после отказа = ложь: юрист идет за несуществующим
     # документом. Успех обязан следовать за фактом записи — свежим mtime файла.
     before = os.path.getmtime(out_path) if os.path.exists(out_path) else None
     b.save(out_path)

@@ -29,7 +29,7 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
 
 
 def _sudact_allowed() -> bool:
-    """Точка правды — practice_search.search_allowed(). Читаем её, а не копию условия."""
+    """Точка правды — practice_search.search_allowed(). Читаем ее, а не копию условия."""
     sys.path.insert(0, os.path.join(ROOT, "scripts"))
     try:
         from practice_search import search_allowed
@@ -85,7 +85,7 @@ def check_mcp_key(server: str) -> tuple[bool, str]:
 
 
 def probe_sudact(timeout: int = 12) -> bool:
-    """Отвечает ли поиск практики на РЕАЛЬНЫЙ запрос. Проба идёт по тому же
+    """Отвечает ли поиск практики на РЕАЛЬНЫЙ запрос. Проба идет по тому же
     маршруту, каким ходит practice_search.py: корень сайта может отвечать 200,
     когда сам поиск лежит с HTTP 500 — так и было 21.08.2026."""
     url = ("https://sudact.ru/regular/doc_ajax/?regular-txt=%D0%B4%D0%BE%D0%BF%D1%80%D0%BE%D1%81"
@@ -108,7 +108,7 @@ def check_sgai() -> tuple[bool, str]:
     # Баланс спрашиваем у `credits`, а не у `validate`. Прецедент 21.08.2026:
     # `validate` проверяет здоровье КЛЮЧА и при нулевом остатке отвечает успехом —
     # preflight печатал «OK», а два охотника подряд получали «Insufficient credits»
-    # на живой охоте. Отчёт, расходящийся с фактом, хуже отсутствия отчёта:
+    # на живой охоте. Отчет, расходящийся с фактом, хуже отсутствия отчета:
     # по нему планируют работу.
     try:
         r = subprocess.run(["sgai", "credits", "--json"], capture_output=True,
@@ -157,7 +157,7 @@ def main() -> int:
         rows.append((f"Публикатор {name}", ok, "отвечает" if ok else "недоступен",
                      "verify_act.py сработает" if ok else "верификация через фолбэк"))
 
-    # Решение по sudact живёт в practice_search.py (SUDACT_SEARCH_ALLOWED +
+    # Решение по sudact живет в practice_search.py (SUDACT_SEARCH_ALLOWED +
     # THEMIS_SUDACT_SEARCH). Preflight его читает, а не дублирует условие:
     # своя копия условия врала «закрыт» при работающем поиске.
     sudact_on = _sudact_allowed()

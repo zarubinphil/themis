@@ -20,7 +20,7 @@
 
 # ponytail: сайдкары .txt остаются на месте — читатели работают с текстом.
 # Облачный фолбэк vision по конкретной странице после вывоза требует повторного
-# рендера из первички (markdown_extract --render-dir /tmp/...), это дёшево.
+# рендера из первички (markdown_extract --render-dir /tmp/...), это дешево.
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ CACHE = Path(os.path.expanduser("~/.cache/legal_extract/case_renders"))
 
 def _service(p: Path, root: Path) -> bool:
     """cases/_assets, cases/_templates, cases/_logs — хозяйство системы, не дело.
-    Подпись владельца (cases/_assets/подпись.png) вывозу не подлежит: её читает
+    Подпись владельца (cases/_assets/подпись.png) вывозу не подлежит: ее читает
     sign_and_pdf.py, и вывоз молча сломал бы подписание документов."""
     try:
         first = p.relative_to(root).parts[0]
@@ -73,7 +73,7 @@ def do_move(root: Path, manifest: Path, cache: Path = CACHE) -> int:
         dst = cache / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         i = 1
-        while dst.exists():                      # тёзка из прошлого вывоза не затирается
+        while dst.exists():                      # тезка из прошлого вывоза не затирается
             dst = dst.with_name(f"{dst.stem}__{i}{dst.suffix}")
             i += 1
         size = src.stat().st_size
@@ -134,7 +134,7 @@ def selftest() -> int:
         man = td / "man.json"
 
         found = find_renders(td / "cases")
-        assert len(found) == 2, f"найдено {len(found)}, ждали 2 (первичка не в счёт)"
+        assert len(found) == 2, f"найдено {len(found)}, ждали 2 (первичка не в счет)"
         assert do_move(td / "cases", man, cache) == 0
         assert not (work / "page_001.png").exists(), "рендер остался на месте"
         assert (work / "page_001.txt").is_file(), "сайдкар .txt пострадал"
@@ -150,7 +150,7 @@ def selftest() -> int:
         assert do_move(td / "cases", man, cache) == 0
         (work / "page_001.png").write_bytes(b"NOVOE")
         assert do_restore(man) == 1, "занятое место обязано дать ненулевой код"
-        assert (work / "page_001.png").read_bytes() == b"NOVOE", "затёрли занятое место"
+        assert (work / "page_001.png").read_bytes() == b"NOVOE", "затерли занятое место"
 
         # Симлинк не переносится: за ним может стоять что угодно вне дерева.
         (work / "ssylka.png").symlink_to(intake / "dokazatelstvo.png")
@@ -179,12 +179,12 @@ def main() -> int:
         for p in files[:10]:
             print("  " + str(p.relative_to(root)))
         if len(files) > 10:
-            print(f"  … ещё {len(files) - 10}")
-        print("диск не изменён. Вывезти: --move КОРЕНЬ --manifest ФАЙЛ")
+            print(f"  … еще {len(files) - 10}")
+        print("диск не изменен. Вывезти: --move КОРЕНЬ --manifest ФАЙЛ")
         return 0
     if a.move:
         if not a.manifest:
-            print("ERROR: --move без --manifest запрещён: перенос без записи отката "
+            print("ERROR: --move без --manifest запрещен: перенос без записи отката "
                   "необратим", file=sys.stderr)
             return 1
         return do_move(Path(a.move).resolve(), Path(a.manifest), Path(a.cache))

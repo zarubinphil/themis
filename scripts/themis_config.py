@@ -29,7 +29,7 @@ from pathlib import Path
 DEFAULT_PATH = Path(os.environ.get("THEMIS_CONFIG") or Path.home() / ".themis" / "config.json")
 
 # Умолчания = локальная работа. Ни адреса сервера, ни токена бота: чужое сюда
-# не подставляется, своё владелец вписывает сам на онбординге.
+# не подставляется, свое владелец вписывает сам на онбординге.
 DEFAULTS = {
     "inbox": str(Path.home() / "Desktop" / "inbox"),
     "server": {"enabled": False, "url": "", "token_env": "THEMIS_PANEL_TOKEN"},
@@ -96,16 +96,16 @@ def check(path: Path) -> int:
                     "в конфиге только имя переменной (…_env)")
     cfg = _merge(DEFAULTS, raw)
     if cfg["server"]["enabled"] and not cfg["server"]["url"]:
-        beda.append("сервер включён, но адрес не назван")
+        beda.append("сервер включен, но адрес не назван")
     if cfg["bot"]["enabled"] and not cfg["bot"].get("token_env"):
-        beda.append("бот включён, но не названа переменная с его токеном")
+        beda.append("бот включен, но не названа переменная с его токеном")
     if beda:
         print(f"конфиг негоден: {len(beda)}", file=sys.stderr)
         for b in beda:
             print("  · " + b, file=sys.stderr)
         return 1
-    rezhim = "сервер включён" if cfg["server"]["enabled"] else "локальный режим"
-    print(f"конфиг годен: {rezhim}, бот {'включён' if cfg['bot']['enabled'] else 'выключен'}")
+    rezhim = "сервер включен" if cfg["server"]["enabled"] else "локальный режим"
+    print(f"конфиг годен: {rezhim}, бот {'включен' if cfg['bot']['enabled'] else 'выключен'}")
     return 0
 
 
@@ -114,8 +114,8 @@ def selftest() -> int:
         td = Path(td)
         net = td / "net.json"
         d = load(net)
-        assert d["server"]["enabled"] is False, "без конфига сервер включён"
-        assert d["bot"]["enabled"] is False, "без конфига бот включён"
+        assert d["server"]["enabled"] is False, "без конфига сервер включен"
+        assert d["bot"]["enabled"] is False, "без конфига бот включен"
         assert not d["server"]["url"], "в умолчаниях чужой адрес сервера"
         assert "token" not in json.dumps(DEFAULTS).replace("token_env", ""), \
             "в умолчаниях осталось поле секрета"
@@ -135,7 +135,7 @@ def selftest() -> int:
                                   "practice": {"region": "Республика Татарстан"}},
                                  ensure_ascii=False), encoding="utf-8")
         assert check(ok) == 0, "годный конфиг отвергнут"
-        assert load(ok)["practice"]["region"] == "Республика Татарстан", "слияние потеряло своё"
+        assert load(ok)["practice"]["region"] == "Республика Татарстан", "слияние потеряло свое"
         assert load(ok)["bot"]["enabled"] is False, "слияние потеряло умолчание"
         assert load(net)["voice"]["stt_cmd"] == "", "движок расшифровки задан по умолчанию"
 

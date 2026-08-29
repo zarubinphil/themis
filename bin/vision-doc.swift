@@ -7,10 +7,10 @@
 // выход выглядит как «Эмитент / Номер гос. рег- / ии, ISIN / Тип ЦБ / … / 10 11 12».
 // Таблица там — доказательство, а не оформление.
 //
-// macOS 26 принёс RecognizeDocumentsRequest: он отдаёт DocumentObservation со
+// macOS 26 принес RecognizeDocumentsRequest: он отдает DocumentObservation со
 // структурой — параграфы, списки и ТАБЛИЦЫ с сеткой ячеек (rows: [[Cell]],
-// у ячейки rowRange/columnRange, то есть объединённые ячейки тоже видны).
-// Это снимает единственную причину, по которой в проект тащили тяжёлую внешнюю
+// у ячейки rowRange/columnRange, то есть объединенные ячейки тоже видны).
+// Это снимает единственную причину, по которой в проект тащили тяжелую внешнюю
 // модель: структура таблиц теперь есть нативно, локально, за $0 и на скорости
 // системного движка.
 //
@@ -39,7 +39,7 @@ guard let img = NSImage(contentsOfFile: path),
     exit(1)
 }
 
-/// Текст ячейки: у Cell есть .content (Container), берём его параграфы.
+/// Текст ячейки: у Cell есть .content (Container), берем его параграфы.
 func cellText(_ cell: DocumentObservation.Container.Table.Cell) -> String {
     cell.content.paragraphs
         .map { $0.transcript.replacingOccurrences(of: "\n", with: " ") }

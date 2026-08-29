@@ -36,7 +36,7 @@ POLICY = {
     # триажем — тема уже покрыта practice_index.md.
     "hunt":          {"MICRO": "-", "L1": "sonnet", "L2": "sonnet", "L3": "sonnet"},
     # Скептик-координатор (Карабчевский, practice-hunter-skeptic) — не рядовой
-    # охотник: его листья на Sonnet, а САМ он ведёт враждебный синтез на Opus
+    # охотник: его листья на Sonnet, а САМ он ведет враждебный синтез на Opus
     # (frontmatter агента запинен на opus, CLAUDE.md относит скептика-координатора
     # к Opus). Общий шаг «hunt»=sonnet объявлял правдивый бриф перерасходом —
     # две копии одной правды (пин и политика) расходились. Пин и политика обязаны
@@ -45,7 +45,7 @@ POLICY = {
     # Совет: роли спорят (Sonnet), председатель сводит и решает (Opus).
     "council-role":  {"MICRO": "-", "L1": "-", "L2": "sonnet", "L3": "sonnet"},
     "council-chair": {"MICRO": "-", "L1": "-", "L2": "opus", "L3": "opus"},
-    # Механика: извлечение и классификация — дешёвой моделью.
+    # Механика: извлечение и классификация — дешевой моделью.
     "read-text":     {"MICRO": "haiku", "L1": "haiku", "L2": "haiku", "L3": "haiku"},
     "classify":      {"MICRO": "haiku", "L1": "haiku", "L2": "haiku", "L3": "haiku"},
     # Скан-читатели: у них фолбэк на облачный vision, дешевле не ставить.
@@ -53,7 +53,7 @@ POLICY = {
 }
 
 # Исполнитель из брифа → шаг политики. Кого здесь нет, того политика не судит,
-# но модель назвать он обязан всё равно (пустая клетка = решение не принято).
+# но модель назвать он обязан все равно (пустая клетка = решение не принято).
 AGENT_STEP = {
     # Персоны конвейера: в брифе и в чате исполнителя зовут по имени роли,
     # и политика, знающая только машинное имя, молча пропускает такую строку.
@@ -103,7 +103,7 @@ def cmd_pair(level: str, step: str) -> int:
         return 2
     m = model_for(level, step)
     if m == "-":
-        print(f"шаг «{step}» на уровне {level} запрещён триажем — не запускать", file=sys.stderr)
+        print(f"шаг «{step}» на уровне {level} запрещен триажем — не запускать", file=sys.stderr)
         return 1
     print(m)
     return 0
@@ -158,7 +158,7 @@ def check_brief(path: Path) -> int:
             continue
         want = model_for(level, step)
         if want == "-":
-            bad.append((f"{executor}: шаг «{step}» на уровне {level} запрещён триажем, "
+            bad.append((f"{executor}: шаг «{step}» на уровне {level} запрещен триажем, "
                         f"а в плане стоит", cells))
         elif model != want:
             note = " (перерасход: Opus дороже Sonnet впятеро)" if model == "opus" else ""
@@ -192,7 +192,7 @@ def selftest() -> int:
     assert model_for("L3", "hunt-skeptic") == "opus", "скептик на L3 не Opus — разошлись с пином"
     assert model_for("MICRO", "hunt-skeptic") == "-", "охота-скептик на MICRO не запрещена триажем"
     assert _step_of("practice-hunter-skeptic") == "hunt-skeptic"
-    assert _step_of("practice-hunter-classic") == "hunt", "рядовой охотник ушёл в шаг скептика"
+    assert _step_of("practice-hunter-classic") == "hunt", "рядовой охотник ушел в шаг скептика"
     for step, by_level in POLICY.items():
         assert set(by_level) == set(LEVELS), f"{step}: политика не покрывает все уровни"
         for lvl, m in by_level.items():

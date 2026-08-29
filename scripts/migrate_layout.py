@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """migrate_layout.py — переезд дел на два слоя. Этап 3 плана FINAL-PLAN-2026-08-18.
 
-Раскладку задаёт `case_paths.py`; этот прибор приводит к ней диск и код ОДНИМ заходом.
+Раскладку задает `case_paths.py`; этот прибор приводит к ней диск и код ОДНИМ заходом.
 Разводить по времени нельзя: система окажется в состоянии «новые папки, старая логика».
 
 Что делает:
   1. манифест ДО — контрольные суммы всего дерева `cases/`;
-  2. проверка коллизий имён после нормализации NFC (macOS хранит NFD, Linux и git NFC:
-     непереведённое имя на сервере становится другим путём);
+  2. проверка коллизий имен после нормализации NFC (macOS хранит NFD, Linux и git NFC:
+     непереведенное имя на сервере становится другим путем);
   3. переезд каталогов дела: `01_context` → `.agent/context`, `03_drafts` → `.agent/drafts`,
      `04_archive` → `.agent/archive`. `00_intake` и `02_hearings` НЕ ТРОГАЮТСЯ;
   4. правка путей в коде и промптах — по списку, посчитанному с диска, а не по памяти;
@@ -16,7 +16,7 @@
 
 Журнал переезда — `.autoloop/migration.jsonl`; по нему работает `--rollback`.
 
-  --dry-run   (по умолчанию) показать всё, не тронуть ничего
+  --dry-run   (по умолчанию) показать все, не тронуть ничего
   --apply     выполнить
   --verify    сверить манифесты и раскладку после переезда
   --rollback  вернуть каталоги на место по журналу
@@ -93,8 +93,8 @@ def all_cases(root=CASES):
 
 
 def check_collisions(root=CASES):
-    """Имена, схлопывающиеся после нормализации. Непусто — переезд запрещён:
-    второе дело затрёт первое молча."""
+    """Имена, схлопывающиеся после нормализации. Непусто — переезд запрещен:
+    второе дело затрет первое молча."""
     bad = []
     for dirpath, dirnames, filenames in os.walk(root):
         c = cp.collisions(dirnames + filenames)
@@ -217,8 +217,8 @@ def do_merge(triples, apply=False):
     """Слияние без потерь: новее побеждает, прежнее уходит в архив дела.
 
     Правило «новее побеждает» здесь не догадка: файлы старого каталога записаны
-    ПОСЛЕ переезда — потому он и возник заново. Но выбор всё равно не молчаливый:
-    вытесненная версия кладётся в `.agent/archive/_pered-sliyaniem/`, а не удаляется.
+    ПОСЛЕ переезда — потому он и возник заново. Но выбор все равно не молчаливый:
+    вытесненная версия кладется в `.agent/archive/_pered-sliyaniem/`, а не удаляется.
     """
     moved, identical, replaced = [], [], []
     for case, src, dst in triples:
@@ -329,7 +329,7 @@ def verify(before, root=CASES, renamed=True):
 
     `renamed=False` — сверка ПОСЛЕ ОТКАТА: на диске снова старая раскладка, и ключи
     манифеста брать как есть. Иначе откат всегда выглядит расхождением, и настоящую
-    поломку в нём не отличить от нормы.
+    поломку в нем не отличить от нормы.
     """
     after = manifest(root)
     problems = []
@@ -364,7 +364,7 @@ def rollback():
     if not JOURNAL.is_file():
         return ["журнала переезда нет — откатывать нечего"]
     entries = [json.loads(l) for l in open(JOURNAL, encoding="utf-8")]
-    # Откат обязан отменить ВСЁ, что сделал прибор: и переезд каталогов, и перенос
+    # Откат обязан отменить ВСЕ, что сделал прибор: и переезд каталогов, и перенос
     # выданных документов в слой человека. Половинчатый откат оставляет систему
     # в третьем состоянии, которого не было ни до, ни после.
     steps = [m for m in entries if m.get("event") in ("move", "promote")]
@@ -393,9 +393,9 @@ def rollback():
 
 
 def _promote_checks():
-    """Второй шаг переезда: выданный документ уходит в слой человека, снимок остаётся.
+    """Второй шаг переезда: выданный документ уходит в слой человека, снимок остается.
 
-    В своём дереве: блок добавляет файлы, которых нет в манифесте ДО основного
+    В своем дереве: блок добавляет файлы, которых нет в манифесте ДО основного
     блока, и смешивать их значит ловить ложное расхождение вместо настоящего.
     """
     import tempfile
@@ -473,7 +473,7 @@ def selftest():
             (case / ".agent" / "drafts" / "isk.md").unlink()
             assert any("потерян" in p for p in verify(before, cases)), "потеря файла не поймана"
             (case / ".agent" / "drafts" / "isk.md").write_text("иск", encoding="utf-8")
-            assert not verify(before, cases), "восстановленный файл всё ещё числится потерянным"
+            assert not verify(before, cases), "восстановленный файл все еще числится потерянным"
 
             # Подмена содержимого обязана быть пойманной
             (case / ".agent" / "drafts" / "isk.md").write_text("подмена", encoding="utf-8")
@@ -496,7 +496,7 @@ def selftest():
         finally:
             JOURNAL = saved
 
-    # Коллизия имён блокирует переезд
+    # Коллизия имен блокирует переезд
     with tempfile.TemporaryDirectory(prefix="migrate-collision-") as tmp:
         d = Path(tmp) / "cases" / "klient" / "delo"
         d.mkdir(parents=True)
@@ -513,7 +513,7 @@ def selftest():
         "лог уроков попал под автоправку — прецеденты будут искажены"
     _promote_checks()
     print("selftest: план переезда, неприкосновенные зоны, детект потери/подмены, "
-          "идемпотентность, откат, коллизии имён, защита исторических записей — ок")
+          "идемпотентность, откат, коллизии имен, защита исторических записей — ок")
     return 0
 
 
@@ -526,7 +526,7 @@ def report(root=ROOT):
     print(f"  дел к переезду:        {len(moves)}")
     print(f"  каталогов переедет:    {total_dirs}")
     print(f"  файлов кода и промптов:{len(sites):4}  (вхождений {sum(sites.values())})")
-    print(f"  коллизий имён:         {len(coll)}")
+    print(f"  коллизий имен:         {len(coll)}")
     print(f"\n  НЕ ТРОГАЕТСЯ: {', '.join(UNTOUCHABLE)}")
     print(f"  НЕ ПРАВИТСЯ (исторические записи, путь в них — часть факта):")
     for h in HISTORICAL:
@@ -534,7 +534,7 @@ def report(root=ROOT):
     print(f"  раскладка после: {' · '.join(cp.HUMAN_VISIBLE)} + "
           f"{cp.AGENT_DIR}/{{context,drafts,archive}}")
     if coll:
-        print("\n⛔ КОЛЛИЗИИ ИМЁН — переезд запрещён:")
+        print("\n⛔ КОЛЛИЗИИ ИМЕН — переезд запрещен:")
         for d, key, names in coll[:10]:
             print(f"  · {d}: {names} → одно имя {key}")
         return 1
@@ -592,7 +592,7 @@ def main():
         after = manifest()
         lost = len(before) - len(after) - len(identical)
         if lost:
-            print(f"\n❌ баланс файлов не сошёлся: расхождение {lost}")
+            print(f"\n❌ баланс файлов не сошелся: расхождение {lost}")
             return 1
         print(f"\n✓ слито: {len(moved)} перенесено, {len(replaced)} вытеснило прежние "
               f"(сохранены в архиве), {len(identical)} дублей убрано. Файлов было "
@@ -616,7 +616,7 @@ def main():
                     if "потерян" not in x and "появился" not in x]
         moved_ok = all(Path(d).is_file() for _, d in done)
         if problems or not moved_ok:
-            print(f"❌ перенос не сошёлся: {len(problems)}")
+            print(f"❌ перенос не сошелся: {len(problems)}")
             for x in problems[:20]:
                 print("  · " + x)
             return 1
@@ -643,7 +643,7 @@ def main():
 
     coll = check_collisions(CASES)
     if coll:
-        print(f"⛔ переезд запрещён: коллизий имён {len(coll)}", file=sys.stderr)
+        print(f"⛔ переезд запрещен: коллизий имен {len(coll)}", file=sys.stderr)
         return 1
     moves = plan_moves(CASES)
     sites = code_sites(ROOT)
@@ -657,7 +657,7 @@ def main():
     print(f"манифест ДО: {len(before)} файлов → {path}")
     copied, bad = backup_moving(moves, a.backup_dir)
     if bad:
-        print(f"⛔ переезд отменён: копия разошлась с оригиналом на {len(bad)} файлах",
+        print(f"⛔ переезд отменен: копия разошлась с оригиналом на {len(bad)} файлах",
               file=sys.stderr)
         for x in bad[:10]:
             print("  · " + x, file=sys.stderr)

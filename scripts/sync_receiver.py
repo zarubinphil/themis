@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""sync_receiver.py — приёмник синхронизации «Mac → сервер». Берёт только текст.
+"""sync_receiver.py — приемник синхронизации «Mac → сервер». Берет только текст.
 
-Решение владельца 18.08.2026: на сервер уходит ИЗВЛЕЧЁННЫЙ ТЕКСТ дел, оригиналы —
+Решение владельца 18.08.2026: на сервер уходит ИЗВЛЕЧЕННЫЙ ТЕКСТ дел, оригиналы —
 никогда. Значит, у границы нужен сторож, который решает не по обещанию отправителя,
-а по самому файлу: имя врёт, расширение врёт, симлинк врёт особенно охотно.
+а по самому файлу: имя врет, расширение врет, симлинк врет особенно охотно.
 
     --queue КАТАЛОГ --accept ФАЙЛ --as ОТНОСИТЕЛЬНЫЙ_ПУТЬ
         код 0 — принято, файл лежит в очереди по указанному пути
@@ -48,11 +48,11 @@ def accept(queue: Path, src: Path, rel: str) -> int:
     if not queue.is_dir():
         return _otkaz(f"очереди нет: {queue}")
 
-    # 1. Путь назначения обязан остаться внутри очереди и быть обычным путём.
+    # 1. Путь назначения обязан остаться внутри очереди и быть обычным путем.
     if rel.startswith("/") or rel.startswith("~"):
         return _otkaz(f"абсолютный путь назначения: {rel}")
     if "\\" in rel:
-        # На сервере обратный слеш — обычный символ имени, и файл остаётся внутри
+        # На сервере обратный слеш — обычный символ имени, и файл остается внутри
         # очереди. Но на клиенте другой платформы то же имя читается как каталоги.
         return _otkaz(f"обратные слеши в пути: {rel}")
     if any(ord(c) < 32 for c in rel):
@@ -62,9 +62,9 @@ def accept(queue: Path, src: Path, rel: str) -> int:
                       "выжимки не лежат")
     dst = (queue / rel).resolve()
     if queue not in dst.parents:
-        return _otkaz(f"путь ведёт вне очереди: {rel}")
+        return _otkaz(f"путь ведет вне очереди: {rel}")
 
-    # 2. Источник: симлинк не берём — цель может лежать где угодно.
+    # 2. Источник: симлинк не берем — цель может лежать где угодно.
     if src.is_symlink():
         return _otkaz(f"симлинк не принимается: {src.name}")
     if not src.is_file():
@@ -75,7 +75,7 @@ def accept(queue: Path, src: Path, rel: str) -> int:
         ext = Path(name).suffix.lower().lstrip(".")
         if ext in ORIGINAL_EXT:
             return _otkaz(f"оригинал документа (.{ext}) на сервер не уходит — "
-                          "туда идёт только извлечённый текст")
+                          "туда идет только извлеченный текст")
         if ext not in TEXT_EXT:
             return _otkaz(f"расширение .{ext or '—'} не в списке текстовых "
                           f"({', '.join(sorted(TEXT_EXT))})")
@@ -89,7 +89,7 @@ def accept(queue: Path, src: Path, rel: str) -> int:
         return _otkaz(f"{size / 1024 / 1024:.1f} МБ — больше потолка выжимки "
                       f"({MAX_BYTES // 1024 // 1024} МБ)")
 
-    # 4. Содержимое решает последним: имя врёт, байты нет.
+    # 4. Содержимое решает последним: имя врет, байты нет.
     raw = src.read_bytes()
     try:
         raw.decode("utf-8")
@@ -109,7 +109,7 @@ def selftest() -> int:
         q = td / "queue"
         q.mkdir()
         good = td / "karta.md"
-        good.write_text("# карта дела\nизвлечённый текст", encoding="utf-8")
+        good.write_text("# карта дела\nизвлеченный текст", encoding="utf-8")
         original = td / "isk.pdf"
         original.write_bytes(b"%PDF-1.4\n")
         fake = td / "fake.txt"
@@ -133,7 +133,7 @@ def selftest() -> int:
         pusto.write_bytes(b"")
         assert accept(q, pusto, "delo/karta.md") == 1, "пустой файл принят поверх целого"
         assert (q / "delo" / "karta.md").read_text(encoding="utf-8").startswith("#"), \
-            "принятый ранее текст затёрт пустым"
+            "принятый ранее текст затерт пустым"
         assert accept(q, good, "a\\b.md") == 1, "обратные слеши приняты"
         assert accept(q, good, "/".join(["a"] * 300) + "/k.md") == 1, "путь-бомба принят"
 
@@ -145,7 +145,7 @@ def selftest() -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Приёмник синхронизации: только извлечённый текст.")
+    ap = argparse.ArgumentParser(description="Приемник синхронизации: только извлеченный текст.")
     ap.add_argument("--queue", help="каталог очереди на сервере")
     ap.add_argument("--accept", help="файл-кандидат")
     ap.add_argument("--as", dest="rel", help="путь внутри очереди")

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""stage65_spec.py — приёмка этапа 6.5 «установка на чужую машину». Пишет КООРДИНАТОР.
+"""stage65_spec.py — приемка этапа 6.5 «установка на чужую машину». Пишет КООРДИНАТОР.
 
-Инвариант роя: generator ≠ verifier. Контракт снаружи, проверка чёрным ящиком —
+Инвариант роя: generator ≠ verifier. Контракт снаружи, проверка черным ящиком —
 через командную строку и чтение того, что скилл обещает человеку. Исполнитель
 файл НЕ ПРАВИТ; правку ловит loop_gate (`spec:tampered`).
 
 Честная граница. Живой клон на Windows и Linux отсюда не проверить: под рукой один
 Mac. Поэтому платформенное поведение проверяется СИМУЛЯЦИЕЙ (`--platform`), а сам
-прогон на чужой машине остаётся за владельцем. Симуляция обязана быть настоящей:
-доктор, выдающий на Windows тот же ответ, что на macOS, приёмку не проходит.
+прогон на чужой машине остается за владельцем. Симуляция обязана быть настоящей:
+доктор, выдающий на Windows тот же ответ, что на macOS, приемку не проходит.
 
 Половина этапа хуже нуля (решение владельца): опознать платформу и промолчать о
 замене — молчаливая деградация. Отсюда главная проверка: у КАЖДОЙ функции, которой
@@ -17,7 +17,7 @@ Mac. Поэтому платформенное поведение проверя
 Пять работ:
   1. доктор называет платформу, версию ОС, архитектуру и список CLI — проверкой,
      а не опросом («есть ли у вас codex» спрашивать запрещено);
-  2. для каждой из трёх платформ перечислено недоступное И замена по каждому пункту;
+  2. для каждой из трех платформ перечислено недоступное И замена по каждому пункту;
   3. SMLTLK — штатный компонент: на macOS ставится, на прочих честно объявляется
      неработающим с платформенной заменой той же функции;
   4. пустой конфиг = рабочая локальная система, сервер и бот выключены; чужого
@@ -74,14 +74,14 @@ def doctor(plat=None, extra=()):
 
 # ── 1. Опознание машины проверкой ───────────────────────────────────────────
 PROBE_CONTRACT = """  scripts/setup_doctor.py --json [--platform darwin|windows|linux] [--offline]
-    Печатает машинный отчёт, где названы фактом:
+    Печатает машинный отчет, где названы фактом:
       platform     — darwin | windows | linux
       os_version   — версия ОС
       arch         — архитектура (arm64, x86_64)
       cli          — список [{name, present, authorized, how}] по КОМАНДЕ, не по опросу:
                      наличие проверяется запуском, авторизация — фактической проверкой
                      инструмента; «спросить у владельца, есть ли codex» запрещено.
-    --platform подставляет чужую платформу для разбора и приёмки: ответ обязан
+    --platform подставляет чужую платформу для разбора и приемки: ответ обязан
     отличаться от macOS, иначе разбор платформы — фикция."""
 
 
@@ -91,10 +91,10 @@ def check_probe():
     fails = []
     code, d, err = doctor()
     if d is None:
-        return [("setup_doctor.py", f"--json не дал разбираемый отчёт: {err.strip()[:200]}")]
+        return [("setup_doctor.py", f"--json не дал разбираемый отчет: {err.strip()[:200]}")]
     for key in ("platform", "os_version", "arch", "cli"):
         if not d.get(key):
-            fails.append(("setup_doctor.py", f"в отчёте нет «{key}» — машина не опознана"))
+            fails.append(("setup_doctor.py", f"в отчете нет «{key}» — машина не опознана"))
     cli = d.get("cli") or []
     if isinstance(cli, list) and cli:
         names = {c.get("name") for c in cli if isinstance(c, dict)}
@@ -117,10 +117,10 @@ def check_probe():
 SUBST_CONTRACT = """  scripts/setup_doctor.py --platform ПЛАТФОРМА --json
     Ключ `unavailable`: список [{what, why, replacement}] — что на этой платформе
     не работает, почему и ЧЕМ ЗАМЕНИТЬ. Пустая замена = молчаливая деградация,
-    прямо запрещённая владельцем: половина этапа хуже нуля.
+    прямо запрещенная владельцем: половина этапа хуже нуля.
     На windows и linux список обязан покрывать как минимум: OCR сканов, расписание
     фоновых заданий, диктовку (SMLTLK), подпись и сборку PDF.
-    На darwin список может быть пуст — там работает всё."""
+    На darwin список может быть пуст — там работает все."""
 
 MUST_COVER = ("ocr", "распис", "диктов", "подпис")
 
@@ -133,7 +133,7 @@ def check_substitutes():
     for plat in PLATFORMS:
         code, d, err = doctor(plat)
         if d is None:
-            fails.append(("setup_doctor.py", f"--platform {plat}: отчёт не разобран: {err.strip()[:150]}"))
+            fails.append(("setup_doctor.py", f"--platform {plat}: отчет не разобран: {err.strip()[:150]}"))
             continue
         otvety[plat] = json.dumps(d.get("unavailable", []), ensure_ascii=False, sort_keys=True)
         if d.get("platform") != plat:
@@ -174,7 +174,7 @@ def check_smltlk():
     for plat in PLATFORMS:
         code, d, err = doctor(plat)
         if d is None:
-            fails.append(("setup_doctor.py", f"--platform {plat}: отчёт не разобран"))
+            fails.append(("setup_doctor.py", f"--platform {plat}: отчет не разобран"))
             continue
         s = d.get("smltlk")
         if not isinstance(s, dict):
@@ -193,7 +193,7 @@ def check_smltlk():
     if SKILL.is_file() and "smltlk" not in SKILL.read_text(encoding="utf-8").lower():
         fails.append(("themis-setup", "скилл молчит про SMLTLK, хотя он штатный компонент"))
     # Обещание «ставится тем же онбордингом» обязано иметь исполнителя. Установщик,
-    # не знающий про SMLTLK, превращает штатный компонент в слова: человек прочтёт,
+    # не знающий про SMLTLK, превращает штатный компонент в слова: человек прочтет,
     # что он ставится, и не получит его.
     ustanovshchik = ROOT / "install.sh"
     if not ustanovshchik.is_file():
@@ -251,9 +251,9 @@ def check_config():
                 fails.append(("themis_config.py", f"--show не дал JSON: {out.strip()[:150]}"))
             if d is not None:
                 if (d.get("server") or {}).get("enabled"):
-                    fails.append(("themis_config.py", "без конфига сервер включён"))
+                    fails.append(("themis_config.py", "без конфига сервер включен"))
                 if (d.get("bot") or {}).get("enabled"):
-                    fails.append(("themis_config.py", "без конфига бот включён"))
+                    fails.append(("themis_config.py", "без конфига бот включен"))
                 if (d.get("server") or {}).get("url"):
                     fails.append(("themis_config.py", "в умолчаниях чужой адрес сервера"))
                 if (d.get("bot") or {}).get("token"):
@@ -302,7 +302,7 @@ def check_skill():
     if not SKILL.is_file():
         return [("themis-setup", "скилла нет. Контракт:\n" + SKILL_CONTRACT)]
     text = SKILL.read_text(encoding="utf-8").lower()
-    fails = [("themis-setup", f"скилл не даёт: {what}")
+    fails = [("themis-setup", f"скилл не дает: {what}")
              for needle, what in SKILL_MUST if needle not in text]
     code, out, err = run([tool("sync_prompts.py")])
     if code != 0:
@@ -329,12 +329,12 @@ def selftest():
             assert check_probe(), "пропавший setup_doctor.py не пойман"
     finally:
         SCRIPTS = saved
-    print("selftest: приёмка краснеет на отсутствующих приборах — ок")
+    print("selftest: приемка краснеет на отсутствующих приборах — ок")
     return 0
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Приёмка этапа 6.5 (пишет координатор).")
+    ap = argparse.ArgumentParser(description="Приемка этапа 6.5 (пишет координатор).")
     ap.add_argument("--contracts", action="store_true")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """sync_prompts.py — единый источник промптов. Этап 2 плана FINAL-PLAN-2026-08-18.
 
-Канон — `.claude/`. Всё остальное ПРОИЗВОДНОЕ и генерируется отсюда:
+Канон — `.claude/`. Все остальное ПРОИЗВОДНОЕ и генерируется отсюда:
 
   .claude/agents/<n>.md      → платформенный каталог агентов/<n>.toml
   .claude/skills/<n>/…       → .agents/skills/<n>/…                (побайтовая копия)
   .claude/commands/<n>.md    → .agents/skills/source-command-<n>/SKILL.md
 
 Зачем: три набора правились руками и разошлись. Замер 19.08.2026 до генерации —
-16 расхождений в 10 агентах из 13, включая запрещённые владельцем квадратные скобки
+16 расхождений в 10 агентах из 13, включая запрещенные владельцем квадратные скобки
 в платформенном каталоге агентов, которых в каноне уже не было. Разошедшийся промпт хуже отсутствующего:
 агент исполняет устаревшее правило уверенно.
 
@@ -53,7 +53,7 @@ Use this skill when the user asks to run the migrated source command `{name}`.
 # `.agents/` — не «другой текст», а платформенный вариант канона. Разница между
 # наборами была ровно механической подстановкой: замер 19.08.2026 показал 13 строк
 # расхождения, из них 11 — эти подстановки, 2 — устаревшее (квадратные скобки,
-# запрещённые владельцем 10.08.2026, и абсолютный путь автора). Держать вариант
+# запрещенные владельцем 10.08.2026, и абсолютный путь автора). Держать вариант
 # руками — значит снова разойтись; держать таблицей — воспроизводимо.
 AGENTS_SUBS = (
     ("Claude Code", PLATFORM_LABEL),
@@ -216,7 +216,7 @@ def selftest():
     with tempfile.TemporaryDirectory(prefix="syncprompts-selftest-") as tmp:
         for d in (".claude/agents", ".claude/skills/proba", ".claude/commands"):
             os.makedirs(os.path.join(tmp, d))
-        # Тело с обратным слешем в grep — ровно то, на чём падает базовая строка TOML
+        # Тело с обратным слешем в grep — ровно то, на чем падает базовая строка TOML
         with open(os.path.join(tmp, ".claude/agents/chitatel.md"), "w", encoding="utf-8") as f:
             f.write('---\nname: chitatel\ndescription: "Петров" — читатель\ntools: Read\n'
                     'model: haiku\n---\n\n# Петров\n\n`grep -n "А\\|Б" файл.md` и «кавычки».\n')
@@ -229,7 +229,7 @@ def selftest():
         agent_rel = os.path.join(PLATFORM_AGENT_DIR, "agents", "chitatel.toml")
         assert agent_rel in want, "агент не сгенерирован"
         assert ".agents/skills/proba/SKILL.md" in want, "скилл не скопирован"
-        assert ".agents/skills/source-command-delat/SKILL.md" in want, "команда не обёрнута"
+        assert ".agents/skills/source-command-delat/SKILL.md" in want, "команда не обернута"
 
         got = tomllib.loads(want[agent_rel])
         assert 'grep -n "А\\|Б"' in got["developer_instructions"], \
@@ -243,7 +243,7 @@ def selftest():
         want = plan(tmp)
         got = want[".agents/skills/proba/SKILL.md"]
         assert f"перезапуск {PLATFORM_LABEL} по AGENTS.md" in got, f"подстановка не сработала: {got!r}"
-        assert "Claude Code" not in got and "CLAUDE.md" not in got, "канон протёк в вариант"
+        assert "Claude Code" not in got and "CLAUDE.md" not in got, "канон протек в вариант"
         canon = open(os.path.join(tmp, ".claude/skills/proba/SKILL.md"), encoding="utf-8").read()
         assert "Claude Code" in canon, "подстановка испортила сам канон"
         assert agent_rel in want and PLATFORM_LABEL not in want[agent_rel], \
@@ -261,7 +261,7 @@ def selftest():
             "ручная правка производного НЕ поймана — генератор бесполезен"
         apply(tmp)
 
-        # Осиротевшее производное: источник в каноне удалён
+        # Осиротевшее производное: источник в каноне удален
         os.remove(os.path.join(tmp, ".claude/agents/chitatel.md"))
         assert any("лишнее" in w for _, w in compare(tmp)), \
             "производное без источника в каноне НЕ поймано"

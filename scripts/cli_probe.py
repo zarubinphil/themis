@@ -19,7 +19,7 @@
 пять часов: квота восстанавливается сама, и вечная запись «нет квоты» отрезает
 провайдера навсегда.
 
-`--now` существует ради приёмки: срок протухания проверяется подстановкой времени,
+`--now` существует ради приемки: срок протухания проверяется подстановкой времени,
 а не ожиданием пяти часов.
 """
 from __future__ import annotations
@@ -41,7 +41,7 @@ from pathlib import Path
 DEFAULT_CACHE = Path(os.path.expanduser("~/.cache/themis/cli_probe.json"))
 QUOTA_TTL = 5 * 3600      # квота восстанавливается сама — запрет не может быть вечным
 OTKAZ_TTL = 15 * 60       # прочие отказы: чиниться им человеком, но не каждую секунду
-CACHE_MAX_TTL = 24 * 3600 # подложенный далёкий until не держит провайдера вечно
+CACHE_MAX_TTL = 24 * 3600 # подложенный далекий until не держит провайдера вечно
 KEEP_ENV = ("HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TERM", "LC_CTYPE", "TMPDIR", "LC_TIME")
 SAFE_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 SECRET_RE = re.compile(r"THEMIS|TOKEN|SECRET|API_?KEY|PASSWORD|CREDENTIAL|ANTHROPIC|OPENAI",
@@ -78,10 +78,10 @@ def _cache_write(path: Path, data: dict) -> None:
 def _cache_lock(path: Path):
     """Межпроцессный замок на чтение-правку-запись кеша.
 
-    Волна ролей идёт параллельно ПО ЗАМЫСЛУ: без замка двенадцать одновременных
+    Волна ролей идет параллельно ПО ЗАМЫСЛУ: без замка двенадцать одновременных
     проб делают read-modify-write наперегонки и затирают работу друг друга (хвост
     круга 5 — три записи из двенадцати). flock на соседнем .lock-файле сериализует
-    только короткую правку кеша, сама проба чужого CLI идёт вне замка."""
+    только короткую правку кеша, сама проба чужого CLI идет вне замка."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         f = open(path.with_name(f"{path.name}.lock"), "w")
@@ -238,7 +238,7 @@ def selftest() -> int:
         assert check("ghost", str(td / "netu.sh"), str(work), cache=poison)["outcome"] == "no_binary", \
             "поддельный ok из кеша принят без пробы"
         # Посторонний файл верного JSON, но чужой формы (список) — не условие работы:
-        # проба идёт, а не падает `.get`-исключением.
+        # проба идет, а не падает `.get`-исключением.
         chuzhoy = td / "chuzhoy.json"
         chuzhoy.write_text(json.dumps(["посторонний", "но валидный json"]), encoding="utf-8")
         assert check("t", ok, str(work), cache=chuzhoy)["outcome"] == "ok", \
@@ -261,7 +261,7 @@ def main() -> int:
     ap.add_argument("--workdir", help="каталог, в котором будет работать чужой CLI")
     ap.add_argument("--timeout", type=int, default=30)
     ap.add_argument("--cache", default=str(DEFAULT_CACHE))
-    ap.add_argument("--now", type=float, help="подстановка времени (приёмка протухания)")
+    ap.add_argument("--now", type=float, help="подстановка времени (приемка протухания)")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
@@ -272,7 +272,7 @@ def main() -> int:
     try:
         command = json.loads(a.probe_cmd) if a.probe_cmd and a.probe_cmd.lstrip().startswith("[") else a.probe_cmd
     except ValueError:
-        ap.error("--probe-cmd: повреждён JSON-массив")
+        ap.error("--probe-cmd: поврежден JSON-массив")
     r = check(a.provider, command, a.workdir, a.timeout, Path(a.cache), a.now)
     if a.json:
         print(json.dumps(r, ensure_ascii=False))
