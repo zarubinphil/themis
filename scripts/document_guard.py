@@ -511,7 +511,7 @@ _MONEY_PREFIX_RE = re.compile(
 # Без этой ветки число внутри скобок не деньги (закрывающая скобка отрезает
 # его от слова валюты), и ложь о сумме проходила (проба круга 6, 20.08.2026).
 _MONEY_BEFORE_PROPIS_RE = re.compile(
-    rf"(?P<words>[а-яё][а-яё \-]{{1,90}}?)\(\s*(?P<num>{_MONEY_NUM})\s*\)"
+    rf"(?P<words>[а-яё][а-яе \-]{{1,90}}?)\(\s*(?P<num>{_MONEY_NUM})\s*\)"
     rf"\s*(?P<cur>{_MONEY_CUR}){_MONEY_CUR_END}",
     re.I)
 # Слово-числительное — словарь словоформ propis.py из money_rule, а не

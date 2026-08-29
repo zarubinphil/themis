@@ -150,7 +150,7 @@ def check_substitutes():
             for needle in MUST_COVER:
                 if needle not in svodka:
                     fails.append(("setup_doctor.py", f"{plat}: не назван пункт «{needle}…» — "
-                                                     "функция обещана, а на платформе её нет"))
+                                                     "функция обещана, а на платформе ее нет"))
     if len(set(otvety.values())) == 1 and otvety:
         fails.append(("setup_doctor.py", "все три платформы дали ОДИН ответ — разбор платформы фиктивен"))
     return fails
