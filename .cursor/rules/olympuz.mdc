@@ -1,0 +1,6 @@
+---
+description: Repository rules for every coding agent
+alwaysApply: true
+---
+
+Read AGENTS.md in the repository root before changing anything. It holds the build, test, style, and publication rules for this project.
