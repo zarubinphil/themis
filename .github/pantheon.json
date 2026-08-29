@@ -35,7 +35,11 @@
         "diagram_en": "Intake",
         "diagram_ru": "Приём",
         "title_zh": "把案件材料交过来",
-        "diagram_zh": "接收"
+        "diagram_zh": "接收",
+        "source_path": "docs/assets/pantheon/workflow/01-intake.png",
+        "source_sha256": "7a782c821eea2288c43f1c890ccc53145752f9fbba24f425159de19fadf26dcf",
+        "published_path": "docs/assets/pantheon/workflow/01-intake.png",
+        "published_sha256": "7a782c821eea2288c43f1c890ccc53145752f9fbba24f425159de19fadf26dcf"
       },
       {
         "id": "extract",
@@ -44,7 +48,11 @@
         "diagram_en": "Extract",
         "diagram_ru": "Чтение",
         "title_zh": "扫描件在你的 Mac 上被读出来",
-        "diagram_zh": "读取"
+        "diagram_zh": "读取",
+        "source_path": "docs/assets/pantheon/workflow/02-extract.png",
+        "source_sha256": "805ff42d618238ff6e5a5d2deb53f774a60f2b6653c625deec7c347ac3199f43",
+        "published_path": "docs/assets/pantheon/workflow/02-extract.png",
+        "published_sha256": "805ff42d618238ff6e5a5d2deb53f774a60f2b6653c625deec7c347ac3199f43"
       },
       {
         "id": "case-map",
@@ -53,7 +61,11 @@
         "diagram_en": "Case map",
         "diagram_ru": "Карта дела",
         "title_zh": "搭起案件地图",
-        "diagram_zh": "地图"
+        "diagram_zh": "地图",
+        "source_path": "docs/assets/pantheon/workflow/03-case-map.png",
+        "source_sha256": "1151ddfbffb793a202a7f6317fba287694db3cef3eaf15a88595d626b8008a60",
+        "published_path": "docs/assets/pantheon/workflow/03-case-map.png",
+        "published_sha256": "1151ddfbffb793a202a7f6317fba287694db3cef3eaf15a88595d626b8008a60"
       },
       {
         "id": "research",
@@ -62,7 +74,11 @@
         "diagram_en": "Research",
         "diagram_ru": "Практика",
         "title_zh": "正反两面的判例",
-        "diagram_zh": "判例"
+        "diagram_zh": "判例",
+        "source_path": "docs/assets/pantheon/workflow/04-research.png",
+        "source_sha256": "6df97313190b31a8a1a6096775ec7d426ac7896d8f6ccf39cf53b15fb5521288",
+        "published_path": "docs/assets/pantheon/workflow/04-research.png",
+        "published_sha256": "6df97313190b31a8a1a6096775ec7d426ac7896d8f6ccf39cf53b15fb5521288"
       },
       {
         "id": "council",
@@ -71,7 +87,11 @@
         "diagram_en": "Council",
         "diagram_ru": "Ареопаг",
         "title_zh": "五位法学家争论",
-        "diagram_zh": "合议"
+        "diagram_zh": "合议",
+        "source_path": "docs/assets/pantheon/workflow/05-council.png",
+        "source_sha256": "1bbc03c19a40b5d3bab3e23a96d915cf9420eb2a60fb8ddd2e827f7407d6ddf3",
+        "published_path": "docs/assets/pantheon/workflow/05-council.png",
+        "published_sha256": "1bbc03c19a40b5d3bab3e23a96d915cf9420eb2a60fb8ddd2e827f7407d6ddf3"
       },
       {
         "id": "draft",
@@ -80,7 +100,11 @@
         "diagram_en": "Draft",
         "diagram_ru": "Документ",
         "title_zh": "一个写，另一个查",
-        "diagram_zh": "文书"
+        "diagram_zh": "文书",
+        "source_path": "docs/assets/pantheon/workflow/06-draft.png",
+        "source_sha256": "f32ce8fe2a27ab5e1fed1f809fba02f2d1190993fa5c0d89cc91aa4543c4b26f",
+        "published_path": "docs/assets/pantheon/workflow/06-draft.png",
+        "published_sha256": "f32ce8fe2a27ab5e1fed1f809fba02f2d1190993fa5c0d89cc91aa4543c4b26f"
       },
       {
         "id": "hearing",
@@ -89,12 +113,18 @@
         "diagram_en": "Hearing",
         "diagram_ru": "Заседание",
         "title_zh": "开庭准备与提醒",
-        "diagram_zh": "开庭"
+        "diagram_zh": "开庭",
+        "source_path": "docs/assets/pantheon/workflow/07-hearing.png",
+        "source_sha256": "27504a5ef01562bc53663736358cea439bdf2d2f904bfbc2e0adbb354513ff0d",
+        "published_path": "docs/assets/pantheon/workflow/07-hearing.png",
+        "published_sha256": "27504a5ef01562bc53663736358cea439bdf2d2f904bfbc2e0adbb354513ff0d"
       }
     ]
   },
   "receipts": {
     "generation_path": ".github/pantheon/generation-receipt.json",
-    "visual_judge_path": ".github/pantheon/visual-judge-receipt.json"
+    "visual_judge_path": ".github/pantheon/visual-judge-receipt.json",
+    "stage_generation_path": ".github/pantheon/stage-generation-receipt.json",
+    "stage_visual_judge_path": ".github/pantheon/stage-visual-judge-receipt.json"
   }
 }

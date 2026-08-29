@@ -83,11 +83,15 @@ Themis 是一套面向俄罗斯诉讼的多智能体助手。它在你的电脑�
 
 你把材料放进案件目录。当事人目录在仓库层面被禁止发布，材料留在本地。
 
+<p align="center"><img src="docs/assets/pantheon/workflow/01-intake.png" alt="Pantheon 宽幅大理石场景：Themis 工作流程第 1 步，把案件材料交过来" width="100%"></p>
+
 **你会得到：** 一个案子一个目录，后面要用的东西都在里面。
 
 ### 第 2 步：扫描件在你的 Mac 上被读出来
 
 识别在本地进行，大约每页一秒半。税号、企业注册号、案号和金额会被提取出来，并用校验位在不联网的情况下核对。
+
+<p align="center"><img src="docs/assets/pantheon/workflow/02-extract.png" alt="Pantheon 宽幅大理石场景：Themis 工作流程第 2 步，扫描件在你的 Mac 上被读出来" width="100%"></p>
 
 **你会得到：** 可读的文本，关键要素已经核对过。
 
@@ -95,11 +99,15 @@ Themis 是一套面向俄罗斯诉讼的多智能体助手。它在你的电脑�
 
 事实从文书搬进一张统一的地图：谁、什么时候、主张什么、由什么支撑。另有一个智能体把几个阅读者互相对照。
 
+<p align="center"><img src="docs/assets/pantheon/workflow/03-case-map.png" alt="Pantheon 宽幅大理石场景：Themis 工作流程第 3 步，搭起案件地图" width="100%"></p>
+
 **你会得到：** 一个可以直接看的地方，不必再把整个卷宗读一遍。
 
 ### 第 4 步：正反两面的判例
 
 一个智能体找支持你立场的判例，另一个找程序上的招法，第三个专门找对你不利的判例。检索请求是去标识化的。
+
+<p align="center"><img src="docs/assets/pantheon/workflow/04-research.png" alt="Pantheon 宽幅大理石场景：Themis 工作流程第 4 步，正反两面的判例" width="100%"></p>
 
 **你会得到：** 在对方提出之前，你先看到争议的两面。
 
@@ -107,17 +115,23 @@ Themis 是一套面向俄罗斯诉讼的多智能体助手。它在你的电脑�
 
 五个审阅智能体从不同角度把立场拆开再拼回去。分歧正是意义所在：脆弱的论点应该倒在这里，而不是在庭上。
 
+<p align="center"><img src="docs/assets/pantheon/workflow/05-council.png" alt="Pantheon 宽幅大理石场景：Themis 工作流程第 5 步，五位法学家争论" width="100%"></p>
+
 **你会得到：** 一个已经指出自己弱点的立场。
 
 ### 第 6 步：一个写，另一个查
 
 文书由一个智能体写，由另一个没写过它的智能体审阅。审阅之前不允许拼装文书，提交之前会核对格式，每次提交都跑一遍个人数据守卫。
 
+<p align="center"><img src="docs/assets/pantheon/workflow/06-draft.png" alt="Pantheon 宽幅大理石场景：Themis 工作流程第 6 步，一个写，另一个查" width="100%"></p>
+
 **你会得到：** 一份你以律师身份去改的草稿，而不是需要逐行复核的文本。
 
 ### 第 7 步：开庭准备与提醒
 
 期限按工作日历计算，并附上依据的法条。本地面板显示工作的状态。提醒发给你自己的机器人，只带日期。
+
+<p align="center"><img src="docs/assets/pantheon/workflow/07-hearing.png" alt="Pantheon 宽幅大理石场景：Themis 工作流程第 7 步，开庭准备与提醒" width="100%"></p>
 
 **你会得到：** 开庭准备就绪，而你的修改会教会下一份文书。
 

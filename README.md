@@ -83,11 +83,15 @@ A case moves through named stages. Each stage has its own agents, and a document
 
 You drop the file into the case folder. Client folders are closed from publication at the repository level, so material stays local.
 
+<p align="center"><img src="docs/assets/pantheon/workflow/01-intake.png" alt="Themis workflow stage 1: Hand over the case files, drawn as a wide Pantheon marble scene" width="100%"></p>
+
 **You get:** one folder per case, with everything the work will need.
 
 ### Step 2: Scans are read on your Mac
 
 Recognition runs locally, about a second and a half per page. Registration numbers, case numbers, and amounts are pulled out and checked by their control digit without going online.
+
+<p align="center"><img src="docs/assets/pantheon/workflow/02-extract.png" alt="Themis workflow stage 2: Scans are read on your Mac, drawn as a wide Pantheon marble scene" width="100%"></p>
 
 **You get:** readable text with the key details already verified.
 
@@ -95,11 +99,15 @@ Recognition runs locally, about a second and a half per page. Registration numbe
 
 Facts move from the documents into a single map: who, when, what is claimed, and what proves it. A separate agent cross-checks the readers against each other.
 
+<p align="center"><img src="docs/assets/pantheon/workflow/03-case-map.png" alt="Themis workflow stage 3: The case map is built, drawn as a wide Pantheon marble scene" width="100%"></p>
+
 **You get:** one place to look instead of rereading the whole file.
 
 ### Step 4: Case law for and against
 
 One agent looks for practice that supports your position, another for procedural moves, and a third deliberately hunts practice against you. The search request is depersonalised.
+
+<p align="center"><img src="docs/assets/pantheon/workflow/04-research.png" alt="Themis workflow stage 4: Case law for and against, drawn as a wide Pantheon marble scene" width="100%"></p>
 
 **You get:** both sides of the argument before the other side makes it.
 
@@ -107,17 +115,23 @@ One agent looks for practice that supports your position, another for procedural
 
 Five reviewer agents take the position apart from different angles and put it back together. Disagreement is the point: a weak argument is meant to fall here, not in court.
 
+<p align="center"><img src="docs/assets/pantheon/workflow/05-council.png" alt="Themis workflow stage 5: Five jurists argue it out, drawn as a wide Pantheon marble scene" width="100%"></p>
+
 **You get:** a position with its weak points already named.
 
 ### Step 6: One writes, another checks
 
 The document is written by one agent and reviewed by another that did not write it. Assembly before review is refused, the format is checked before filing, and a guard runs over personal data on every commit.
 
+<p align="center"><img src="docs/assets/pantheon/workflow/06-draft.png" alt="Themis workflow stage 6: One writes, another checks, drawn as a wide Pantheon marble scene" width="100%"></p>
+
 **You get:** a draft you edit as a lawyer, not a text you have to re-verify line by line.
 
 ### Step 7: Hearing prep and reminders
 
 Deadlines are calculated with the working calendar and a reference to the rule. A local dashboard shows the state of the work. Reminders go to your own bot, carrying dates only.
+
+<p align="center"><img src="docs/assets/pantheon/workflow/07-hearing.png" alt="Themis workflow stage 7: Hearing prep and reminders, drawn as a wide Pantheon marble scene" width="100%"></p>
 
 **You get:** the hearing prepared, and edits you make teach the next document.
 

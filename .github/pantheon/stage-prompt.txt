@@ -1,0 +1,42 @@
+You generate a coherent series of wide Pantheon workflow scenes with your built-in image_gen tool at the highest quality. Generate them one by one, in order.
+
+Pass these references to EVERY generation:
+1. $HOME/.agents/skills/public-repo-release-gate/assets/pantheon-style-anchor.png
+2. $HOME/.agents/skills/public-repo-release-gate/assets/pantheon-column.png
+3. docs/assets/pantheon/hero.png
+
+Hard constraints for every frame:
+- Same world, same figure, same camera height and lens as the hero. The classical white marble column appears in every frame.
+- Warm ivory background, white marble, soft daylight from upper left, long gentle shadows, generous empty space.
+- Sky blue means public flow and movement. Muted gold means private or valuable material.
+- Wide 16:9, at least 1600 px on the long side.
+- Absolutely no letters, digits, logos, watermarks, UI chrome or pseudo-text anywhere in the image. Documents and cards stay blank.
+- No dark background, no neon, no purple gradient, no cinematic smoke, no stock-photo look.
+- Each frame shows its own step. Do not repeat the hero composition.
+
+After each image, save it to the exact path given for that scene, then print the path and the pixel size. Do not modify any other file. Do not commit.
+
+Project: Themis, the litigation workroom. Figure: Themis in white marble with scales and a lowered sword. Recurring props: blank document sheets, a gold folder for client material, blue threads for controlled flow, five marble seats for the reviewing jurists. Keep every document blank: no letters, stamps, seals with text, signatures or QR codes.
+
+Generate these seven scenes:
+
+docs/assets/pantheon/workflow/01-intake.png
+A closed gold folder rests on a marble table beside the column, a single blank sheet half drawn out of it. Themis places her hand flat on the folder, keeping it closed to the outside world. Blue threads stop at the table edge and go no further.
+
+docs/assets/pantheon/workflow/02-extract.png
+Blank sheets pass one by one under a broad lens of clear glass on a marble stand; on the far side they come out as clean glass plates. The scales stand nearby, still empty. All work stays on the table.
+
+docs/assets/pantheon/workflow/03-case-map.png
+The glass plates are arranged into one large flat map on the marble floor, connected by thin blue threads: people, dates and claims as small blank marble markers of different heights. Themis looks down at the whole map at once.
+
+docs/assets/pantheon/workflow/04-research.png
+Two marble shelves face each other. From the left shelf blue-lit plates fly toward Themis, from the right shelf equally sharp plates fly against her; her scales hang between the two streams, level. She holds the sword lowered.
+
+docs/assets/pantheon/workflow/05-council.png
+Five marble seats in a semicircle, each with its own small glass plate, all turned toward one central plate that is being taken apart into pieces and reassembled in the air above them. Themis stands outside the circle and listens.
+
+docs/assets/pantheon/workflow/06-draft.png
+Two separated marble desks: on the first a blank document is written by a thin gold stylus; on the second a different figure inspects the finished sheet through clear glass, with the first desk hidden behind a low marble screen. A small closed lock of gold stands on the second desk.
+
+docs/assets/pantheon/workflow/07-hearing.png
+Morning. A single finished blank document lies in a slim gold sleeve at the edge of the table, ready to be carried out; the scales are balanced, and a small marble calendar block with blank faces stands beside them.

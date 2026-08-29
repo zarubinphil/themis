@@ -296,6 +296,21 @@ def _skip_strong_pii_scan(where: str) -> bool:
     return path.lower().endswith(_STATIC_ASSET_EXT)
 
 
+_HEX_RUN_RE = re.compile(r"[0-9a-f]{32,}")
+
+
+def _inside_hex_digest(text: str, position: int) -> bool:
+    """Совпадение попало в длинную шестнадцатеричную строку - это хеш, не реквизит."""
+    left = text.rfind("\n", 0, position) + 1
+    right = text.find("\n", position)
+    line = text[left:right if right != -1 else len(text)]
+    offset = position - left
+    for match in _HEX_RUN_RE.finditer(line.lower()):
+        if match.start() <= offset < match.end():
+            return True
+    return False
+
+
 def scan_pii(text: str, where: str) -> list[str]:
     """Второй рубеж на пути коммита: паспорт/СНИЛС/кадастр/госномер/дата рождения
     без метки папки дела. pii_gate живёт своей жизнью (стадии 6/7), здесь его
@@ -316,6 +331,10 @@ def scan_pii(text: str, where: str) -> list[str]:
         return []
     out = []
     for start, cat in raw:
+        if _inside_hex_digest(text, start):
+            # Цифры внутри sha256 не персональные данные: манифесты и receipts
+            # состоят из хешей, и без этой поправки сторож кричит на каждый.
+            continue
         line_no = text.count("\n", 0, start) + 1
         out.append(f"{where}:{line_no} — похоже на персональные данные ({cat}), "
                    "не имя папки дела. Само значение не печатается")

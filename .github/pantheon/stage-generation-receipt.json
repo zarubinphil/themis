@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "kind": "pantheon-generation",
+  "selection_mode": "managed-frontier",
+  "runtime": "codex",
+  "tool": "image_gen",
+  "route_id": "codex:image_gen:managed-frontier",
+  "model": {
+    "id": "provider-managed",
+    "revision": "provider-managed",
+    "tier": "frontier"
+  },
+  "quality": "highest",
+  "generation_id": "pantheon-stage-series-themis-2026-08-29",
+  "generated_at": "2026-08-29T18:10:02Z",
+  "capability_snapshot": {
+    "checked_at": "2026-08-29T18:10:02Z",
+    "routes": [
+      {
+        "id": "codex:image_gen:managed-frontier",
+        "rank": 1,
+        "available": true,
+        "tier": "frontier",
+        "quality": "highest",
+        "model": {
+          "id": "provider-managed",
+          "revision": "provider-managed",
+          "tier": "frontier"
+        }
+      }
+    ]
+  },
+  "prompt": {
+    "path": ".github/pantheon/stage-prompt.txt",
+    "sha256": "e3fe69266041355870150c9e2ac41dc8393fb7db082218eba677dbd3a78550c3"
+  },
+  "references": [
+    {
+      "role": "style-anchor",
+      "sha256": "ce524f9d22cb0092cb17aa280832e1b2ab2a77a0e01602065ec502232a3bb2d2"
+    },
+    {
+      "role": "column-reference",
+      "sha256": "9d32edd56ac55c4dd6d0425a28a2ac35035e9ab09073fc8ce0c1414b2edfb1bd"
+    }
+  ],
+  "candidates": [
+    {
+      "id": "codex-managed-stage-series",
+      "route_id": "codex:image_gen:managed-frontier",
+      "generation_id": "pantheon-stage-series-themis-2026-08-29",
+      "prompt_sha256": "e3fe69266041355870150c9e2ac41dc8393fb7db082218eba677dbd3a78550c3",
+      "reference_sha256": [
+        "ce524f9d22cb0092cb17aa280832e1b2ab2a77a0e01602065ec502232a3bb2d2",
+        "9d32edd56ac55c4dd6d0425a28a2ac35035e9ab09073fc8ce0c1414b2edfb1bd"
+      ],
+      "outputs": [
+        {
+          "role": "stage-01-intake",
+          "source_sha256": "7a782c821eea2288c43f1c890ccc53145752f9fbba24f425159de19fadf26dcf",
+          "published_sha256": "7a782c821eea2288c43f1c890ccc53145752f9fbba24f425159de19fadf26dcf"
+        },
+        {
+          "role": "stage-02-extract",
+          "source_sha256": "805ff42d618238ff6e5a5d2deb53f774a60f2b6653c625deec7c347ac3199f43",
+          "published_sha256": "805ff42d618238ff6e5a5d2deb53f774a60f2b6653c625deec7c347ac3199f43"
+        },
+        {
+          "role": "stage-03-case-map",
+          "source_sha256": "1151ddfbffb793a202a7f6317fba287694db3cef3eaf15a88595d626b8008a60",
+          "published_sha256": "1151ddfbffb793a202a7f6317fba287694db3cef3eaf15a88595d626b8008a60"
+        },
+        {
+          "role": "stage-04-research",
+          "source_sha256": "6df97313190b31a8a1a6096775ec7d426ac7896d8f6ccf39cf53b15fb5521288",
+          "published_sha256": "6df97313190b31a8a1a6096775ec7d426ac7896d8f6ccf39cf53b15fb5521288"
+        },
+        {
+          "role": "stage-05-council",
+          "source_sha256": "1bbc03c19a40b5d3bab3e23a96d915cf9420eb2a60fb8ddd2e827f7407d6ddf3",
+          "published_sha256": "1bbc03c19a40b5d3bab3e23a96d915cf9420eb2a60fb8ddd2e827f7407d6ddf3"
+        },
+        {
+          "role": "stage-06-draft",
+          "source_sha256": "f32ce8fe2a27ab5e1fed1f809fba02f2d1190993fa5c0d89cc91aa4543c4b26f",
+          "published_sha256": "f32ce8fe2a27ab5e1fed1f809fba02f2d1190993fa5c0d89cc91aa4543c4b26f"
+        },
+        {
+          "role": "stage-07-hearing",
+          "source_sha256": "27504a5ef01562bc53663736358cea439bdf2d2f904bfbc2e0adbb354513ff0d",
+          "published_sha256": "27504a5ef01562bc53663736358cea439bdf2d2f904bfbc2e0adbb354513ff0d"
+        }
+      ]
+    }
+  ],
+  "winner_id": "codex-managed-stage-series"
+}
