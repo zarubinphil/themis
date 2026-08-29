@@ -1,0 +1,364 @@
+{
+  "schema_version": 1,
+  "owner": "zarubinvibe",
+  "slug": "themis",
+  "license_badge": "community%201.0",
+  "status_badge": "in%20development",
+  "languages": [
+    "en",
+    "ru",
+    "zh"
+  ],
+  "quick_code": "git clone https://github.com/zarubinvibe/themis.git\ncd themis\nclaude\n# inside Claude Code run: /themis-setup",
+  "text": {
+    "en": {
+      "title": "Themis",
+      "name": "Themis",
+      "tagline": "Themis works a Russian court case beside a lawyer: it reads the file, hunts case law, and checks its own documents.",
+      "hero_alt": "Themis in white marble with scales and sword beside the classical column, legal documents and agent review cards laid out in daylight",
+      "what": "Themis is a multi-agent assistant for Russian litigation. It reads the case file on your computer, builds a case map, hunts case law for and against you, and drafts documents that another agent reviews. The thinking and the decisions stay with the lawyer.",
+      "why": "Too much of a good lawyer's time goes into mechanics: two hundred pages of scans, dates to reconcile, citations to verify, one detail buried in the file. Themis takes that work and leaves you the part that needs judgement.",
+      "advantage": "the numbers and the wording of the law are produced by code, not by a model.",
+      "better": "Interest under article 395, procedural deadlines, court fees, and amounts in words are calculated by programs. Statutes are quoted from the corpus on your disk, so a paraphrase cannot silently replace the text.",
+      "how": "A case moves through named stages. Each stage has its own agents, and a document never leaves without a second pair of eyes.",
+      "quick_intro": "You need a Mac for local scan recognition, Python 3.11 or newer, Xcode Command Line Tools, and Claude Code.",
+      "quick_extra": "Prefer the plain installer? Run `bash install.sh` in the same folder; it installs dependencies after one confirmation but skips the interview about your practice. No Git? Take [the ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip). The local dashboard starts with `python3 cockpit/app.py` on port 8800.",
+      "quick_result": "the setup asks about your practice one question at a time, downloads the codes you need first, and finishes by testing itself on a real document of yours.",
+      "compare": [
+        [
+          "**Themis**",
+          "A real case with scans, deadlines, and documents",
+          "Local reading, case map, both sides of the practice, reviewed drafts",
+          "Mac for recognition, and a lawyer still decides"
+        ],
+        [
+          "Doing it by hand",
+          "A small case",
+          "Full control",
+          "Hours of mechanics per case"
+        ],
+        [
+          "A general chat assistant",
+          "A quick question about the law",
+          "Instant answers",
+          "Quotes from memory, no case file, no deadline maths"
+        ],
+        [
+          "A commercial legal platform",
+          "A firm with a budget",
+          "Support and integrations",
+          "Case material leaves your machine, and you pay per seat"
+        ]
+      ],
+      "glossary": [
+        [
+          "Case map",
+          "One file that holds parties, dates, claims, and evidence"
+        ],
+        [
+          "Agent",
+          "One assistant with a narrow job, such as reading scans or hunting case law"
+        ]
+      ],
+      "safety": [
+        "Reading and recognition run on your computer; client folders are closed from publication at the repository level.",
+        "Case law search sends a depersonalised request, never the case file.",
+        "A cloud check of a single page is allowed only when local recognition returns nothing or a critical detail must be confirmed. There is no silent switch to the cloud.",
+        "Telegram reminders use your own bot and carry dates and the word \"done\": no names, case numbers, or amounts.",
+        "A personal-data guard runs on every commit, and a separate guard refuses to erase case material.",
+        "Document format is checked before filing, and assembly before review is refused."
+      ],
+      "safety_tail": "Read [SECURITY.md](SECURITY.md) before putting real client material on a shared machine.",
+      "status": "Status: in active development, built for work under a lawyer's control. The main workflow runs in Claude Code.",
+      "limits": [
+        "Local scan recognition depends on Apple Vision and works on macOS only. Text PDF, DOCX, and XLSX are read on other systems too.",
+        "Case law search depends on an external source and is sometimes unavailable.",
+        "A red gate or a missing agent stops the workflow instead of guessing.",
+        "Themis does not represent you, does not sign anything, and does not replace a lawyer's judgement.",
+        "A clean install on Windows and Linux has not been verified yet."
+      ],
+      "docs": "Deeper reading: [how it really works](docs/HOW-IT-WORKS.ru.md), in Russian and without advertising, and [the full reference](docs/DETAILS.md) with the agent roster and the setup interview.",
+      "license": "Themis Community Licence 1.0: free for an individual lawyer, including private practice. Organisations need a commercial licence. See [LICENSE](LICENSE) and [LICENSE.ru.md](LICENSE.ru.md)."
+    },
+    "ru": {
+      "title": "Фемида",
+      "name": "Фемида",
+      "tagline": "Фемида ведёт судебное дело рядом с юристом: читает материалы, ищет практику и проверяет собственные документы.",
+      "hero_alt": "Фемида из белого мрамора с весами и мечом у классической колонны, документы дела и карточки проверки агентов в дневном свете",
+      "what": "Фемида это многоагентный помощник по российским судебным делам. Она читает материалы на вашем компьютере, строит карту дела, ищет практику за вас и против вас и готовит документы, которые проверяет другой агент. Мышление и решения остаются за юристом.",
+      "why": "Слишком много времени хорошего юриста уходит на механику: двести страниц сканов, сверка дат, проверка ссылок, одна деталь, зарытая в материалах. Фемида забирает эту работу и оставляет вам ту часть, где нужно суждение.",
+      "advantage": "цифры и текст закона выдаёт код, а не модель.",
+      "better": "Проценты по статье 395, процессуальные сроки, госпошлина и суммы прописью считаются программами. Нормы цитируются из корпуса на вашем диске, поэтому пересказ не подменит текст незаметно.",
+      "how": "Дело идёт по названным стадиям. У каждой свои агенты, и документ не выходит без вторых глаз.",
+      "quick_intro": "Нужны Mac для локального распознавания сканов, Python 3.11 или новее, Xcode Command Line Tools и Claude Code.",
+      "quick_extra": "Хотите обычный установщик? Запустите `bash install.sh` в той же папке: он ставит зависимости после одного подтверждения, но не проводит интервью о вашей практике. Нет Git? Возьмите [ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip). Локальная панель запускается командой `python3 cockpit/app.py` на порту 8800.",
+      "quick_result": "установка спрашивает о вашей практике по одному вопросу, скачивает нужные вам кодексы первыми и в конце проверяет себя на вашем настоящем документе.",
+      "compare": [
+        [
+          "**Фемида**",
+          "Настоящее дело со сканами, сроками и документами",
+          "Локальное чтение, карта дела, обе стороны практики, проверенные проекты",
+          "Нужен Mac для распознавания, а решает по-прежнему юрист"
+        ],
+        [
+          "Делать руками",
+          "Небольшое дело",
+          "Полный контроль",
+          "Часы механики на каждое дело"
+        ],
+        [
+          "Обычный чат-помощник",
+          "Быстрый вопрос по праву",
+          "Мгновенные ответы",
+          "Цитаты по памяти, без материалов дела и без расчёта сроков"
+        ],
+        [
+          "Коммерческая legal-платформа",
+          "Фирма с бюджетом",
+          "Поддержка и интеграции",
+          "Материалы дела уходят с вашей машины, и платить надо за каждого человека"
+        ]
+      ],
+      "glossary": [
+        [
+          "Case map",
+          "Один файл, где собраны стороны, даты, требования и доказательства"
+        ],
+        [
+          "Agent",
+          "Один помощник с узкой задачей: читать сканы или искать практику"
+        ]
+      ],
+      "safety": [
+        "Чтение и распознавание идут на вашем компьютере, папки доверителей закрыты от публикации на уровне репозитория.",
+        "Поиск практики отправляет обезличенный запрос, а не материалы дела.",
+        "Облачная проверка одной страницы допустима, только если локальное распознавание вернуло пустоту или нужно подтвердить критичный реквизит. Молчаливого переключения в облако нет.",
+        "Напоминания в Telegram идут через вашего бота и несут даты и слово «готово»: без фамилий, номеров дел и сумм.",
+        "Сторож персональных данных проходит по каждому коммиту, а отдельный сторож не даёт стереть материалы дела.",
+        "Формат документа проверяется перед подачей, а собрать документ раньше проверки нельзя."
+      ],
+      "safety_tail": "Прочитайте [SECURITY.md](SECURITY.md), прежде чем класть настоящие материалы доверителя на общий компьютер.",
+      "status": "Статус: в активной разработке, рассчитана на работу под контролем юриста. Основной workflow идёт в Claude Code.",
+      "limits": [
+        "Локальное распознавание сканов зависит от Apple Vision и работает только на macOS. Текстовые PDF, DOCX и XLSX читаются и на других системах.",
+        "Поиск практики зависит от внешнего источника и иногда недоступен.",
+        "Красный гейт или отсутствующий агент останавливает workflow, а не додумывает за вас.",
+        "Фемида не представляет ваши интересы, ничего не подписывает и не заменяет суждение юриста.",
+        "Чистая установка на Windows и Linux пока не проверена."
+      ],
+      "docs": "Глубже: [как я работаю на самом деле](docs/HOW-IT-WORKS.ru.md), без рекламы, и [полный разбор](docs/DETAILS.ru.md) с составом агентов и вопросами установки.",
+      "license": "Themis Community Licence 1.0: частному юристу бесплатно, включая личную практику. Организации нужна коммерческая лицензия. Тексты в [LICENSE.ru.md](LICENSE.ru.md) и [LICENSE](LICENSE)."
+    },
+    "zh": {
+      "title": "Themis",
+      "name": "Themis",
+      "tagline": "Themis 陪着律师办俄罗斯的诉讼案件：读卷宗、找判例、并且检查自己写出来的文书。",
+      "hero_alt": "白色大理石的忒弥斯手持天平与放下的剑，站在古典石柱旁，案卷与审阅卡片摊在日光里",
+      "what": "Themis 是一套面向俄罗斯诉讼的多智能体助手。它在你的电脑上读卷宗，搭起案件地图，找出对你有利和不利的判例，起草文书，再由另一个智能体审阅。思考和决定仍然属于律师。",
+      "why": "一个好律师太多时间花在机械活上：两百页扫描件、核对日期、检查引用、为了一个细节把卷宗再翻一遍。这部分工作 Themis 拿走，把需要判断的那部分留给你。",
+      "advantage": "数字和法条原文由程序给出，而不是由模型给出。",
+      "better": "民法典第 395 条的利息、诉讼期限、国家规费和金额大写都由程序计算。法条从你磁盘上的法规库里逐字引用，转述不会悄悄替换原文。",
+      "how": "一个案件按命名好的阶段推进。每个阶段有自己的智能体，文书不经过第二双眼睛不会出门。",
+      "quick_intro": "你需要一台 Mac 来本地识别扫描件，Python 3.11 以上，Xcode 命令行工具，以及 Claude Code。",
+      "quick_extra": "更喜欢普通安装脚本？在同一个目录里执行 `bash install.sh`：它在一次确认之后安装依赖，但不会做关于你执业方向的访谈。没有 Git？拿 [ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip)。本地面板用 `python3 cockpit/app.py` 启动，端口 8800。",
+      "quick_result": "安装过程会一次一个问题地了解你的执业方向，先下载你最需要的法典，最后用你自己的一份真实文书来自检。",
+      "compare": [
+        [
+          "**Themis**",
+          "手上是有扫描件、期限和文书的真实案件",
+          "本地阅读、案件地图、正反两面的判例、经过审阅的草稿",
+          "识别需要 Mac，决定仍然由律师做"
+        ],
+        [
+          "全部手工",
+          "小案子",
+          "完全掌控",
+          "每个案子都要花几小时在机械活上"
+        ],
+        [
+          "通用聊天助手",
+          "关于法律的一个快速问题",
+          "回答很快",
+          "凭记忆引用法条，没有卷宗，也不算期限"
+        ],
+        [
+          "商业法律科技平台",
+          "有预算的律所",
+          "有支持和集成",
+          "案件材料离开你的机器，而且按人头收费"
+        ]
+      ],
+      "glossary": [
+        [
+          "Case map",
+          "案件地图：把当事人、日期、诉求和证据放在一起的一份文件"
+        ],
+        [
+          "Agent",
+          "智能体：只负责一件窄活的助手，比如读扫描件或找判例"
+        ]
+      ],
+      "safety": [
+        "阅读和识别都在你的电脑上；当事人目录在仓库层面被禁止发布。",
+        "判例检索发出的是去标识化的请求，卷宗不会外传。",
+        "只有当本地识别一无所获，或者必须确认一个关键要素时，才允许对单页做一次云端检查。没有静默切换到云端这回事。",
+        "Telegram 提醒走你自己的机器人，只带日期和“完成”两个字：没有姓名、案号和金额。",
+        "每次提交都会跑个人数据守卫，另一个守卫不允许删除案件材料。",
+        "提交之前会检查文书格式，并且不允许在审阅之前先把文书拼出来。"
+      ],
+      "safety_tail": "把真实当事人材料放到共用电脑之前，请先读 [SECURITY.md](SECURITY.md)。",
+      "status": "状态：在积极开发中，按照“律师全程掌控”的方式设计。主要工作流在 Claude Code 里运行。",
+      "limits": [
+        "本地扫描件识别依赖 Apple Vision，只在 macOS 上可用。文本 PDF、DOCX 和 XLSX 在其他系统上也能读。",
+        "判例检索依赖外部来源，有时会不可用。",
+        "闸门变红或者少了某个智能体，工作流会停下，而不是替你猜。",
+        "Themis 不代表你出面，不签任何东西，也不代替律师的判断。",
+        "Windows 和 Linux 上的干净安装还没有验证过。"
+      ],
+      "docs": "想看得更深：[它到底怎么工作](docs/HOW-IT-WORKS.ru.md)（俄语，没有广告）和 [完整参考](docs/DETAILS.md)（智能体名单与安装访谈）。",
+      "license": "Themis Community Licence 1.0：个人律师免费使用，包括个人执业；组织需要商业许可。见 [LICENSE](LICENSE) 与 [LICENSE.ru.md](LICENSE.ru.md)。"
+    }
+  },
+  "stages": {
+    "intake": {
+      "en": {
+        "short": "Scans, photos, and documents land in the case folder",
+        "body": "You drop the file into the case folder. Client folders are closed from publication at the repository level, so material stays local.",
+        "result": "one folder per case, with everything the work will need.",
+        "alt": "Themis workflow stage 1: Hand over the case files, drawn as a wide Pantheon marble scene"
+      },
+      "ru": {
+        "short": "Сканы, фотографии и документы ложатся в папку дела",
+        "body": "Вы кладёте материалы в папку дела. Папки доверителей закрыты от публикации на уровне репозитория, поэтому материал остаётся локальным.",
+        "result": "одна папка на дело, где лежит всё, что понадобится в работе.",
+        "alt": "Этап 1 такта Themis: Передайте материалы дела, показан широкой мраморной сценой Pantheon"
+      },
+      "zh": {
+        "short": "扫描件、照片和文书落进案件目录",
+        "body": "你把材料放进案件目录。当事人目录在仓库层面被禁止发布，材料留在本地。",
+        "result": "一个案子一个目录，后面要用的东西都在里面。",
+        "alt": "Pantheon 宽幅大理石场景：Themis 工作流程第 1 步，把案件材料交过来"
+      }
+    },
+    "extract": {
+      "en": {
+        "short": "Apple Vision recognition, direct text, checksum-verified details",
+        "body": "Recognition runs locally, about a second and a half per page. Registration numbers, case numbers, and amounts are pulled out and checked by their control digit without going online.",
+        "result": "readable text with the key details already verified.",
+        "alt": "Themis workflow stage 2: Scans are read on your Mac, drawn as a wide Pantheon marble scene"
+      },
+      "ru": {
+        "short": "Распознавание Apple Vision, прямой текст, реквизиты с контрольной суммой",
+        "body": "Распознавание идёт локально, примерно полторы секунды на страницу. ИНН, ОГРН, номера дел и суммы вынимаются и проверяются контрольной суммой без выхода в интернет.",
+        "result": "читаемый текст, где ключевые реквизиты уже проверены.",
+        "alt": "Этап 2 такта Themis: Сканы читаются на вашем Mac, показан широкой мраморной сценой Pantheon"
+      },
+      "zh": {
+        "short": "Apple Vision 识别、直接取文本、带校验位的要素",
+        "body": "识别在本地进行，大约每页一秒半。税号、企业注册号、案号和金额会被提取出来，并用校验位在不联网的情况下核对。",
+        "result": "可读的文本，关键要素已经核对过。",
+        "alt": "Pantheon 宽幅大理石场景：Themis 工作流程第 2 步，扫描件在你的 Mac 上被读出来"
+      }
+    },
+    "case-map": {
+      "en": {
+        "short": "Parties, dates, claims, and evidence in one picture",
+        "body": "Facts move from the documents into a single map: who, when, what is claimed, and what proves it. A separate agent cross-checks the readers against each other.",
+        "result": "one place to look instead of rereading the whole file.",
+        "alt": "Themis workflow stage 3: The case map is built, drawn as a wide Pantheon marble scene"
+      },
+      "ru": {
+        "short": "Стороны, даты, требования и доказательства в одной картине",
+        "body": "Факты переезжают из документов в единую карту: кто, когда, что требует и чем это подтверждается. Отдельный агент сверяет читателей между собой.",
+        "result": "одно место, куда смотреть, вместо перечитывания всего дела.",
+        "alt": "Этап 3 такта Themis: Строится карта дела, показан широкой мраморной сценой Pantheon"
+      },
+      "zh": {
+        "short": "当事人、日期、诉求和证据放进同一张图",
+        "body": "事实从文书搬进一张统一的地图：谁、什么时候、主张什么、由什么支撑。另有一个智能体把几个阅读者互相对照。",
+        "result": "一个可以直接看的地方，不必再把整个卷宗读一遍。",
+        "alt": "Pantheon 宽幅大理石场景：Themis 工作流程第 3 步，搭起案件地图"
+      }
+    },
+    "research": {
+      "en": {
+        "short": "Support, procedural moves, and the opponent's best argument",
+        "body": "One agent looks for practice that supports your position, another for procedural moves, and a third deliberately hunts practice against you. The search request is depersonalised.",
+        "result": "both sides of the argument before the other side makes it.",
+        "alt": "Themis workflow stage 4: Case law for and against, drawn as a wide Pantheon marble scene"
+      },
+      "ru": {
+        "short": "Поддержка, процессуальные ходы и лучший довод оппонента",
+        "body": "Один агент ищет практику за вашу позицию, другой процессуальные ходы, третий намеренно ищет практику против вас. Поисковый запрос уходит обезличенным.",
+        "result": "обе стороны спора до того, как их приведёт оппонент.",
+        "alt": "Этап 4 такта Themis: Практика за вас и против вас, показан широкой мраморной сценой Pantheon"
+      },
+      "zh": {
+        "short": "支持的判例、程序上的招法、对方最好的论点",
+        "body": "一个智能体找支持你立场的判例，另一个找程序上的招法，第三个专门找对你不利的判例。检索请求是去标识化的。",
+        "result": "在对方提出之前，你先看到争议的两面。",
+        "alt": "Pantheon 宽幅大理石场景：Themis 工作流程第 4 步，正反两面的判例"
+      }
+    },
+    "council": {
+      "en": {
+        "short": "A position assembled from an argument, not from one opinion",
+        "body": "Five reviewer agents take the position apart from different angles and put it back together. Disagreement is the point: a weak argument is meant to fall here, not in court.",
+        "result": "a position with its weak points already named.",
+        "alt": "Themis workflow stage 5: Five jurists argue it out, drawn as a wide Pantheon marble scene"
+      },
+      "ru": {
+        "short": "Позиция, собранная из спора, а не из одного мнения",
+        "body": "Пятеро проверяющих агентов разбирают позицию с разных сторон и собирают заново. Несогласие здесь и есть смысл: слабый довод должен упасть тут, а не в заседании.",
+        "result": "позиция, у которой слабые места уже названы.",
+        "alt": "Этап 5 такта Themis: Пятеро правоведов спорят, показан широкой мраморной сценой Pantheon"
+      },
+      "zh": {
+        "short": "立场来自争论，而不是一个人的意见",
+        "body": "五个审阅智能体从不同角度把立场拆开再拼回去。分歧正是意义所在：脆弱的论点应该倒在这里，而不是在庭上。",
+        "result": "一个已经指出自己弱点的立场。",
+        "alt": "Pantheon 宽幅大理石场景：Themis 工作流程第 5 步，五位法学家争论"
+      }
+    },
+    "draft": {
+      "en": {
+        "short": "A separate reviewer, format checks, and a personal-data guard",
+        "body": "The document is written by one agent and reviewed by another that did not write it. Assembly before review is refused, the format is checked before filing, and a guard runs over personal data on every commit.",
+        "result": "a draft you edit as a lawyer, not a text you have to re-verify line by line.",
+        "alt": "Themis workflow stage 6: One writes, another checks, drawn as a wide Pantheon marble scene"
+      },
+      "ru": {
+        "short": "Отдельный проверяющий, проверка формата и сторож персональных данных",
+        "body": "Документ пишет один агент, а проверяет другой, который его не писал. Собрать документ раньше проверки нельзя, формат сверяется перед подачей, а сторож персональных данных проходит по каждому коммиту.",
+        "result": "проект, который вы правите как юрист, а не текст, который надо перепроверять построчно.",
+        "alt": "Этап 6 такта Themis: Один пишет, другой проверяет, показан широкой мраморной сценой Pantheon"
+      },
+      "zh": {
+        "short": "独立的审阅者、格式检查和个人数据守卫",
+        "body": "文书由一个智能体写，由另一个没写过它的智能体审阅。审阅之前不允许拼装文书，提交之前会核对格式，每次提交都跑一遍个人数据守卫。",
+        "result": "一份你以律师身份去改的草稿，而不是需要逐行复核的文本。",
+        "alt": "Pantheon 宽幅大理石场景：Themis 工作流程第 6 步，一个写，另一个查"
+      }
+    },
+    "hearing": {
+      "en": {
+        "short": "Deadlines, a local dashboard, optional Telegram reminders",
+        "body": "Deadlines are calculated with the working calendar and a reference to the rule. A local dashboard shows the state of the work. Reminders go to your own bot, carrying dates only.",
+        "result": "the hearing prepared, and edits you make teach the next document.",
+        "alt": "Themis workflow stage 7: Hearing prep and reminders, drawn as a wide Pantheon marble scene"
+      },
+      "ru": {
+        "short": "Сроки, локальная панель, необязательные напоминания в Telegram",
+        "body": "Сроки считаются по производственному календарю со ссылкой на норму. Локальная панель показывает состояние работы. Напоминания уходят вашему собственному боту и несут только даты.",
+        "result": "заседание подготовлено, а ваши правки учат следующий документ.",
+        "alt": "Этап 7 такта Themis: Подготовка к заседанию и напоминания, показан широкой мраморной сценой Pantheon"
+      },
+      "zh": {
+        "short": "期限、本地面板、可选的 Telegram 提醒",
+        "body": "期限按工作日历计算，并附上依据的法条。本地面板显示工作的状态。提醒发给你自己的机器人，只带日期。",
+        "result": "开庭准备就绪，而你的修改会教会下一份文书。",
+        "alt": "Pantheon 宽幅大理石场景：Themis 工作流程第 7 步，开庭准备与提醒"
+      }
+    }
+  }
+}

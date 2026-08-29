@@ -33,49 +33,63 @@
         "title_en": "Hand over the case files",
         "title_ru": "Передайте материалы дела",
         "diagram_en": "Intake",
-        "diagram_ru": "Приём"
+        "diagram_ru": "Приём",
+        "title_zh": "把案件材料交过来",
+        "diagram_zh": "接收"
       },
       {
         "id": "extract",
         "title_en": "Scans are read on your Mac",
         "title_ru": "Сканы читаются на вашем Mac",
         "diagram_en": "Extract",
-        "diagram_ru": "Чтение"
+        "diagram_ru": "Чтение",
+        "title_zh": "扫描件在你的 Mac 上被读出来",
+        "diagram_zh": "读取"
       },
       {
         "id": "case-map",
         "title_en": "The case map is built",
         "title_ru": "Строится карта дела",
         "diagram_en": "Case map",
-        "diagram_ru": "Карта дела"
+        "diagram_ru": "Карта дела",
+        "title_zh": "搭起案件地图",
+        "diagram_zh": "地图"
       },
       {
         "id": "research",
         "title_en": "Case law for and against",
         "title_ru": "Практика за вас и против вас",
         "diagram_en": "Research",
-        "diagram_ru": "Практика"
+        "diagram_ru": "Практика",
+        "title_zh": "正反两面的判例",
+        "diagram_zh": "判例"
       },
       {
         "id": "council",
         "title_en": "Five jurists argue it out",
         "title_ru": "Пятеро правоведов спорят",
         "diagram_en": "Council",
-        "diagram_ru": "Ареопаг"
+        "diagram_ru": "Ареопаг",
+        "title_zh": "五位法学家争论",
+        "diagram_zh": "合议"
       },
       {
         "id": "draft",
         "title_en": "One writes, another checks",
         "title_ru": "Один пишет, другой проверяет",
         "diagram_en": "Draft",
-        "diagram_ru": "Документ"
+        "diagram_ru": "Документ",
+        "title_zh": "一个写，另一个查",
+        "diagram_zh": "文书"
       },
       {
         "id": "hearing",
         "title_en": "Hearing prep and reminders",
         "title_ru": "Подготовка к заседанию и напоминания",
         "diagram_en": "Hearing",
-        "diagram_ru": "Заседание"
+        "diagram_ru": "Заседание",
+        "title_zh": "开庭准备与提醒",
+        "diagram_zh": "开庭"
       }
     ]
   },

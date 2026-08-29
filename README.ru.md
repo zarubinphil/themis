@@ -2,7 +2,7 @@
 
 Фемида ведёт судебное дело рядом с юристом: читает материалы, ищет практику и проверяет собственные документы.
 
-[English](README.md)
+[English](README.md) · [中文](README.zh.md)
 
 [![License](https://img.shields.io/badge/license-community%201.0-blue.svg)](LICENSE) [![Stars](https://img.shields.io/github/stars/zarubinvibe/themis?style=flat&color=C9A87A)](https://github.com/zarubinvibe/themis/stargazers) [![Status](https://img.shields.io/badge/status-in%20development-brightgreen.svg)](https://github.com/zarubinvibe/themis) [![Olympuz](https://img.shields.io/badge/olympuz-family-B8D6EA.svg)](https://github.com/zarubinvibe/athena#olympuz-family)
 
