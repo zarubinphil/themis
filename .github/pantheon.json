@@ -19,9 +19,9 @@
     },
     "hero": {
       "source_path": "docs/assets/pantheon/hero-source.png",
-      "source_sha256": "9fa6365e886c87ab15c621fedc6d04c9a5bf90aa44fcf9fd0de7610ac6001678",
+      "source_sha256": "b72347f997f0d35d2d487dd44e5272715a2c534877bf5336f0d62d19de22eb79",
       "published_path": "docs/assets/pantheon/hero.png",
-      "published_sha256": "bcbd18c62ca55918bd4abf59cf25dec5ea692c6082f5ee1f15285921a1a3054d"
+      "published_sha256": "a81ef2f6f62c802bab2c622366a03c7f42639a2f34dc70f9faf3e517cf695e8c"
     },
     "emblem": {
       "source_path": "docs/assets/pantheon/emblem-source.png",
@@ -35,13 +35,13 @@
         "title_en": "Hand over the case files",
         "title_ru": "Передайте материалы дела",
         "diagram_en": "Intake",
-        "diagram_ru": "Приём",
+        "diagram_ru": "Прием",
         "title_zh": "把案件材料交过来",
         "diagram_zh": "接收",
         "source_path": "docs/assets/pantheon/workflow/01-intake.png",
-        "source_sha256": "7a782c821eea2288c43f1c890ccc53145752f9fbba24f425159de19fadf26dcf",
+        "source_sha256": "149536a8f003654d4037a36314d7a2450c97baac43208dee98e6c2f765cab12c",
         "published_path": "docs/assets/pantheon/workflow/01-intake.png",
-        "published_sha256": "7a782c821eea2288c43f1c890ccc53145752f9fbba24f425159de19fadf26dcf"
+        "published_sha256": "149536a8f003654d4037a36314d7a2450c97baac43208dee98e6c2f765cab12c"
       },
       {
         "id": "extract",
@@ -52,9 +52,9 @@
         "title_zh": "扫描件在你的 Mac 上被读出来",
         "diagram_zh": "读取",
         "source_path": "docs/assets/pantheon/workflow/02-extract.png",
-        "source_sha256": "805ff42d618238ff6e5a5d2deb53f774a60f2b6653c625deec7c347ac3199f43",
+        "source_sha256": "d91ddbfe6b1008170556e037b628b4a173ad436ecf81b8a7c873736ce2a4eae4",
         "published_path": "docs/assets/pantheon/workflow/02-extract.png",
-        "published_sha256": "805ff42d618238ff6e5a5d2deb53f774a60f2b6653c625deec7c347ac3199f43"
+        "published_sha256": "d91ddbfe6b1008170556e037b628b4a173ad436ecf81b8a7c873736ce2a4eae4"
       },
       {
         "id": "case-map",
@@ -65,9 +65,9 @@
         "title_zh": "搭起案件地图",
         "diagram_zh": "地图",
         "source_path": "docs/assets/pantheon/workflow/03-case-map.png",
-        "source_sha256": "1151ddfbffb793a202a7f6317fba287694db3cef3eaf15a88595d626b8008a60",
+        "source_sha256": "ed5888078e1548df7391714a9c09942ae51233412393155289ea8386e23c1f46",
         "published_path": "docs/assets/pantheon/workflow/03-case-map.png",
-        "published_sha256": "1151ddfbffb793a202a7f6317fba287694db3cef3eaf15a88595d626b8008a60"
+        "published_sha256": "ed5888078e1548df7391714a9c09942ae51233412393155289ea8386e23c1f46"
       },
       {
         "id": "research",
@@ -78,9 +78,9 @@
         "title_zh": "正反两面的判例",
         "diagram_zh": "判例",
         "source_path": "docs/assets/pantheon/workflow/04-research.png",
-        "source_sha256": "6df97313190b31a8a1a6096775ec7d426ac7896d8f6ccf39cf53b15fb5521288",
+        "source_sha256": "da8ab6880d0e62bb746b04d55010c8ff0e6ad9971b7111d6a7bfe6cacbb268da",
         "published_path": "docs/assets/pantheon/workflow/04-research.png",
-        "published_sha256": "6df97313190b31a8a1a6096775ec7d426ac7896d8f6ccf39cf53b15fb5521288"
+        "published_sha256": "da8ab6880d0e62bb746b04d55010c8ff0e6ad9971b7111d6a7bfe6cacbb268da"
       },
       {
         "id": "council",
@@ -91,9 +91,9 @@
         "title_zh": "五位法学家争论",
         "diagram_zh": "合议",
         "source_path": "docs/assets/pantheon/workflow/05-council.png",
-        "source_sha256": "1bbc03c19a40b5d3bab3e23a96d915cf9420eb2a60fb8ddd2e827f7407d6ddf3",
+        "source_sha256": "3b0a8fecd6ed6ef1c36abfc936e2527ce29359f28b986ed6fd91bf8af22c75b5",
         "published_path": "docs/assets/pantheon/workflow/05-council.png",
-        "published_sha256": "1bbc03c19a40b5d3bab3e23a96d915cf9420eb2a60fb8ddd2e827f7407d6ddf3"
+        "published_sha256": "3b0a8fecd6ed6ef1c36abfc936e2527ce29359f28b986ed6fd91bf8af22c75b5"
       },
       {
         "id": "draft",
@@ -104,9 +104,9 @@
         "title_zh": "一个写，另一个查",
         "diagram_zh": "文书",
         "source_path": "docs/assets/pantheon/workflow/06-draft.png",
-        "source_sha256": "f32ce8fe2a27ab5e1fed1f809fba02f2d1190993fa5c0d89cc91aa4543c4b26f",
+        "source_sha256": "bc7a408b7ae5547c705a12c5ae756fb5d1a3be44d799c6f43fa5b2e75a6cdd5b",
         "published_path": "docs/assets/pantheon/workflow/06-draft.png",
-        "published_sha256": "f32ce8fe2a27ab5e1fed1f809fba02f2d1190993fa5c0d89cc91aa4543c4b26f"
+        "published_sha256": "bc7a408b7ae5547c705a12c5ae756fb5d1a3be44d799c6f43fa5b2e75a6cdd5b"
       },
       {
         "id": "hearing",
@@ -117,9 +117,9 @@
         "title_zh": "开庭准备与提醒",
         "diagram_zh": "开庭",
         "source_path": "docs/assets/pantheon/workflow/07-hearing.png",
-        "source_sha256": "27504a5ef01562bc53663736358cea439bdf2d2f904bfbc2e0adbb354513ff0d",
+        "source_sha256": "bece217719e85e713440d52f67ed72f677caca82eb168db3f07f8e99bb3fb923",
         "published_path": "docs/assets/pantheon/workflow/07-hearing.png",
-        "published_sha256": "27504a5ef01562bc53663736358cea439bdf2d2f904bfbc2e0adbb354513ff0d"
+        "published_sha256": "bece217719e85e713440d52f67ed72f677caca82eb168db3f07f8e99bb3fb923"
       }
     ]
   },

@@ -24,7 +24,7 @@ Use this skill when the user asks to run the migrated source command `init-pract
 
 2. Состав — блок `## ОХОТНИКИ — РЕШЕНИЕ ФЕМИДЫ` карты; нет → по числу правовых вопросов: 1 = L1 tactical · 2-3 = L2 classic + tactical (+ skeptic при орг-оппоненте) · 4+ / кассация ВС / КАС = L3 все три.
 3. Запуск: дела по очереди, охотники дела параллельно (`practice-hunter-classic`/`-skeptic`/`-tactical`). В промпт — правовые вопросы карты ТЕКСТОМ (материал до 15 000 токенов — текстом, не путем) + путь дела.
-4. Синтез: FULL → `/askacouncil {путь}` → `practice.md` с маркером; L1/FAST → Фемида синтезирует `practice.md` сама (Opus) и ставит маркер `## FAST-СИНТЕЗ ФЕМИДЫ`; охотник кладёт только `tactical_*.md`. Затем `archivist` (один раз).
+4. Синтез: FULL → `/askacouncil {путь}` → `practice.md` с маркером; L1/FAST → Фемида синтезирует `practice.md` сама (Opus) и ставит маркер `## FAST-СИНТЕЗ ФЕМИДЫ`; охотник кладет только `tactical_*.md`. Затем `archivist` (один раз).
 5. Отчет: `✓ Готово` (маркер) / `⚠ Частично` (нужен /askacouncil) / `↷ Пропущено` / `✗ Ошибки` + причина. Далее: /position-council → /draft.
 
 ## Сбои

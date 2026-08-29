@@ -33,7 +33,7 @@ for p in "${SYS[@]}"; do
   git checkout "origin/$BR" -- "$p" 2>/dev/null || true
 done
 
-# Новые/изменённые зависимости и OCR — доустановить
+# Новые/измененные зависимости и OCR — доустановить
 OCR_AFTER="$(shasum bin/vision-ocr.swift 2>/dev/null | awk '{print $1}')"
 echo "Доустанавливаю новые компоненты…"
 bash install.sh

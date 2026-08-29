@@ -11,8 +11,8 @@
     "tier": "frontier"
   },
   "quality": "highest",
-  "generation_id": "01a03d85-2ee4-7ab3-9e38-cab42e4a51fb",
-  "generated_at": "2026-08-26T12:00:00.000Z",
+  "generation_id": "01a04f1a-fc48-78a1-9ff1-2421bd18f996",
+  "generated_at": "2026-08-29T20:07:20Z",
   "capability_snapshot": {
     "checked_at": "2026-08-26T12:00:00.000Z",
     "routes": [
@@ -48,7 +48,7 @@
     {
       "id": "codex-managed",
       "route_id": "codex:image_gen:managed-frontier",
-      "generation_id": "01a03d85-2ee4-7ab3-9e38-cab42e4a51fb",
+      "generation_id": "01a04f1a-fc48-78a1-9ff1-2421bd18f996",
       "prompt_sha256": "b9d92fde1768e5e382311a82f2f4eb50d807d8a16d33489e6b129ef1f2b343be",
       "reference_sha256": [
         "ce524f9d22cb0092cb17aa280832e1b2ab2a77a0e01602065ec502232a3bb2d2",
@@ -57,8 +57,8 @@
       "outputs": [
         {
           "role": "hero",
-          "source_sha256": "9fa6365e886c87ab15c621fedc6d04c9a5bf90aa44fcf9fd0de7610ac6001678",
-          "published_sha256": "bcbd18c62ca55918bd4abf59cf25dec5ea692c6082f5ee1f15285921a1a3054d"
+          "source_sha256": "b72347f997f0d35d2d487dd44e5272715a2c534877bf5336f0d62d19de22eb79",
+          "published_sha256": "a81ef2f6f62c802bab2c622366a03c7f42639a2f34dc70f9faf3e517cf695e8c"
         },
         {
           "role": "emblem",

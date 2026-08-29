@@ -2,7 +2,7 @@
   "schema_version": 1,
   "kind": "pantheon-visual-judge",
   "receipt_id": "themis-visual-judge-2026-08-26",
-  "checked_at": "2026-08-26T12:10:00.000Z",
+  "checked_at": "2026-08-29T20:07:20Z",
   "runtime": "codex",
   "tool": "view_image",
   "route_id": "codex:view_image:managed-frontier",
@@ -28,7 +28,7 @@
     {
       "role": "hero",
       "path": "docs/assets/pantheon/hero.png",
-      "sha256": "bcbd18c62ca55918bd4abf59cf25dec5ea692c6082f5ee1f15285921a1a3054d",
+      "sha256": "a81ef2f6f62c802bab2c622366a03c7f42639a2f34dc70f9faf3e517cf695e8c",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,

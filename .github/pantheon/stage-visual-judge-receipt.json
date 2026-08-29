@@ -2,7 +2,7 @@
   "schema_version": 1,
   "kind": "pantheon-visual-judge",
   "receipt_id": "pantheon-stage-judge-themis-2026-08-29",
-  "checked_at": "2026-08-29T18:10:02Z",
+  "checked_at": "2026-08-29T20:07:37Z",
   "runtime": "claude",
   "tool": "read_image",
   "route_id": "claude:read_image:frontier",
@@ -28,7 +28,7 @@
     {
       "role": "stage-01-intake",
       "path": "docs/assets/pantheon/workflow/01-intake.png",
-      "sha256": "7a782c821eea2288c43f1c890ccc53145752f9fbba24f425159de19fadf26dcf",
+      "sha256": "149536a8f003654d4037a36314d7a2450c97baac43208dee98e6c2f765cab12c",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,
@@ -62,7 +62,7 @@
     {
       "role": "stage-02-extract",
       "path": "docs/assets/pantheon/workflow/02-extract.png",
-      "sha256": "805ff42d618238ff6e5a5d2deb53f774a60f2b6653c625deec7c347ac3199f43",
+      "sha256": "d91ddbfe6b1008170556e037b628b4a173ad436ecf81b8a7c873736ce2a4eae4",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,
@@ -96,7 +96,7 @@
     {
       "role": "stage-03-case-map",
       "path": "docs/assets/pantheon/workflow/03-case-map.png",
-      "sha256": "1151ddfbffb793a202a7f6317fba287694db3cef3eaf15a88595d626b8008a60",
+      "sha256": "ed5888078e1548df7391714a9c09942ae51233412393155289ea8386e23c1f46",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,
@@ -130,7 +130,7 @@
     {
       "role": "stage-04-research",
       "path": "docs/assets/pantheon/workflow/04-research.png",
-      "sha256": "6df97313190b31a8a1a6096775ec7d426ac7896d8f6ccf39cf53b15fb5521288",
+      "sha256": "da8ab6880d0e62bb746b04d55010c8ff0e6ad9971b7111d6a7bfe6cacbb268da",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,
@@ -164,7 +164,7 @@
     {
       "role": "stage-05-council",
       "path": "docs/assets/pantheon/workflow/05-council.png",
-      "sha256": "1bbc03c19a40b5d3bab3e23a96d915cf9420eb2a60fb8ddd2e827f7407d6ddf3",
+      "sha256": "3b0a8fecd6ed6ef1c36abfc936e2527ce29359f28b986ed6fd91bf8af22c75b5",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,
@@ -198,7 +198,7 @@
     {
       "role": "stage-06-draft",
       "path": "docs/assets/pantheon/workflow/06-draft.png",
-      "sha256": "f32ce8fe2a27ab5e1fed1f809fba02f2d1190993fa5c0d89cc91aa4543c4b26f",
+      "sha256": "bc7a408b7ae5547c705a12c5ae756fb5d1a3be44d799c6f43fa5b2e75a6cdd5b",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,
@@ -232,7 +232,7 @@
     {
       "role": "stage-07-hearing",
       "path": "docs/assets/pantheon/workflow/07-hearing.png",
-      "sha256": "27504a5ef01562bc53663736358cea439bdf2d2f904bfbc2e0adbb354513ff0d",
+      "sha256": "bece217719e85e713440d52f67ed72f677caca82eb168db3f07f8e99bb3fb923",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,

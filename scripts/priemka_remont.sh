@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Приёмка ремонта конвейера — десять команд Части 8 файла локальный файл ремонта ФЕМИДЫ.
+# Приемка ремонта конвейера — десять команд Части 8 файла локальный файл ремонта ФЕМИДЫ.
 # Каждая секция — отдельная команда с ожидаемым кодом. Аргументы: номера секций
-# (по умолчанию все). Ненулевой код любой секции = приёмка красная.
+# (по умолчанию все). Ненулевой код любой секции = приемка красная.
 #
 #   bash scripts/priemka_remont.sh          # все десять
 #   bash scripts/priemka_remont.sh 2 3 4    # только гейты вердикта
 #
 # Правило: этот файл правят только руками владельца или оркестратора. Исполнитель
-# задачи, который меняет приёмку под свою работу, проваливает миссию — подделка
+# задачи, который меняет приемку под свою работу, проваливает миссию — подделка
 # видна в diff маркера helioz-gate.
 set -u
 cd "$(dirname "$0")/.." || exit 2
@@ -15,7 +15,7 @@ CASE_DIR="${THEMIS_CASE:-$(ls -d cases/*/*/ 2>/dev/null | head -1)}"
 FAILS=0
 STEND=""
 
-fixture() {  # $1 — каталог; кладёт draft.md с классической денежной формой
+fixture() {  # $1 — каталог; кладет draft.md с классической денежной формой
   mkdir -p "$1/_working"
   cat > "$1/draft.md" <<'ТЕКСТ'
 # Ответ на уведомление о повышении арендной платы
@@ -44,9 +44,9 @@ run_1() {
   sect 1 "Проводник существует и держит порядок фаз"
   expect 0 "проводник синтаксически жив" -- node --check .claude/workflows/themis-pipeline.js
   expect 0 "проводник тоньше 260 строк" -- test "$(wc -l < .claude/workflows/themis-pipeline.js)" -lt 260
-  expect 0 "проводник зовёт существующие приборы" -- bash -c 'grep -q "themis_status.py" .claude/workflows/themis-pipeline.js && grep -q "verdict.py" .claude/workflows/themis-pipeline.js && grep -q "document_guard.py" .claude/workflows/themis-pipeline.js && grep -q "quality_gate.py" .claude/workflows/themis-pipeline.js'
+  expect 0 "проводник зовет существующие приборы" -- bash -c 'grep -q "themis_status.py" .claude/workflows/themis-pipeline.js && grep -q "verdict.py" .claude/workflows/themis-pipeline.js && grep -q "document_guard.py" .claude/workflows/themis-pipeline.js && grep -q "quality_gate.py" .claude/workflows/themis-pipeline.js'
   expect 0 "проводник без TODO/placeholder" -- bash -c '! grep -qi "TODO\\|заглушка\\|placeholder" .claude/workflows/themis-pipeline.js'
-  expect 0 "рецензия ровно из трёх линз" -- bash -c 'test "$(grep -c "label: '\''lens:" .claude/workflows/themis-pipeline.js)" -eq 3'
+  expect 0 "рецензия ровно из трех линз" -- bash -c 'test "$(grep -c "label: '\''lens:" .claude/workflows/themis-pipeline.js)" -eq 3'
 }
 
 verdict_stend() {  # общий стенд для 2-4: первый раунд записан честно
@@ -95,7 +95,7 @@ run_6() {
 
 run_7() {
   sect 7 "Денежное правило починено"
-  expect 0 "селфтест прибора формата зелёный" -- python3 scripts/document_guard.py --selftest
+  expect 0 "селфтест прибора формата зеленый" -- python3 scripts/document_guard.py --selftest
 }
 
 run_8() {
@@ -111,7 +111,7 @@ run_8() {
      grep -q "прочитано с диска" "$status_log"; then
     echo "   ✓ статус печатает активных агентов, расход и источник (код $code)"
   else
-    echo "   ✗ статус не даёт управляемый результат"; FAILS=$((FAILS+1)); sed 's/^/     /' "$status_log" | head -8
+    echo "   ✗ статус не дает управляемый результат"; FAILS=$((FAILS+1)); sed 's/^/     /' "$status_log" | head -8
   fi
   rm -f "$status_log"
 }
@@ -126,7 +126,7 @@ run_9() {
   local cite_log
   cite_log="$(mktemp)"
   if python3 scripts/cite.py "ст. 123.20-3 ГК РФ" >"$cite_log" 2>&1; then
-    echo "   ✗ cite вернул зелёный по пропущенной статье"; FAILS=$((FAILS+1))
+    echo "   ✗ cite вернул зеленый по пропущенной статье"; FAILS=$((FAILS+1))
   elif grep -q "отсутствует в выгрузке" "$cite_log"; then
     echo "   ✓ cite называет пропущенную статью неполной выгрузкой"
   else
@@ -143,25 +143,25 @@ run_9() {
     echo "   ✗ --check упал без понятной причины неполной выгрузки"; FAILS=$((FAILS+1))
   fi
   rm -f "$check_log"
-  expect 0 "тип письма даёт ПРОСИМ и неизвестный тип отвергнут" -- python3 scripts/create_docx.py --selftest
+  expect 0 "тип письма дает ПРОСИМ и неизвестный тип отвергнут" -- python3 scripts/create_docx.py --selftest
   expect 0 "policy ловит переставленную колонку модели" -- python3 scripts/model_policy.py --selftest
 }
 
 run_10() {
-  sect 10 "Тест Мнемозины зелёный"
+  sect 10 "Тест Мнемозины зеленый"
   MNEMAZINE_HOME="${MNEMAZINE_HOME:-../mnemazine}"
   log=$(mktemp)
   if node "$MNEMAZINE_HOME/tests/test-coverage-fix.mjs" >"$log" 2>&1 && grep -q "11 passed" "$log"; then
     echo "   ✓ 11 passed"
-  else echo "   ✗ тест Мнемозины не даёт 11 passed"; FAILS=$((FAILS+1)); fi
+  else echo "   ✗ тест Мнемозины не дает 11 passed"; FAILS=$((FAILS+1)); fi
   rm -f "$log"
 }
 
-# перечень секций строится счётом, а не литералом: длинная цепочка цифр в исходнике
+# перечень секций строится счетом, а не литералом: длинная цепочка цифр в исходнике
 # срабатывает у сторожа персональных данных как номер документа (ложное совпадение)
 if [ $# -eq 0 ]; then set -- $(seq 1 10); fi
 for s in "$@"; do "run_$s"; done
 
 echo
-if [ "$FAILS" -eq 0 ]; then echo "ПРИЁМКА ЗЕЛЁНАЯ (секции: $*)"; exit 0; fi
-echo "ПРИЁМКА КРАСНАЯ: провалов $FAILS (секции: $*)"; exit 1
+if [ "$FAILS" -eq 0 ]; then echo "ПРИЕМКА ЗЕЛЕНАЯ (секции: $*)"; exit 0; fi
+echo "ПРИЕМКА КРАСНАЯ: провалов $FAILS (секции: $*)"; exit 1
