@@ -5,7 +5,7 @@
   "project": {
     "slug": "themis",
     "deity": "Themis",
-    "symbol": "scales and sword"
+    "symbol": "blindfold over the eyes, balanced scales and a lowered sword"
   },
   "visuals": {
     "style_anchor_sha256": "ce524f9d22cb0092cb17aa280832e1b2ab2a77a0e01602065ec502232a3bb2d2",
@@ -13,13 +13,15 @@
     "presentation": {
       "min_width": 1600,
       "aspect_ratio": "16:9",
-      "readme_width": "100%"
+      "readme_width": "100%",
+      "published_width": 1664,
+      "published_height": 936
     },
     "hero": {
       "source_path": "docs/assets/pantheon/hero-source.png",
       "source_sha256": "9fa6365e886c87ab15c621fedc6d04c9a5bf90aa44fcf9fd0de7610ac6001678",
       "published_path": "docs/assets/pantheon/hero.png",
-      "published_sha256": "9fa6365e886c87ab15c621fedc6d04c9a5bf90aa44fcf9fd0de7610ac6001678"
+      "published_sha256": "bcbd18c62ca55918bd4abf59cf25dec5ea692c6082f5ee1f15285921a1a3054d"
     },
     "emblem": {
       "source_path": "docs/assets/pantheon/emblem-source.png",

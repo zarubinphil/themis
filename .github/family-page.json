@@ -14,16 +14,16 @@
     "en": {
       "title": "Themis",
       "name": "Themis",
-      "tagline": "Themis works a Russian court case beside a lawyer: it reads the file, hunts case law, and checks its own documents.",
+      "tagline": "Themis takes the mechanics of a court case off your desk: it reads the file, hunts case law, and reviews its own documents.",
       "hero_alt": "Themis in white marble with scales and sword beside the classical column, legal documents and agent review cards laid out in daylight",
-      "what": "Themis is a multi-agent assistant for Russian litigation. It reads the case file on your computer, builds a case map, hunts case law for and against you, and drafts documents that another agent reviews. The thinking and the decisions stay with the lawyer.",
-      "why": "Too much of a good lawyer's time goes into mechanics: two hundred pages of scans, dates to reconcile, citations to verify, one detail buried in the file. Themis takes that work and leaves you the part that needs judgement.",
-      "advantage": "the numbers and the wording of the law are produced by code, not by a model.",
-      "better": "Interest under article 395, procedural deadlines, court fees, and amounts in words are calculated by programs. Statutes are quoted from the corpus on your disk, so a paraphrase cannot silently replace the text.",
-      "how": "A case moves through named stages. Each stage has its own agents, and a document never leaves without a second pair of eyes.",
-      "quick_intro": "You need a Mac for local scan recognition, Python 3.11 or newer, Xcode Command Line Tools, and Claude Code.",
+      "what": "Themis works next to a lawyer. It reads the file on your computer, builds a case map, hunts practice for you and against you, drafts a document and hands it to a different agent for review. The decisions stay with you, and that is the design, not a disclaimer at the end.",
+      "why": "A good lawyer's time does not go into law. Two hundred pages of scans. Reconciling dates. Checking citations. That one detail that was definitely somewhere in volume three. Themis takes that part whole and leaves you the part where thinking happens.",
+      "advantage": "the numbers and the text of the law come from a program, not from a model.",
+      "better": "Statutory interest, procedural deadlines, court fees and amounts in words are computed in code. Statutes are quoted from the corpus on your own disk, so a paraphrase cannot quietly replace the article.",
+      "how": "A case moves through stages. Each has its own agents, and no document leaves without a second pair of eyes.",
+      "quick_intro": "You need a Mac for scan recognition, Python 3.11 or newer, Xcode Command Line Tools, and Claude Code.",
       "quick_extra": "Prefer the plain installer? Run `bash install.sh` in the same folder; it installs dependencies after one confirmation but skips the interview about your practice. No Git? Take [the ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip). The local dashboard starts with `python3 cockpit/app.py` on port 8800. First time here? Open the project in Claude Code and run `/themis-setup`: the install goes as a conversation, one question at a time, and nothing is installed without your yes.",
-      "quick_result": "the setup asks about your practice one question at a time, downloads the codes you need first, and finishes by testing itself on a real document of yours.",
+      "quick_result": "the setup asks about your practice one question at a time, downloads the codes you need first, and ends by testing itself on a real document of yours.",
       "compare": [
         [
           "**Themis**",
@@ -68,8 +68,8 @@
         "A personal-data guard runs on every commit, and a separate guard refuses to erase case material.",
         "Document format is checked before filing, and assembly before review is refused."
       ],
-      "safety_tail": "Read [SECURITY.md](SECURITY.md) before putting real client material on a shared machine.",
-      "status": "Status: in active development, built for work under a lawyer's control. The main workflow runs in Claude Code.",
+      "safety_tail": "Before putting client material on a shared computer, read [SECURITY.md](SECURITY.md).",
+      "status": "Status: in development, built to work under a lawyer's control. The main path runs through Claude Code.",
       "limits": [
         "Local scan recognition depends on Apple Vision and works on macOS only. Text PDF, DOCX, and XLSX are read on other systems too.",
         "Case law search depends on an external source and is sometimes unavailable.",
@@ -77,23 +77,23 @@
         "Themis does not represent you, does not sign anything, and does not replace a lawyer's judgement.",
         "A clean install on Windows and Linux has not been verified yet."
       ],
-      "docs": "Deeper reading: [how it really works](docs/HOW-IT-WORKS.ru.md), in Russian and without advertising, and [the full reference](docs/DETAILS.md) with the agent roster and the setup interview.",
+      "docs": "Deeper: [how it really works](docs/HOW-IT-WORKS.ru.md), in Russian and without advertising, and [the full reference](docs/DETAILS.md) with the agent roster.",
       "license": "Themis Community Licence 1.0: free for an individual lawyer, including private practice. Organisations need a commercial licence. See [LICENSE](LICENSE) and [LICENSE.ru.md](LICENSE.ru.md).",
       "welcome": "Hello. I am a practising lawyer, and too much of my time went into mechanics: two hundred pages of scans, dates to reconcile, citations to check, one detail buried somewhere in the file.\n\nThemis takes that work and leaves me the part that needs judgement. She does not decide anything, and neither should she."
     },
     "ru": {
       "title": "Фемида",
       "name": "Фемида",
-      "tagline": "Фемида ведёт судебное дело рядом с юристом: читает материалы, ищет практику и проверяет собственные документы.",
+      "tagline": "Фемида берёт на себя механику судебного дела: читает материалы, ищет практику и проверяет собственные документы.",
       "hero_alt": "Фемида из белого мрамора с весами и мечом у классической колонны, документы дела и карточки проверки агентов в дневном свете",
-      "what": "Фемида это многоагентный помощник по российским судебным делам. Она читает материалы на вашем компьютере, строит карту дела, ищет практику за вас и против вас и готовит документы, которые проверяет другой агент. Мышление и решения остаются за юристом.",
-      "why": "Слишком много времени хорошего юриста уходит на механику: двести страниц сканов, сверка дат, проверка ссылок, одна деталь, зарытая в материалах. Фемида забирает эту работу и оставляет вам ту часть, где нужно суждение.",
-      "advantage": "цифры и текст закона выдаёт код, а не модель.",
-      "better": "Проценты по статье 395, процессуальные сроки, госпошлина и суммы прописью считаются программами. Нормы цитируются из корпуса на вашем диске, поэтому пересказ не подменит текст незаметно.",
-      "how": "Дело идёт по названным стадиям. У каждой свои агенты, и документ не выходит без вторых глаз.",
-      "quick_intro": "Нужны Mac для локального распознавания сканов, Python 3.11 или новее, Xcode Command Line Tools и Claude Code.",
+      "what": "Фемида работает рядом с юристом. Она читает материалы у вас на компьютере, собирает карту дела, ищет практику за вас и против вас, готовит документ и отдаёт его на проверку другому агенту. Решения остаются за вами, и это не оговорка в конце, а устройство.",
+      "why": "У хорошего юриста время уходит не на право. Двести страниц сканов. Сверка дат. Проверка ссылок. Та самая деталь, которая точно была где-то в третьем томе. Эту часть Фемида забирает целиком, а вам оставляет ту, где нужно думать.",
+      "advantage": "цифры и текст закона выдаёт программа, а не модель.",
+      "better": "Проценты по 395-й, процессуальные сроки, госпошлина и сумма прописью считаются кодом. Нормы цитируются из корпуса на вашем диске, поэтому пересказ не подменит текст статьи незаметно.",
+      "how": "Дело идёт по стадиям. У каждой свои агенты, и ни один документ не выходит без вторых глаз.",
+      "quick_intro": "Нужен Mac для распознавания сканов, Python 3.11 или новее, Xcode Command Line Tools и Claude Code.",
       "quick_extra": "Хотите обычный установщик? Запустите `bash install.sh` в той же папке: он ставит зависимости после одного подтверждения, но не проводит интервью о вашей практике. Нет Git? Возьмите [ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip). Локальная панель запускается командой `python3 cockpit/app.py` на порту 8800. Первый раз? Откройте проект в Claude Code и запустите `/themis-setup`: установка пройдёт разговором, по одному вопросу, и ничего не поставится без вашего «да».",
-      "quick_result": "установка спрашивает о вашей практике по одному вопросу, скачивает нужные вам кодексы первыми и в конце проверяет себя на вашем настоящем документе.",
+      "quick_result": "установка спрашивает о вашей практике по одному вопросу, первыми качает нужные вам кодексы и в конце проверяет себя на вашем настоящем документе.",
       "compare": [
         [
           "**Фемида**",
@@ -138,8 +138,8 @@
         "Сторож персональных данных проходит по каждому коммиту, а отдельный сторож не даёт стереть материалы дела.",
         "Формат документа проверяется перед подачей, а собрать документ раньше проверки нельзя."
       ],
-      "safety_tail": "Прочитайте [SECURITY.md](SECURITY.md), прежде чем класть настоящие материалы доверителя на общий компьютер.",
-      "status": "Статус: в активной разработке, рассчитана на работу под контролем юриста. Основной workflow идёт в Claude Code.",
+      "safety_tail": "Прежде чем класть материалы доверителя на общий компьютер, прочитайте [SECURITY.md](SECURITY.md).",
+      "status": "Статус: в разработке, рассчитана на работу под контролем юриста. Основной путь идёт через Claude Code.",
       "limits": [
         "Локальное распознавание сканов зависит от Apple Vision и работает только на macOS. Текстовые PDF, DOCX и XLSX читаются и на других системах.",
         "Поиск практики зависит от внешнего источника и иногда недоступен.",
@@ -147,23 +147,23 @@
         "Фемида не представляет ваши интересы, ничего не подписывает и не заменяет суждение юриста.",
         "Чистая установка на Windows и Linux пока не проверена."
       ],
-      "docs": "Глубже: [как я работаю на самом деле](docs/HOW-IT-WORKS.ru.md), без рекламы, и [полный разбор](docs/DETAILS.ru.md) с составом агентов и вопросами установки.",
+      "docs": "Глубже: [как я работаю на самом деле](docs/HOW-IT-WORKS.ru.md) без рекламы и [полный разбор](docs/DETAILS.ru.md) с составом агентов.",
       "license": "Themis Community Licence 1.0: частному юристу бесплатно, включая личную практику. Организации нужна коммерческая лицензия. Тексты в [LICENSE.ru.md](LICENSE.ru.md) и [LICENSE](LICENSE).",
       "welcome": "Привет. Я практикующий юрист, и слишком много моего времени уходило на механику: двести страниц сканов, сверка дат, проверка ссылок, одна деталь, зарытая где-то в материалах.\n\nФемида забирает эту работу и оставляет мне ту часть, где нужно суждение. Она ничего не решает, и не должна."
     },
     "zh": {
       "title": "Themis",
       "name": "Themis",
-      "tagline": "Themis 陪着律师办俄罗斯的诉讼案件：读卷宗、找判例、并且检查自己写出来的文书。",
+      "tagline": "忒弥斯把办案的机械活从你桌上拿走：读卷宗、找判例，还检查自己写的文书。",
       "hero_alt": "白色大理石的忒弥斯手持天平与放下的剑，站在古典石柱旁，案卷与审阅卡片摊在日光里",
-      "what": "Themis 是一套面向俄罗斯诉讼的多智能体助手。它在你的电脑上读卷宗，搭起案件地图，找出对你有利和不利的判例，起草文书，再由另一个智能体审阅。思考和决定仍然属于律师。",
-      "why": "一个好律师太多时间花在机械活上：两百页扫描件、核对日期、检查引用、为了一个细节把卷宗再翻一遍。这部分工作 Themis 拿走，把需要判断的那部分留给你。",
-      "advantage": "数字和法条原文由程序给出，而不是由模型给出。",
-      "better": "民法典第 395 条的利息、诉讼期限、国家规费和金额大写都由程序计算。法条从你磁盘上的法规库里逐字引用，转述不会悄悄替换原文。",
-      "how": "一个案件按命名好的阶段推进。每个阶段有自己的智能体，文书不经过第二双眼睛不会出门。",
-      "quick_intro": "你需要一台 Mac 来本地识别扫描件，Python 3.11 以上，Xcode 命令行工具，以及 Claude Code。",
+      "what": "忒弥斯在律师旁边干活。她在你的电脑上读材料，搭出案件地图，找对你有利和不利的判例，起草文书，再交给另一个智能体审阅。决定仍然归你，这是它的构造，不是结尾处的一句免责。",
+      "why": "好律师的时间并没有花在法律上。两百页扫描件。核对日期。检查引用。还有那个一定在第三卷某处的细节。这部分忒弥斯整块拿走，把需要思考的那部分留给你。",
+      "advantage": "数字和法条原文由程序给出，不是由模型给出。",
+      "better": "法定利息、诉讼期限、国家规费和金额大写都由代码计算。法条从你自己硬盘上的语料里逐字引用，所以转述不会悄悄换掉条文。",
+      "how": "案件按阶段推进。每个阶段有自己的智能体，任何文书都不会没经过第二双眼睛就出门。",
+      "quick_intro": "需要一台 Mac 来识别扫描件，还要 Python 3.11 以上、Xcode 命令行工具和 Claude Code。",
       "quick_extra": "更喜欢普通安装脚本？在同一个目录里执行 `bash install.sh`：它在一次确认之后安装依赖，但不会做关于你执业方向的访谈。没有 Git？拿 [ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip)。本地面板用 `python3 cockpit/app.py` 启动，端口 8800。 第一次用？在 Claude Code 里打开项目并运行 `/themis-setup`：安装以对话方式进行，一次问一个问题，没有你的同意不会装任何东西。",
-      "quick_result": "安装过程会一次一个问题地了解你的执业方向，先下载你最需要的法典，最后用你自己的一份真实文书来自检。",
+      "quick_result": "安装会一次一个问题地了解你的执业方向，先下你最需要的法典，最后用你自己的真实文书自检一遍。",
       "compare": [
         [
           "**Themis**",
@@ -208,8 +208,8 @@
         "每次提交都会跑个人数据守卫，另一个守卫不允许删除案件材料。",
         "提交之前会检查文书格式，并且不允许在审阅之前先把文书拼出来。"
       ],
-      "safety_tail": "把真实当事人材料放到共用电脑之前，请先读 [SECURITY.md](SECURITY.md)。",
-      "status": "状态：在积极开发中，按照“律师全程掌控”的方式设计。主要工作流在 Claude Code 里运行。",
+      "safety_tail": "把当事人材料放到共用电脑之前，请先读 [SECURITY.md](SECURITY.md)。",
+      "status": "状态：开发中，按照律师全程掌控来设计。主路径走 Claude Code。",
       "limits": [
         "本地扫描件识别依赖 Apple Vision，只在 macOS 上可用。文本 PDF、DOCX 和 XLSX 在其他系统上也能读。",
         "判例检索依赖外部来源，有时会不可用。",
@@ -217,7 +217,7 @@
         "Themis 不代表你出面，不签任何东西，也不代替律师的判断。",
         "Windows 和 Linux 上的干净安装还没有验证过。"
       ],
-      "docs": "想看得更深：[它到底怎么工作](docs/HOW-IT-WORKS.ru.md)（俄语，没有广告）和 [完整参考](docs/DETAILS.md)（智能体名单与安装访谈）。",
+      "docs": "想更深：[它到底怎么工作](docs/HOW-IT-WORKS.ru.md)（俄语，没有广告）和[完整参考](docs/DETAILS.md)（含智能体名单）。",
       "license": "Themis Community Licence 1.0：个人律师免费使用，包括个人执业；组织需要商业许可。见 [LICENSE](LICENSE) 与 [LICENSE.ru.md](LICENSE.ru.md)。",
       "welcome": "你好。我是执业律师，太多时间花在机械活上：两百页扫描件、核对日期、检查引用、在卷宗里找那一个细节。\n\n忒弥斯把这部分工作拿走，把需要判断的那部分留给我。她不做任何决定，也不该做。"
     }

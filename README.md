@@ -1,6 +1,6 @@
 # Themis
 
-Themis works a Russian court case beside a lawyer: it reads the file, hunts case law, and checks its own documents.
+Themis takes the mechanics of a court case off your desk: it reads the file, hunts case law, and reviews its own documents.
 
 [Русский](README.ru.md) · [中文](README.zh.md)
 
@@ -35,21 +35,21 @@ Themis works a Russian court case beside a lawyer: it reads the file, hunts case
 
 ## What This Is
 
-Themis is a multi-agent assistant for Russian litigation. It reads the case file on your computer, builds a case map, hunts case law for and against you, and drafts documents that another agent reviews. The thinking and the decisions stay with the lawyer.
+Themis works next to a lawyer. It reads the file on your computer, builds a case map, hunts practice for you and against you, drafts a document and hands it to a different agent for review. The decisions stay with you, and that is the design, not a disclaimer at the end.
 
 ## Why It Helps
 
-Too much of a good lawyer's time goes into mechanics: two hundred pages of scans, dates to reconcile, citations to verify, one detail buried in the file. Themis takes that work and leaves you the part that needs judgement.
+A good lawyer's time does not go into law. Two hundred pages of scans. Reconciling dates. Checking citations. That one detail that was definitely somewhere in volume three. Themis takes that part whole and leaves you the part where thinking happens.
 
 ## The Main Advantage
 
-**Main advantage:** the numbers and the wording of the law are produced by code, not by a model.
+**Main advantage:** the numbers and the text of the law come from a program, not from a model.
 
-**Why this is better:** Interest under article 395, procedural deadlines, court fees, and amounts in words are calculated by programs. Statutes are quoted from the corpus on your disk, so a paraphrase cannot silently replace the text.
+**Why this is better:** Statutory interest, procedural deadlines, court fees and amounts in words are computed in code. Statutes are quoted from the corpus on your own disk, so a paraphrase cannot quietly replace the article.
 
 ## How It Works
 
-A case moves through named stages. Each stage has its own agents, and a document never leaves without a second pair of eyes.
+A case moves through stages. Each has its own agents, and no document leaves without a second pair of eyes.
 
 <!-- workflow-diagram:start -->
 
@@ -137,7 +137,7 @@ Deadlines are calculated with the working calendar and a reference to the rule. 
 
 ## Quickstart
 
-You need a Mac for local scan recognition, Python 3.11 or newer, Xcode Command Line Tools, and Claude Code.
+You need a Mac for scan recognition, Python 3.11 or newer, Xcode Command Line Tools, and Claude Code.
 
 ```bash
 git clone https://github.com/zarubinvibe/themis.git
@@ -150,7 +150,7 @@ Prefer the plain installer? Run `bash install.sh` in the same folder; it install
 
 Never done this before? [The onboarding](docs/ONBOARDING.md) walks the whole first run step by step and says what you see after every command.
 
-**You get:** the setup asks about your practice one question at a time, downloads the codes you need first, and finishes by testing itself on a real document of yours.
+**You get:** the setup asks about your practice one question at a time, downloads the codes you need first, and ends by testing itself on a real document of yours.
 
 ## Simple Comparison
 
@@ -182,11 +182,11 @@ Never done this before? [The onboarding](docs/ONBOARDING.md) walks the whole fir
 - A personal-data guard runs on every commit, and a separate guard refuses to erase case material.
 - Document format is checked before filing, and assembly before review is refused.
 
-Read [SECURITY.md](SECURITY.md) before putting real client material on a shared machine.
+Before putting client material on a shared computer, read [SECURITY.md](SECURITY.md).
 
 ## Limits
 
-Status: in active development, built for work under a lawyer's control. The main workflow runs in Claude Code.
+Status: in development, built to work under a lawyer's control. The main path runs through Claude Code.
 
 - Local scan recognition depends on Apple Vision and works on macOS only. Text PDF, DOCX, and XLSX are read on other systems too.
 - Case law search depends on an external source and is sometimes unavailable.
@@ -194,7 +194,7 @@ Status: in active development, built for work under a lawyer's control. The main
 - Themis does not represent you, does not sign anything, and does not replace a lawyer's judgement.
 - A clean install on Windows and Linux has not been verified yet.
 
-Deeper reading: [how it really works](docs/HOW-IT-WORKS.ru.md), in Russian and without advertising, and [the full reference](docs/DETAILS.md) with the agent roster and the setup interview.
+Deeper: [how it really works](docs/HOW-IT-WORKS.ru.md), in Russian and without advertising, and [the full reference](docs/DETAILS.md) with the agent roster.
 
 ## Star And Contribute
 

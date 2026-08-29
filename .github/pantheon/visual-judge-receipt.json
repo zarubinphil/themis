@@ -28,7 +28,7 @@
     {
       "role": "hero",
       "path": "docs/assets/pantheon/hero.png",
-      "sha256": "9fa6365e886c87ab15c621fedc6d04c9a5bf90aa44fcf9fd0de7610ac6001678",
+      "sha256": "bcbd18c62ca55918bd4abf59cf25dec5ea692c6082f5ee1f15285921a1a3054d",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,
