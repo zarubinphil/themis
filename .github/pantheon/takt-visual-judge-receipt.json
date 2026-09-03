@@ -2,7 +2,7 @@
   "schema_version": 1,
   "kind": "pantheon-visual-judge",
   "receipt_id": "pantheon-takt-judge-themiz-2026-09-03",
-  "checked_at": "2026-09-03T11:53:48Z",
+  "checked_at": "2026-09-03T13:27:22Z",
   "runtime": "claude",
   "tool": "read_image",
   "route_id": "claude:read_image:frontier",
@@ -28,7 +28,7 @@
     {
       "role": "takt-en",
       "path": "docs/assets/pantheon/takt-en.png",
-      "sha256": "ae99ee0c5a3bd32460a90fa99bb74f6547b6f5f1145d0ee5ae06610bff119d7b",
+      "sha256": "618048c9aa11d8eb1d8c76461918eb610818da223bac40d9722e2001406a7f22",
       "checks": {
         "column-present": 5,
         "ivory-light": 5,
@@ -44,7 +44,7 @@
     {
       "role": "takt-ru",
       "path": "docs/assets/pantheon/takt-ru.png",
-      "sha256": "7f9ffffd4e2de503bc0b676e3fc883593e35aa791e23a86603fb89e2ede70425",
+      "sha256": "7b0854397a97e79f26a20512b8a48fd82ee3044c54ccf9943606835c332a1c39",
       "checks": {
         "column-present": 5,
         "ivory-light": 5,
@@ -60,7 +60,7 @@
     {
       "role": "takt-zh",
       "path": "docs/assets/pantheon/takt-zh.png",
-      "sha256": "fd30b27559b7cd988864e92ce9af8d95df7cbb26b32b2a19d56ecba3d3808dde",
+      "sha256": "18c3d82e58eb25d5007712112f2b76e1719f32ec0c4278c22d924c17febdfe96",
       "checks": {
         "column-present": 5,
         "ivory-light": 5,

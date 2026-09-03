@@ -10,9 +10,11 @@ Themiz takes the mechanics of a court case off your desk: it reads the file, hun
 
 <!-- owner-welcome:start -->
 
-> Hello. I am a practising lawyer, and too much of my time went into mechanics: two hundred pages of scans, dates to reconcile, citations to check, one detail buried somewhere in the file.
+> Hello. I am Fil.
 >
-> Themiz takes that work and leaves me the part that needs judgement. She does not decide anything, and neither should she.
+> I built Themiz for myself: I was tired of losing evenings to the mechanical part of a case — two hundred pages of scans, dates to reconcile, citations to check. If it turns out to be useful to you too, I am glad.
+>
+> Please try it. If something breaks, open an issue — I read them. If you like it, star the repository and tell a colleague who still does all of this by hand. And take a look at the other Olympuz projects: https://zarubinvibe.com
 >
 > — Filipp Zarubin
 
@@ -132,11 +134,26 @@ You need a Mac for scan recognition, Python 3.11 or newer, Xcode Command Line To
 ```bash
 git clone https://github.com/zarubinvibe/themiz.git
 cd themiz
-claude
-# inside Claude Code run: /themiz-setup
+bash install.sh
+
+# дальше открывайте, чем привычнее:
+claude                  # Claude Code
+codex                   # Codex CLI
+code .                  # VS Code: агент открывается внутри редактора
+python3 cockpit/app.py   # только панель в браузере, без агента
 ```
 
-Prefer the plain installer? Run `bash install.sh` in the same folder; it installs dependencies after one confirmation but skips the interview about your practice. No Git? Take [the ZIP](https://github.com/zarubinvibe/themiz/archive/refs/heads/main.zip). The local dashboard starts with `python3 cockpit/app.py` on port 8800. First time here? Open the project in Claude Code and run `/themiz-setup`: the install goes as a conversation, one question at a time, and nothing is installed without your yes.
+The three lines above are the whole install. `bash install.sh` sets everything up and asks before it installs anything. It needs no agent at all: a plain terminal is enough.
+
+**Claude Code.** Run `claude` in the folder and say `/themiz-setup`. The setup goes as a conversation, one question at a time.
+
+**Codex CLI.** Run `codex` in the same folder. The same agents and the same rules are already inside the project.
+
+**VS Code or Cursor.** Open the folder with `code .` and start your agent inside the editor.
+
+**No agent at all.** `python3 cockpit/app.py` opens the local dashboard at `http://127.0.0.1:8800`, where you can read a case, follow deadlines and collect a document by hand.
+
+No Git? Take [the ZIP](https://github.com/zarubinvibe/themiz/archive/refs/heads/main.zip) and unpack it. The install is the same.
 
 Never done this before? [The onboarding](docs/ONBOARDING.md) walks the whole first run step by step and says what you see after every command.
 

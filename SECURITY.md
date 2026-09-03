@@ -1,31 +1,60 @@
-# Security policy
+# Security
 
-Themiz works with real case material: scans, client documents, deadlines, and drafts. The repository holds the agent prompts, the calculators, the guards, and the workflow. Your machine holds the case files.
+[Русский](SECURITY.ru.md) · [中文](SECURITY.zh.md)
 
-## Trust boundary
+<p align="center"><img src="docs/assets/pantheon/security.png" alt="The closed gold client folder under Themis's flat hand on the marble table, with the blue thread of outside sources stopping at the table edge and going no further" width="100%"></p>
 
-- Reading, recognition, and the mechanical calculators run locally. Client folders are blocked from publication at the repository level.
-- Case law search sends a depersonalised query to an external source. The case file itself is never sent.
-- A cloud check of a single page is allowed only when local recognition returns nothing, or when a critical detail has to be confirmed. There is no silent switch to the cloud.
-- Telegram reminders go through your own bot and carry dates and a completion word. No names, case numbers, or amounts.
-- Agent output is untrusted model output, including case maps, found practice, and draft documents. A lawyer decides.
-- Themiz does not implement a sandbox. File access, shell commands, and network access are governed by the agent runtime you start it in.
+Themiz works with a live case: scans, client documents, deadlines, drafts.
+This page is about one thing — what stays with you, what leaves your computer,
+and what to do if something goes wrong. No technical words.
 
-Keep client material on an encrypted disk, run Themiz under an account only you use, and review `git status` before any commit in a case repository.
+## What stays on your computer
 
-## Personal data
+Case material goes nowhere. Reading scans, counting deadlines and fees, assembling
+the document — all of it happens on your machine. Case folders are blocked from
+publication by the repository itself: they cannot end up in a public copy even if
+someone tries.
 
-- A personal-data guard runs on every commit and blocks names, addresses, and identifiers from leaving the working tree.
-- A separate guard refuses to erase case material.
-- Never commit client documents, exports, or recognition caches to a public repository.
-- Anything you paste into an issue or a discussion is public. Redact it first.
+## What leaves, and in what form
 
-## Supported versions
+- **Case-law search.** What leaves is a depersonalised question: the rule of law,
+  the category of dispute, the region. No names, no case number, no amounts. The
+  case file is not sent.
+- **Cloud reading of a single page.** Only when local recognition returned nothing,
+  or when one disputed detail has to be confirmed. The system never slips into the
+  cloud quietly — you see it happen.
+- **Telegram reminders.** Through your own bot, carrying only dates, a count and
+  the word "done". No names, no case numbers, no amounts.
 
-Security fixes target the current `main` branch. There is no tagged stable release line yet.
+## What the system does not decide for you
 
-## Reporting a vulnerability
+Themiz does not decide. The case map, the practice it found, the finished draft —
+that is an assistant's work, not a court's conclusion. The lawyer decides, and that
+is how the system is built, not a disclaimer in small print.
 
-Do not publish exploit details, and never attach real client material to a report. If the repository Security tab offers private vulnerability reporting, use it. Otherwise open a minimal issue asking the maintainer for a private contact channel, and keep the sensitive part out until that channel exists.
+One more thing: Themiz does not build an isolated room around itself. Its access to
+files, commands and the network is exactly the access of the program you started it in.
 
-Include the affected revision, the operating system, the reproduction steps on synthetic data, the impact, and any mitigation you tested.
+## How to keep this in order
+
+- Keep case material on an encrypted disk.
+- Run Themiz under an account only you use.
+- Before every save into a case repository, look at what is actually being saved.
+- A personal-data guard checks every save by itself and will not let a name, an
+  address or a document number through. A second guard refuses to erase case material.
+- Anything you paste into a public discussion on GitHub becomes public. Take the
+  personal details out before you send it.
+
+## If you find a vulnerability
+
+Do not publish how to use it, and never attach real case material. If the Security
+tab of the repository offers a private report form, write there. If it does not,
+open a short issue asking for a private channel and keep the details until that
+channel exists.
+
+Useful to include: the version, the operating system, what you did step by step on
+made-up data, what it threatens, and anything you already tried as a fix.
+
+## Which versions we fix
+
+Fixes land on the current `main` branch. There is no separate stable release line yet.

@@ -5,16 +5,37 @@ Pass these references to EVERY generation, in this order:
 2. $HOME/.agents/skills/public-repo-release-gate/assets/pantheon-column.png
 3. docs/assets/pantheon/bible-character.png
 4. docs/assets/pantheon/bible-props.png
+5. docs/assets/pantheon/bible-jurists.png
 
-References 3 and 4 are the project bible and they are binding. The figure in every
-frame is the same person as on the character sheet: same face, same braided crown with
-one braid over the left shoulder, same blindfold, same chiton and mantle, gold scales
-carried level, and a sword with a WHITE MARBLE blade and muted gold fittings, always
-lowered. Every recurring object is the object from the prop sheet: the same flat gold
-client folder, the same blank sheet, the same blank marble plaque, the same blue thread
-with its arrowhead, the same frosted glass plate, the same marble seat. Do not invent a
-new hairstyle, a new sword material or a new folder shape in any frame. Hands are
-anatomically correct: exactly five fingers, one readable thumb, nothing fused.
+References 3, 4 and 5 are the project bible and they are binding.
+
+Figure. Themis is the same person as on the character sheet: same face, same braided
+crown with one braid over the left shoulder, same chiton and mantle carved with deep
+folds, and the same monumental sculptural presence — a large finely carved figure, never
+a small smooth figurine. The blindfold is a wide band that covers BOTH EYES COMPLETELY,
+with no gap above or below it and no eye, eyelid or eyelash visible anywhere: that is the
+meaning of the character, and a visible eye fails the frame.
+
+Objects. Every recurring object is the object from the prop sheet: the same THIN flat
+matte-gold client folder with no spine and no leather grain, the same blank sheet, the
+same blank marble plaque, the same blue thread with its arrowhead, the same frosted glass
+plate, the same monumental carved marble seat with a moulded plinth. Do not invent a new
+hairstyle, a new sword material, a thicker folder or a smoother chair.
+
+Physics. Nothing floats and nothing balances on a point. The scales are HELD: her hand
+closes around the ring above the beam and both chains hang straight down. The sword has a
+white marble blade and muted gold fittings, is always lowered, and is always supported —
+carried in a closed hand or leaning with its blade against a solid surface, never standing
+upright on its tip. Everything that lies on a surface touches it and casts its own shadow.
+
+Colour carries meaning in EVERY frame, and the meaning never fades out. Muted gold
+#C9A87A is the client's own material: their folder, their finished document, their
+signature. Sky blue #B8D6EA is what comes from outside: the practice found in the world,
+the flow of public sources. A frame that shows the lawyer's own material must keep a warm
+gold presence, and a frame that shows material arriving from outside must keep the blue
+one. Neither colour is decoration, and neither may quietly disappear into ivory.
+
+Hands are anatomically correct: exactly five fingers, one readable thumb, nothing fused.
 
 Hard constraints for every frame:
 - Same world, same figure, same camera height and lens as the hero. The classical white marble column appears in every frame.
@@ -44,7 +65,7 @@ docs/assets/pantheon/workflow/04-research.png
 Two marble shelves face each other. From the left shelf blue-lit plates fly toward Themis, from the right shelf equally sharp plates fly against her; her scales hang between the two streams, level. She holds the sword lowered.
 
 docs/assets/pantheon/workflow/05-council.png
-Five marble seats in a semicircle, each with its own small glass plate, all turned toward one central plate that is being taken apart into pieces and reassembled in the air above them. Themis stands outside the circle and listens.
+Five monumental marble seats in a semicircle, and the five jurists from the jurists sheet SIT on them, one man to a seat, each recognizable by his own features — the slender man with the narrow moustache, the bald man with the short beard, the broad man with the long sweeping moustache, the man with the dark pointed beard, and the older man with round spectacles. They are carved in the same white marble as Themis and wear classical drapery. Each holds his own small glass plate and looks toward one central plate that is being taken apart into pieces and reassembled in the air above the circle. Blue light lives in the plates, because the practice under discussion came from outside; the client's gold folder rests closed on a low marble stand within the circle. Themis stands outside the circle and listens, her scales held level and her sword lowered in her hand.
 
 docs/assets/pantheon/workflow/06-draft.png
 Two separated marble desks: on the first a blank document is written by a thin gold stylus; on the second a different figure inspects the finished sheet through clear glass, with the first desk hidden behind a low marble screen. A small closed lock of gold stands on the second desk.

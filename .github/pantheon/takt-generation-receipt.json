@@ -12,9 +12,9 @@
   },
   "quality": "highest",
   "generation_id": "pantheon-takt-themiz-2026-09-03",
-  "generated_at": "2026-09-03T11:53:48Z",
+  "generated_at": "2026-09-03T13:27:22Z",
   "capability_snapshot": {
-    "checked_at": "2026-09-03T11:53:48Z",
+    "checked_at": "2026-09-03T13:27:22Z",
     "routes": [
       {
         "id": "codex:image_gen:managed-frontier",
@@ -42,42 +42,34 @@
     {
       "role": "column-reference",
       "sha256": "9d32edd56ac55c4dd6d0425a28a2ac35035e9ab09073fc8ce0c1414b2edfb1bd"
-    },
-    {
-      "role": "character-sheet",
-      "sha256": "3a3c7a4b0ce052e05ee5581ce083e8663e3a491b23f13fef45dae8184354ac5b"
-    },
-    {
-      "role": "prop-sheet",
-      "sha256": "933311c8799a9acfbf918a196f8e8d4dd0968f6acc5bd7f97d0330ef686323ab"
     }
   ],
   "outputs": [
     {
       "role": "takt-source",
       "path": "docs/assets/pantheon/takt-source.png",
-      "sha256": "91468e08b0589bf0b512d14ac9e358cca3ade6aa7e31538607524761359d2bfb"
+      "sha256": "9fadf5f5852a23ca9929b3bdcc90eed76e16c0df9320194a2e9df30ce90f24bf"
     },
     {
       "role": "takt-en",
       "path": "docs/assets/pantheon/takt-en.png",
-      "sha256": "ae99ee0c5a3bd32460a90fa99bb74f6547b6f5f1145d0ee5ae06610bff119d7b"
+      "sha256": "618048c9aa11d8eb1d8c76461918eb610818da223bac40d9722e2001406a7f22"
     },
     {
       "role": "takt-ru",
       "path": "docs/assets/pantheon/takt-ru.png",
-      "sha256": "7f9ffffd4e2de503bc0b676e3fc883593e35aa791e23a86603fb89e2ede70425"
+      "sha256": "7b0854397a97e79f26a20512b8a48fd82ee3044c54ccf9943606835c332a1c39"
     },
     {
       "role": "takt-zh",
       "path": "docs/assets/pantheon/takt-zh.png",
-      "sha256": "fd30b27559b7cd988864e92ce9af8d95df7cbb26b32b2a19d56ecba3d3808dde"
+      "sha256": "18c3d82e58eb25d5007712112f2b76e1719f32ec0c4278c22d924c17febdfe96"
     }
   ],
   "label_layer": {
     "note": "кадр рожден с пустыми мраморными плитами; подписи поставлены детерминированно из visuals.stages, поэтому текст совпадает с манифестом посимвольно на каждом языке",
     "geometry": ".github/pantheon/takt-plity.json",
-    "geometry_sha256": "7d3279669e043ca1441c40c60e1272782125bd37897f92479de35dce62c04d9e",
+    "geometry_sha256": "6aac8a173bbbb7679b420aa89e84bc2762de4235fd74a7a0a2e6513b5b80030c",
     "font_en": "assets/fonts/PT_Serif-Web-Bold.ttf",
     "font_ru": "assets/fonts/PT_Serif-Web-Bold.ttf",
     "font_zh": "Songti SC",

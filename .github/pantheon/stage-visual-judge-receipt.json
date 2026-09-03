@@ -2,7 +2,7 @@
   "schema_version": 1,
   "kind": "pantheon-visual-judge",
   "receipt_id": "pantheon-stage-judge-themis-2026-08-29",
-  "checked_at": "2026-09-03T11:45:14Z",
+  "checked_at": "2026-09-03T12:39:11Z",
   "runtime": "claude",
   "tool": "read_image",
   "route_id": "claude:read_image:frontier",
@@ -28,7 +28,7 @@
     {
       "role": "stage-01-intake",
       "path": "docs/assets/pantheon/workflow/01-intake.png",
-      "sha256": "5120fb1f02781fc1fc95200f0512e09b451dddddb3f15dd9e6b23027afcf8899",
+      "sha256": "ff1777db05564719d37e6464c5582d66d225ccc7b916d8206bdff6da2a1875ab",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,
@@ -63,7 +63,7 @@
     {
       "role": "stage-02-extract",
       "path": "docs/assets/pantheon/workflow/02-extract.png",
-      "sha256": "034b2c8222c4457340561f15fdb129a2f41df29babe566bda30ccae164e05ed7",
+      "sha256": "f1e6b2e75b7713da03a8c0c64a792bf6e236b442b166588c391241e3ec748272",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,
@@ -98,7 +98,7 @@
     {
       "role": "stage-03-case-map",
       "path": "docs/assets/pantheon/workflow/03-case-map.png",
-      "sha256": "4f962a3ebf55c58437efaaba38bf6be10e5d1f64978fb2d242f1f8d8d3e4982e",
+      "sha256": "2635050dae59cc455b41c5ff5cf348ffcb71a45249017aee52dd59fc2a2a297a",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,
@@ -133,7 +133,7 @@
     {
       "role": "stage-04-research",
       "path": "docs/assets/pantheon/workflow/04-research.png",
-      "sha256": "8966a092c10df9247ebff2bc952c657f87b5a8e366cd5e75ee7432bf6fbb767c",
+      "sha256": "3b83d70abc605db7770c7801c89223ae9bec5e2a1d60c99699b5b7b60eb4909b",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,
@@ -168,7 +168,7 @@
     {
       "role": "stage-05-council",
       "path": "docs/assets/pantheon/workflow/05-council.png",
-      "sha256": "868203858c6f95ed135b85415be1e3f4408ff4585170746a7bafbe34ffa455a2",
+      "sha256": "ad26a563ee71828d4253c97a9d0134dd925a1c311fcd014bb3d923ad35260168",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,
@@ -203,7 +203,7 @@
     {
       "role": "stage-06-draft",
       "path": "docs/assets/pantheon/workflow/06-draft.png",
-      "sha256": "a3002bb8c2851511eb416d261d2640529168d1691075c56443adb7567ee8b1dd",
+      "sha256": "716055bf24311213cd189d224c7fbe2236071ffe185216e7bc599367df425e2e",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,
@@ -238,7 +238,7 @@
     {
       "role": "stage-07-hearing",
       "path": "docs/assets/pantheon/workflow/07-hearing.png",
-      "sha256": "9e8024380c2b603bd224c312922e1e07b280b1ddcf65a35e6b4f36fd5609fc5e",
+      "sha256": "fc5535394c24e9d61ca834e12f4c4af6c3673fd53e48217f2405bd0c5090e87b",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,
@@ -289,6 +289,19 @@
         "stage-07-hearing"
       ],
       "at": "2026-09-03T11:45:14Z",
+      "note": "серия приведена к своду проекта; прежние кадры расходились между собой по прическе, материалу меча и форме папки"
+    },
+    {
+      "roles": [
+        "stage-01-intake",
+        "stage-02-extract",
+        "stage-03-case-map",
+        "stage-04-research",
+        "stage-05-council",
+        "stage-06-draft",
+        "stage-07-hearing"
+      ],
+      "at": "2026-09-03T12:39:11Z",
       "note": "серия приведена к своду проекта; прежние кадры расходились между собой по прическе, материалу меча и форме папки"
     }
   ]

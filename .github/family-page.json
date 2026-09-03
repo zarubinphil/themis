@@ -9,7 +9,7 @@
     "ru",
     "zh"
   ],
-  "quick_code": "git clone https://github.com/zarubinvibe/themiz.git\ncd themiz\nclaude\n# inside Claude Code run: /themiz-setup",
+  "quick_code": "git clone https://github.com/zarubinvibe/themiz.git\ncd themiz\nbash install.sh\n\n# дальше открывайте, чем привычнее:\nclaude                  # Claude Code\ncodex                   # Codex CLI\ncode .                  # VS Code: агент открывается внутри редактора\npython3 cockpit/app.py   # только панель в браузере, без агента",
   "text": {
     "en": {
       "title": "Themiz",
@@ -22,7 +22,7 @@
       "better": "Statutory interest, procedural deadlines, court fees and amounts in words are computed in code. Statutes are quoted from the corpus on your own disk, so a paraphrase cannot quietly replace the article.",
       "how": "A case moves through stages. Each has its own agents, and no document leaves without a second pair of eyes.",
       "quick_intro": "You need a Mac for scan recognition, Python 3.11 or newer, Xcode Command Line Tools, and Claude Code.",
-      "quick_extra": "Prefer the plain installer? Run `bash install.sh` in the same folder; it installs dependencies after one confirmation but skips the interview about your practice. No Git? Take [the ZIP](https://github.com/zarubinvibe/themiz/archive/refs/heads/main.zip). The local dashboard starts with `python3 cockpit/app.py` on port 8800. First time here? Open the project in Claude Code and run `/themiz-setup`: the install goes as a conversation, one question at a time, and nothing is installed without your yes.",
+      "quick_extra": "The three lines above are the whole install. `bash install.sh` sets everything up and asks before it installs anything. It needs no agent at all: a plain terminal is enough.\n\n**Claude Code.** Run `claude` in the folder and say `/themiz-setup`. The setup goes as a conversation, one question at a time.\n\n**Codex CLI.** Run `codex` in the same folder. The same agents and the same rules are already inside the project.\n\n**VS Code or Cursor.** Open the folder with `code .` and start your agent inside the editor.\n\n**No agent at all.** `python3 cockpit/app.py` opens the local dashboard at `http://127.0.0.1:8800`, where you can read a case, follow deadlines and collect a document by hand.\n\nNo Git? Take [the ZIP](https://github.com/zarubinvibe/themiz/archive/refs/heads/main.zip) and unpack it. The install is the same.",
       "quick_result": "the setup asks about your practice one question at a time, downloads the codes you need first, and ends by testing itself on a real document of yours.",
       "compare": [
         [
@@ -125,7 +125,7 @@
       ],
       "docs": "Deeper: [how it really works](docs/HOW-IT-WORKS.ru.md), in Russian and without advertising, and [the full reference](docs/DETAILS.md) with the agent roster.",
       "license": "Themiz Community Licence 1.0: free for an individual lawyer, including private practice. Organisations need a commercial licence. See [LICENSE](LICENSE) and [LICENSE.ru.md](LICENSE.ru.md).",
-      "welcome": "Hello. I am a practising lawyer, and too much of my time went into mechanics: two hundred pages of scans, dates to reconcile, citations to check, one detail buried somewhere in the file.\n\nThemiz takes that work and leaves me the part that needs judgement. She does not decide anything, and neither should she.",
+      "welcome": "Hello. I am Fil.\n\nI built Themiz for myself: I was tired of losing evenings to the mechanical part of a case — two hundred pages of scans, dates to reconcile, citations to check. If it turns out to be useful to you too, I am glad.\n\nPlease try it. If something breaks, open an issue — I read them. If you like it, star the repository and tell a colleague who still does all of this by hand. And take a look at the other Olympuz projects: https://zarubinvibe.com",
       "compare_header": [
         "Option",
         "What it is",
@@ -149,7 +149,7 @@
       "better": "Проценты по 395-й, процессуальные сроки, госпошлина и сумма прописью считаются кодом. Нормы цитируются из корпуса на вашем диске, поэтому пересказ не подменит текст статьи незаметно.",
       "how": "Дело идет по стадиям. У каждой свои агенты, и ни один документ не выходит без вторых глаз.",
       "quick_intro": "Нужен Mac для распознавания сканов, Python 3.11 или новее, Xcode Command Line Tools и Claude Code.",
-      "quick_extra": "Хотите обычный установщик? Запустите `bash install.sh` в той же папке: он ставит зависимости после одного подтверждения, но не проводит интервью о вашей практике. Нет Git? Возьмите [ZIP](https://github.com/zarubinvibe/themiz/archive/refs/heads/main.zip). Локальная панель запускается командой `python3 cockpit/app.py` на порту 8800. Первый раз? Откройте проект в Claude Code и запустите `/themiz-setup`: установка пройдет разговором, по одному вопросу, и ничего не поставится без вашего «да».",
+      "quick_extra": "Три строки выше — это вся установка. `bash install.sh` ставит все сам и спрашивает разрешение перед каждым шагом. Никакой агент ему не нужен: хватает обычного терминала.\n\n**Claude Code.** Запустите `claude` в этой папке и скажите `/themiz-setup`. Установка пройдет разговором, по одному вопросу.\n\n**Codex CLI.** Запустите `codex` в той же папке. Те же агенты и те же правила уже лежат внутри проекта.\n\n**VS Code или Cursor.** Откройте папку командой `code .` и запустите своего агента прямо в редакторе.\n\n**Совсем без агента.** `python3 cockpit/app.py` откроет локальную панель на `http://127.0.0.1:8800`: там можно читать дело, следить за сроками и собирать документ руками.\n\nНет Git? Возьмите [ZIP](https://github.com/zarubinvibe/themiz/archive/refs/heads/main.zip) и распакуйте. Установка та же.",
       "quick_result": "установка спрашивает о вашей практике по одному вопросу, первыми качает нужные вам кодексы и в конце проверяет себя на вашем настоящем документе.",
       "compare": [
         [
@@ -252,7 +252,7 @@
       ],
       "docs": "Глубже: [как я работаю на самом деле](docs/HOW-IT-WORKS.ru.md) без рекламы и [полный разбор](docs/DETAILS.ru.md) с составом агентов.",
       "license": "Themiz Community Licence 1.0: частному юристу бесплатно, включая личную практику. Организации нужна коммерческая лицензия. Тексты в [LICENSE.ru.md](LICENSE.ru.md) и [LICENSE](LICENSE).",
-      "welcome": "Привет. Я практикующий юрист, и слишком много моего времени уходило на механику: двести страниц сканов, сверка дат, проверка ссылок, одна деталь, зарытая где-то в материалах.\n\nФемида забирает эту работу и оставляет мне ту часть, где нужно суждение. Она ничего не решает, и не должна.",
+      "welcome": "Привет. Я Фил.\n\nЯ сделал Фемиду для себя: надоело терять вечера на механику дела — двести страниц сканов, сверка дат, проверка ссылок. Если она пригодится и вам, я буду рад.\n\nПопробуйте. Что-то сломается — напишите в Issues, я их читаю. Понравится — поставьте звезду и расскажите знакомому юристу, который до сих пор делает это руками. И загляните в остальные проекты Олимпуса: https://zarubinvibe.ru",
       "compare_header": [
         "Вариант",
         "Что это",
@@ -276,7 +276,7 @@
       "better": "法定利息、诉讼期限、国家规费和金额大写都由代码计算。法条从你自己硬盘上的语料里逐字引用，所以转述不会悄悄换掉条文。",
       "how": "案件按阶段推进。每个阶段有自己的智能体，任何文书都不会没经过第二双眼睛就出门。",
       "quick_intro": "需要一台 Mac 来识别扫描件，还要 Python 3.11 以上、Xcode 命令行工具和 Claude Code。",
-      "quick_extra": "更喜欢普通安装脚本？在同一个目录里执行 `bash install.sh`：它在一次确认之后安装依赖，但不会做关于你执业方向的访谈。没有 Git？拿 [ZIP](https://github.com/zarubinvibe/themiz/archive/refs/heads/main.zip)。本地面板用 `python3 cockpit/app.py` 启动，端口 8800。 第一次用？在 Claude Code 里打开项目并运行 `/themiz-setup`：安装以对话方式进行，一次问一个问题，没有你的同意不会装任何东西。",
+      "quick_extra": "上面三行就是全部安装。`bash install.sh` 会把一切装好，并且在装任何东西之前先征求同意。它完全不需要智能体，一个普通终端就够了。\n\n**Claude Code。** 在该目录运行 `claude`，再说 `/themiz-setup`。安装会以对话方式进行，一次问一个问题。\n\n**Codex CLI。** 在同一个目录运行 `codex`。同样的智能体和同样的规则已经在项目里了。\n\n**VS Code 或 Cursor。** 用 `code .` 打开目录，在编辑器里启动你的智能体。\n\n**完全不用智能体。** `python3 cockpit/app.py` 会在 `http://127.0.0.1:8800` 打开本地面板，你可以在那里读案卷、盯期限、手工生成文书。\n\n没有 Git？拿 [ZIP](https://github.com/zarubinvibe/themiz/archive/refs/heads/main.zip) 解压即可。安装步骤一样。",
       "quick_result": "安装会一次一个问题地了解你的执业方向，先下你最需要的法典，最后用你自己的真实文书自检一遍。",
       "compare": [
         [
@@ -379,7 +379,7 @@
       ],
       "docs": "想更深：[它到底怎么工作](docs/HOW-IT-WORKS.ru.md)（俄语，没有广告）和[完整参考](docs/DETAILS.md)（含智能体名单）。",
       "license": "Themiz Community Licence 1.0：个人律师免费使用，包括个人执业；组织需要商业许可。见 [LICENSE](LICENSE) 与 [LICENSE.ru.md](LICENSE.ru.md)。",
-      "welcome": "你好。我是执业律师，太多时间花在机械活上：两百页扫描件、核对日期、检查引用、在卷宗里找那一个细节。\n\n忒弥斯把这部分工作拿走，把需要判断的那部分留给我。她不做任何决定，也不该做。",
+      "welcome": "你好，我是 Fil。\n\n我做忒弥斯是给自己用的：我厌倦了把晚上耗在案件的机械部分——两百页扫描件、核对日期、检查引用。如果它对你也有用，我很高兴。\n\n请试一试。有什么坏了，就开一个 issue，我会看。如果喜欢，请给仓库点个星，并告诉那位还在用手做这一切的同行。也欢迎看看 Olympuz 的其他项目：https://zarubinvibe.com",
       "compare_header": [
         "方案",
         "是什么",

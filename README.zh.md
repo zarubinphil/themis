@@ -10,9 +10,11 @@
 
 <!-- owner-welcome:start -->
 
-> 你好。我是执业律师，太多时间花在机械活上：两百页扫描件、核对日期、检查引用、在卷宗里找那一个细节。
+> 你好，我是 Fil。
 >
-> 忒弥斯把这部分工作拿走，把需要判断的那部分留给我。她不做任何决定，也不该做。
+> 我做忒弥斯是给自己用的：我厌倦了把晚上耗在案件的机械部分——两百页扫描件、核对日期、检查引用。如果它对你也有用，我很高兴。
+>
+> 请试一试。有什么坏了，就开一个 issue，我会看。如果喜欢，请给仓库点个星，并告诉那位还在用手做这一切的同行。也欢迎看看 Olympuz 的其他项目：https://zarubinvibe.com
 >
 > — Filipp Zarubin
 
@@ -132,11 +134,26 @@
 ```bash
 git clone https://github.com/zarubinvibe/themiz.git
 cd themiz
-claude
-# inside Claude Code run: /themiz-setup
+bash install.sh
+
+# дальше открывайте, чем привычнее:
+claude                  # Claude Code
+codex                   # Codex CLI
+code .                  # VS Code: агент открывается внутри редактора
+python3 cockpit/app.py   # только панель в браузере, без агента
 ```
 
-更喜欢普通安装脚本？在同一个目录里执行 `bash install.sh`：它在一次确认之后安装依赖，但不会做关于你执业方向的访谈。没有 Git？拿 [ZIP](https://github.com/zarubinvibe/themiz/archive/refs/heads/main.zip)。本地面板用 `python3 cockpit/app.py` 启动，端口 8800。 第一次用？在 Claude Code 里打开项目并运行 `/themiz-setup`：安装以对话方式进行，一次问一个问题，没有你的同意不会装任何东西。
+上面三行就是全部安装。`bash install.sh` 会把一切装好，并且在装任何东西之前先征求同意。它完全不需要智能体，一个普通终端就够了。
+
+**Claude Code。** 在该目录运行 `claude`，再说 `/themiz-setup`。安装会以对话方式进行，一次问一个问题。
+
+**Codex CLI。** 在同一个目录运行 `codex`。同样的智能体和同样的规则已经在项目里了。
+
+**VS Code 或 Cursor。** 用 `code .` 打开目录，在编辑器里启动你的智能体。
+
+**完全不用智能体。** `python3 cockpit/app.py` 会在 `http://127.0.0.1:8800` 打开本地面板，你可以在那里读案卷、盯期限、手工生成文书。
+
+没有 Git？拿 [ZIP](https://github.com/zarubinvibe/themiz/archive/refs/heads/main.zip) 解压即可。安装步骤一样。
 
 第一次做这件事？[上手引导](docs/ONBOARDING.zh.md) 会一步一步带你走完第一次运行，并写清楚每条命令之后你会看到什么。
 

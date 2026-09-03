@@ -1,0 +1,12 @@
+Use case: stylized-concept
+Asset type: public GitHub document header image for a contribution page
+Primary request: one wide frame that says without words: this is a workshop where a change is carved carefully, and the client's folder stands aside, untouched by the work.
+Input images: Image 1 is the immutable Pantheon style reference; Image 2 is the required family-signature column; Image 3 is the project prop sheet, binding for every object.
+Subject: a quiet marble workshop bench with no human figure. On the bench lie one blank white sheet from the prop sheet, a slim marble chisel and a small marble mallet resting beside it, and one blank white marble plaque half carved. A thin sky-blue thread comes in from the left and ends in a small blue arrowhead touching the edge of the blank sheet, as a change arriving from outside. The THIN flat matte-gold client folder from the prop sheet stands closed on a separate low marble stand well apart from the bench, clearly out of the work.
+Composition/framing: 16:9 landscape. The classical white-marble column stands at the right as the family signature. Everything rests on its surface and casts its own shadow. Generous empty ivory space, nothing overlapping, nothing cropped.
+Style/medium: premium restrained 3D product render, warm ivory Apple-like presentation, white marble, matte muted gold, physically plausible materials
+Lighting/mood: soft daylight from upper left, long gentle shadows, calm and confident
+Color palette: ivory #F3EFE8, bright ivory #FBFAF6, white marble, sky blue #B8D6EA for the incoming thread only, muted gold #C9A87A for the folder only, charcoal #3E3A36
+Constraints: every object matches the prop sheet; nothing floats; the folder is thin, flat and matte, never a padded binder; highest final quality; maximum resolution
+Avoid: human figures, hands, deity, scales, sword, a thick or leather folder, floating objects, dark background, neon, purple gradient, smoky lighting, watermark
+Text (verbatim): No readable text, no letters, no digits anywhere in the image.

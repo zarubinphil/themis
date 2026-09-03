@@ -1,0 +1,18 @@
+Use case: stylized-concept
+Asset type: character reference sheet for the five reviewing jurists of a public GitHub project, binding for every later frame
+Primary request: one wide sheet that fixes five distinct jurists so each stays recognizable in later scenes while all five clearly belong to the same marble world as the project deity.
+Input images: Image 1 is the immutable Pantheon style reference; Image 2 is the required family-signature column; Image 3 is a strip of five reference portraits — take ONLY the identifying features of each man from it: build, hairline, beard, moustache and eyewear. Do not copy the photographic look, the dark clothing or the modern background; translate each man into the same white-marble sculpture language as the rest of the family; Image 4 is the approved monumental marble seat.
+Subject: five white-marble portrait busts of five different men, standing in one row at the same scale on the ivory ground, each on its own small round marble base, each turned three-quarter toward the viewer. From left to right they must be visibly different people:
+1. a slender man with a neat narrow moustache and short parted hair, no beard;
+2. a bald man with a full short beard and a heavy brow;
+3. a broad man with a long sweeping moustache and thick swept-back hair, no beard;
+4. a man with dark wavy hair and a full pointed beard;
+5. an older man with round spectacles, a trimmed grey beard and a high forehead.
+Below the row, one monumental marble seat from Image 4 stands empty at a three-quarter angle, showing how these men will be seated later.
+Composition/framing: 16:9 landscape. A classical white-marble column stands at the far right as the family signature, clearly separated from the busts. The five busts stand in one straight row across the upper two thirds with equal spacing, identical height and identical lighting, none overlapping, none cropped. Generous empty ivory space.
+Style/medium: premium restrained 3D marble sculpture render, finely carved surfaces, crisp edges, warm ivory Apple-like presentation, physically plausible materials, museum plate feeling
+Lighting/mood: soft daylight from upper left, long gentle shadows, calm and confident, identical lighting on every bust
+Color palette: ivory #F3EFE8, bright ivory #FBFAF6, white marble, muted gold #C9A87A used only as a thin band on the bases, charcoal #3E3A36
+Constraints: five clearly different men, each recognizable by the features listed above at a glance; all five carved in the same white marble and the same sculptural language, so they read as one bench and not as five styles; every bust rests on its base and nothing floats; classical drapery over the shoulders instead of modern clothing; anatomically correct features; preserve the reference style; highest final quality; maximum resolution
+Avoid: photographic skin, modern jackets or uniforms, dark background, black background, neon, purple gradient, smoky cinema lighting, heavy bronze, metallic or plastic marble, watermark, five identical faces, a female figure, blindfolds, scales, swords, callout labels
+Text (verbatim): No readable text, no letters, no digits, no name plates, no labels anywhere in the image.
