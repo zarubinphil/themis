@@ -16,12 +16,17 @@
     token_ledger.py SESSION.jsonl         # конкретная сессия
     token_ledger.py --all                 # все сессии проекта, сводно
     token_ledger.py --track FAST          # + вердикт по цели трека (exit 3 при перерасходе)
+    token_ledger.py --ctx-limit 150000    # потолок контекста запроса (exit 3 при пробое, 0 — выкл)
     token_ledger.py --json                # машинный вывод
     token_ledger.py --selftest            # проверка без сети и без реальных сессий
+
+Колонка «преамбула × вызовы» (M08): пол контекста потока (минимальный контекст его
+запроса) × число вызовов = счет за повторную доставку одного и того же. Цифра из
+журнала, нижняя граница. Считает context_ledger; здесь — свод по потокам и потолок
+контекста фазы: превышение — ненулевой код, а не молчание.
 """
 from __future__ import annotations
 
-import argparse
 import glob
 import json
 import os
@@ -29,6 +34,13 @@ import re
 import sys
 import tempfile
 from collections import defaultdict
+
+import _obshee as obs
+
+try:
+    from swarm_contract import SUBST_RE as _SUBST_RE
+except ImportError:  # прибор лежит рядом; его отсутствие не роняет замер расхода
+    _SUBST_RE = None
 
 # Цена за миллион токенов: [input, output, cache-write, cache-read]
 RATES = {
@@ -180,16 +192,17 @@ def usage_of(entry: dict) -> dict | None:
     }
 
 
-def read_jsonl(path: str):
+def read_jsonl(path: str, with_raw: bool = False):
     with open(path, encoding="utf-8", errors="replace") as fh:
         for line in fh:
             line = line.strip()
             if not line:
                 continue
             try:
-                yield json.loads(line)
+                entry = json.loads(line)
             except json.JSONDecodeError:
                 continue  # оборванная строка живой сессии — не повод падать
+            yield (line, entry) if with_raw else entry
 
 
 def scan_file(path: str):
@@ -207,8 +220,11 @@ def scan_file(path: str):
     descriptions: dict[str, str] = {}  # tool_use id -> description
     own_type = ""   # attributionAgent — тип самого агента, чей это транскрипт
     own_desc = ""   # первая реплика-задание в транскрипте субагента
+    subst = 0       # подмены модели харнессом — счет по сырой строке журнала
 
-    for entry in read_jsonl(path):
+    for raw, entry in read_jsonl(path, with_raw=True):
+        if _SUBST_RE is not None and _SUBST_RE.search(raw):
+            subst += 1
         msg = entry.get("message") or {}
         own_type = own_type or entry.get("attributionAgent") or ""
         if not own_desc and entry.get("isSidechain") and entry.get("type") == "user":
@@ -249,7 +265,7 @@ def scan_file(path: str):
     for u, model in seen.values():
         add(per_model[model], u)
     turns = [(u, model, step_at.get(key)) for key, (u, model) in seen.items()]
-    return per_model, spawns, {"type": own_type, "desc": own_desc}, turns
+    return per_model, spawns, {"type": own_type, "desc": own_desc, "subst": subst}, turns
 
 
 def step_of(agent_type: str, description: str) -> str:
@@ -287,12 +303,16 @@ def collect(session_path: str) -> dict:
     """Собрать полный реестр по сессии: основной поток + все субагенты."""
     session_dir = os.path.join(os.path.dirname(session_path),
                                os.path.basename(session_path)[:-len(".jsonl")])
-    _, spawns, _, main_turns = scan_file(session_path)
+    _, spawns, main_own, main_turns = scan_file(session_path)
+    subst = main_own.get("subst", 0)
 
     agents: dict[str, dict] = {}
     for s in spawns:
         agents[s["agent_id"]] = {"type": s["agent_type"], "desc": s["description"],
                                  "parent": None, "models": defaultdict(blank)}
+
+    # Потоки для колонки «преамбула × вызовы»: главный + каждый транскрипт свой.
+    stream_turns: list[tuple[str, list]] = [("основной поток", main_turns)]
 
     # Агенты лежат на двух глубинах: обычный субагент — в subagents/, агент воркфлоу —
     # в subagents/workflows/<run>/. Без второго шаблона прибор слеп ровно к тому,
@@ -302,7 +322,8 @@ def collect(session_path: str) -> dict:
                                             "agent-*.jsonl")))
     for path in sorted(transcripts):
         agent_id = os.path.basename(path)[len("agent-"):-len(".jsonl")]
-        models, child_spawns, own, _ = scan_file(path)
+        models, child_spawns, own, turns = scan_file(path)
+        subst += own.get("subst", 0)
         rec = agents.setdefault(agent_id, {"type": "?", "desc": "", "parent": None,
                                            "models": defaultdict(blank)})
         # транскрипт агента знает свой тип сам — вызов родителя мог не попасть в разбор
@@ -310,6 +331,8 @@ def collect(session_path: str) -> dict:
             rec["type"] = own["type"]
         if not rec["desc"]:
             rec["desc"] = own["desc"]
+        stream_turns.append((rec["type"] if rec["type"] not in ("?", "", None)
+                             else f"агент {agent_id[:8]}", turns))
         for model, u in models.items():
             add(rec["models"][model], u)
         for c in child_spawns:
@@ -348,22 +371,55 @@ def collect(session_path: str) -> dict:
     total = blank()
     for u in by_step.values():
         add(total, u)
+
+    # Колонка «преамбула × вызовы» и максимум контекста — из тех же реплик журнала.
+    # context_ledger импортирует token_ledger, поэтому импорт здесь ленивый.
+    preamble = {"floor_main": 0, "calls": 0, "tokens": 0, "money": 0.0, "streams": []}
+    max_ctx = 0
+    try:
+        import context_ledger as _cl
+    except ImportError:  # прибор лежит рядом; его отсутствие не роняет замер расхода
+        _cl = None
+    if _cl is not None:
+        for name, turns in stream_turns:
+            p = _cl.preamble_of(turns)
+            preamble["calls"] += p["calls"]
+            preamble["tokens"] += p["tokens"]
+            preamble["money"] += p["money"]
+            preamble["streams"].append({"name": name, **p})
+            if name == "основной поток":
+                preamble["floor_main"] = p["floor"]
+                max_ctx = max((_cl.ctx_of(u) for u, _m, _s in turns), default=0)
+
     return {"session": os.path.basename(session_path), "total": total, "money": money,
             "by_step": dict(by_step), "by_agent": dict(by_agent), "by_model": dict(by_model),
-            "agents": len(agents)}
+            "agents": len(agents), "preamble": preamble, "max_ctx": max_ctx,
+            "substitutions": subst}
 
 
 def merge(reports: list[dict]) -> dict:
     out = {"session": f"{len(reports)} сессий", "total": blank(), "money": 0.0,
            "by_step": defaultdict(blank), "by_agent": defaultdict(blank),
-           "by_model": defaultdict(blank), "agents": 0}
+           "by_model": defaultdict(blank), "agents": 0,
+           "preamble": {"floor_main": 0, "calls": 0, "tokens": 0, "money": 0.0, "streams": []},
+           "max_ctx": 0, "substitutions": 0}
     for r in reports:
         add(out["total"], r["total"])
         out["money"] += r["money"]
         out["agents"] += r["agents"]
+        out["substitutions"] += r.get("substitutions", 0)
         for key in ("by_step", "by_agent", "by_model"):
             for name, u in r[key].items():
                 add(out[key][name], u)
+        p = r.get("preamble") or {}
+        out["preamble"]["calls"] += p.get("calls", 0)
+        out["preamble"]["tokens"] += p.get("tokens", 0)
+        out["preamble"]["money"] += p.get("money", 0.0)
+        out["preamble"]["streams"] += p.get("streams", [])
+        if p.get("floor_main"):
+            cur = out["preamble"]["floor_main"]
+            out["preamble"]["floor_main"] = min(cur, p["floor_main"]) if cur else p["floor_main"]
+        out["max_ctx"] = max(out["max_ctx"], r.get("max_ctx", 0))
     for key in ("by_step", "by_agent", "by_model"):
         out[key] = dict(out[key])
     return out
@@ -373,7 +429,31 @@ def tokens(u: dict) -> int:
     return u["in"] + u["out"] + u["cw"] + u["cr"]
 
 
-def render(rep: dict, track: str | None) -> int:
+def ctx_verdict(max_ctx: int, limit: int) -> tuple[str, int]:
+    """Потолок контекста фазы: превышение — ненулевой код, а не молчание.
+
+    Меряется максимальный контекст запроса ГЛАВНОГО потока (у субагента контекст
+    свой и умирает вместе с ним). Пробой значит: фаза тащит весь накопленный вес
+    дальше и переоплачивает его каждым вызовом — обязательна разгрузка
+    (handoff.md и продолжение чистой сессией), а не строка в отчете.
+    """
+    if limit <= 0:
+        return "", obs.KOD_OK
+    if max_ctx <= 0:
+        return ("\nпотолок контекста: ДАННЫХ НЕТ — ни одного запроса главного потока "
+                "в разборе. Это НЕ «уложились».", obs.KOD_NE_RABOTAL)
+    if max_ctx > limit:
+        return (f"\nпотолок контекста {limit:,} ПРОБИТ: контекст запроса дошел до "
+                f"{max_ctx:,}. ".replace(",", " ")
+                + "СТОП: разгрузка между фазами обязательна ДО следующего шага — "
+                  "записать .agent/context/handoff.md и продолжить чистой сессией "
+                  "(см. «Экономия и разгрузка контекста» в .claude/CLAUDE.md).",
+                obs.KOD_STOP)
+    return (f"\nпотолок контекста {limit:,}: держится (максимум {max_ctx:,})."
+            .replace(",", " "), obs.KOD_OK)
+
+
+def render(rep: dict, track: str | None, ctx_limit: int = 0) -> int:
     t = rep["total"]
     print(f"сессия: {rep['session']}   субагентов: {rep['agents']}")
     print(f"\n{'статья':<20}{'токенов':>16}")
@@ -382,6 +462,20 @@ def render(rep: dict, track: str | None) -> int:
     print(f"{'cache-write':<20}{t['cw']:>16,}")
     print(f"{'cache-read':<20}{t['cr']:>16,}")
     print(f"{'ВСЕГО':<20}{tokens(t):>16,}   ≈ ${rep['money']:,.2f}")
+
+    p = rep.get("preamble") or {}
+    if p.get("calls"):
+        print(f"\nповторная доставка — преамбула × вызовы (пол потока на каждом вызове):")
+        print(f"{'поток':<26}{'пол ctx':>12}{'вызовов':>9}{'токенов':>14}{'≈$':>10}")
+        for s in sorted(p["streams"], key=lambda x: -x["tokens"])[:8]:
+            print(f"{s['name'][:25]:<26}{s['floor']:>12,}{s['calls']:>9}"
+                  f"{s['tokens']:>14,}{s['money']:>10,.2f}".replace(",", " "))
+        print(f"{'ИТОГО преамбулы':<26}{'':>12}{p['calls']:>9}"
+              f"{p['tokens']:>14,}{p['money']:>10,.2f}".replace(",", " "))
+        print(f"  {p['tokens']/max(tokens(t), 1)*100:.1f}% трафика — одно и то же, доставленное "
+              "заново. Пол потока (минимальный контекст его запроса) × число вызовов; "
+              "цифра из журнала, нижняя граница: реальный повтор больше на все, "
+              "что наросло сверх пола. Разрез по шагам фазы — context_ledger.py.")
 
     print(f"\n{'шаг':<18}{'токенов':>14}{'доля':>8}{'вызовов':>9}")
     total_tok = max(tokens(t), 1)
@@ -416,11 +510,23 @@ def render(rep: dict, track: str | None) -> int:
         print(f"⚠ модель вне тарифной таблицы: {n:,} токенов ({n/total_tok*100:.1f}%). "
               "Цена по ним — ВЕРХНЯЯ оценка (ставка opus). Внести тариф в RATES.")
 
-    if not track:
-        return 0
-    text, rc = track_verdict(track, tokens(t))
-    print(text)
-    return rc
+    # Подмена модели харнессом — ОТДЕЛЬНАЯ строка разреза, не растворена в строке
+    # фактически сработавшей модели: 15 подмен за прогон 01.09 были невидимы.
+    n_subst = rep.get("substitutions", 0)
+    if n_subst:
+        print(f"\nПОДМЕНА МОДЕЛИ ХАРНЕССОМ: {n_subst} событий — заказанная модель не "
+              f"поднята, харнесс подставил другую. Расход выше посчитан по фактически "
+              f"сработавшей модели; подмена в ее строку НЕ растворена. Детали по "
+              f"журналу: python3 scripts/swarm_contract.py --substitutions ФАЙЛ…")
+
+    rc = 0
+    if track:
+        text, rc = track_verdict(track, tokens(t))
+        print(text)
+    ctext, crc = ctx_verdict(rep.get("max_ctx", 0), ctx_limit)
+    if ctext:
+        print(ctext)
+    return max(rc, crc)
 
 
 def track_verdict(track: str, spent: int) -> tuple[str, int]:
@@ -436,17 +542,16 @@ def track_verdict(track: str, spent: int) -> tuple[str, int]:
         return (f"\nтрек {track}: цель {limit:,} — ДАННЫХ НЕТ. ".replace(",", " ")
                 + "Ни одной записи расхода в разобранных файлах: не тот файл сессии, "
                   "не тот проект либо логи еще не сброшены на диск. "
-                  "Это НЕ «уложились».", 2)
+                  "Это НЕ «уложились».", obs.KOD_NE_RABOTAL)
     head = f"\nтрек {track}: цель {limit:,}, факт {spent:,} — ".replace(",", " ")
     if spent > limit:
         return (head + f"ПЕРЕРАСХОД ×{spent/limit:.2f}. "
-                       "СТОП: доложить владельцу до продолжения.", 3)
-    return head + f"в пределах ({spent/limit*100:.0f}% цели).", 0
+                       "СТОП: доложить владельцу до продолжения.", obs.KOD_STOP)
+    return head + f"в пределах ({spent/limit*100:.0f}% цели).", obs.KOD_OK
 
 
 def project_dir(cwd: str) -> str:
-    key = re.sub(r"[^A-Za-z0-9]", "-", cwd)
-    return os.path.join(os.path.expanduser("$HOME/.claude/projects"), key)
+    return str(obs.dom_sessij(cwd))
 
 
 def latest_session(cwd: str) -> str | None:
@@ -498,6 +603,10 @@ def selftest() -> int:
             fh.write(line(type="user", toolUseResult={
                 "agentId": "aaa", "agentType": "case-mapper", "toolUseID": "tu1",
                 "resolvedModel": "claude-opus-5"}))
+            # харнесс молча подменил недоступную модель — отдельный счетчик разреза
+            fh.write(line(type="system",
+                          text="claude-sonnet-5[1m] is temporarily unavailable, "
+                               "auto mode cannot determine"))
 
         with open(os.path.join(sub_dir, "agent-aaa.jsonl"), "w", encoding="utf-8") as fh:
             fh.write(assistant("claude-sonnet-5", 100, 200, 300, 400, "req_c"))
@@ -573,6 +682,10 @@ def selftest() -> int:
             ("известная модель тариф не меняет",
              rate_key("claude-sonnet-5") == "sonnet" and rate_key("claude-haiku-4-5") == "haiku"),
             ("агент воркфлоу учтен", st("5 проверка")["out"] == 8),
+            # Подмена модели харнессом — отдельный счетчик, а не растворение в
+            # строке фактически сработавшей модели (15 невидимых подмен 01.09).
+            ("подмена модели посчитана отдельной строкой разреза",
+             rep["substitutions"] == 1),
             ("итог сходится", tokens(rep["total"]) == 100 + 26 + 10 + 4 + 11000 + 34),
             ("деньги посчитаны", rep["money"] > 0),
             ("шаг по описанию", step_of("general-purpose", "Ареопаг раунд 2") == "3 позиция"),
@@ -598,48 +711,125 @@ def selftest() -> int:
         ("неизвестная модель считается по верхней ставке в деньгах",
          cost({"in": 1_000_000, "out": 0, "cw": 0, "cr": 0}, "claude-fable-5") == 15.0),
         ]
+
+        # Порог путь-резолва (b8086b2): project_dir указывал на литеральный
+        # "$HOME/..." → glob всегда пуст → latest_session=None даже при живых
+        # сессиях (слепой ноль, читался как «уложились»). Фикстура ПО ОБЕ
+        # стороны порога: HOME с реальным журналом обязан найтись, пустой
+        # каталог — честный None (шаг отказа main, exit 1).
+        _home0 = os.environ.get("HOME")
+        key = re.sub(r"[^A-Za-z0-9]", "-", "/x/case")
+        try:
+            full_home = os.path.join(tmp, "home_full")
+            full_dir = os.path.join(full_home, ".claude", "projects", key)
+            os.makedirs(full_dir)
+            with open(os.path.join(full_dir, "sess.jsonl"), "w", encoding="utf-8") as fh:
+                fh.write("{}\n")
+            os.environ["HOME"] = full_home
+            found = latest_session("/x/case")
+
+            empty_home = os.path.join(tmp, "home_empty")
+            os.makedirs(os.path.join(empty_home, ".claude", "projects", key))
+            os.environ["HOME"] = empty_home
+            empty = latest_session("/x/case")
+        finally:
+            if _home0 is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = _home0
+        checks += [
+            ("HOME развернут: реальный журнал найден, не слепой None",
+             found is not None and found.endswith("sess.jsonl")),
+            ("пустой каталог сессий → честный None, не выдуманный путь",
+             empty is None),
+        ]
+
+        # Колонка «преамбула × вызовы» (M08): пол потока — минимальный контекст
+        # его запроса. В фикстуре главного потока ctx реплик: 80, 20, 8, 3 →
+        # пол 3, вызовов 4. Субагенты: aaa 800×1, bbb 8000×1, ccc 26×1.
+        pr = rep["preamble"]
+        checks += [
+            ("пол контекста главного потока из журнала", pr["floor_main"] == 3),
+            ("преамбула = пол × вызовы по всем потокам",
+             pr["tokens"] == 12 + 800 + 8000 + 26 and pr["calls"] == 7),
+            ("счет за повторную доставку ненулевой", pr["money"] > 0),
+            ("разрез преамбулы по потокам на месте",
+             {s["name"] for s in pr["streams"]}
+             >= {"основной поток", "case-mapper", "pdf-reader", "doc-reviewer"}),
+            ("максимум контекста главного потока виден", rep["max_ctx"] == 80),
+            # Потолок контекста фазы: превышение — ненулевой код, а не молчание.
+            ("пробой потолка контекста дает 3",
+             ctx_verdict(80, 50)[1] == obs.KOD_STOP and "ПРОБИТ" in ctx_verdict(80, 50)[0]),
+            ("потолок держится дает 0", ctx_verdict(80, 200)[1] == obs.KOD_OK),
+            ("пустой разбор — «данных нет», а не «уложились»",
+             ctx_verdict(0, 200)[1] == obs.KOD_NE_RABOTAL),
+            ("потолок 0 выключает проверку", ctx_verdict(80, 0) == ("", obs.KOD_OK)),
+        ]
+
+        # Приемка M08 зовет только этот selftest — машина контекста проверяется
+        # внутри него, а не рядом: разрез преамбулы по шагам фазы и гейт выгрузки
+        # (context_ledger), живой потолок и байтовый предел инструкций (context_guard).
+        import context_guard
+        import context_ledger
+        checks += [
+            ("selftest context_ledger пройден", context_ledger.selftest() == 0),
+            ("selftest context_guard пройден", context_guard.selftest() == 0),
+        ]
+
         bad = [name for name, ok in checks if not ok]
         for name, ok in checks:
             print(f"  {'✓' if ok else '✗'} {name}")
         if bad:
             print(f"selftest ПРОВАЛЕН: {len(bad)} из {len(checks)}")
-            return 1
+            return obs.KOD_OSHIBKA
         print(f"selftest пройден: {len(checks)}/{len(checks)}")
         return 0
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Замер расхода токенов по шагам конвейера Фемиды")
+    ap = obs.parser("Замер расхода токенов по шагам конвейера Фемиды")
     ap.add_argument("session", nargs="?", help="путь к session.jsonl (по умолчанию — свежая сессия проекта)")
     ap.add_argument("--all", action="store_true", help="все сессии проекта сводно")
     ap.add_argument("--track", choices=sorted(TRACK_BUDGET), help="сверить с целью трека, exit 3 при перерасходе")
+    ap.add_argument("--ctx-limit", type=int, default=None, metavar="N",
+                    help="потолок контекста запроса главного потока, exit 3 при пробое; "
+                         "0 — выключить (по умолчанию 200 000)")
     ap.add_argument("--json", action="store_true", help="машинный вывод")
-    ap.add_argument("--selftest", action="store_true", help="проверка без сети")
     args = ap.parse_args()
 
     if args.selftest:
         return selftest()
 
+    ctx_limit = args.ctx_limit
+    if ctx_limit is None:
+        try:
+            import context_ledger as _cl
+            ctx_limit = _cl.CTX_LIMIT_DEFAULT
+        except ImportError:
+            ctx_limit = 200_000
+
     if args.all:
         files = sorted(glob.glob(os.path.join(project_dir(os.getcwd()), "*.jsonl")))
         if not files:
             print("сессий проекта не найдено", file=sys.stderr)
-            return 1
+            return obs.KOD_OSHIBKA
         rep = merge([collect(f) for f in files])
     else:
         path = args.session or latest_session(os.getcwd())
         if not path or not os.path.isfile(path):
             print(f"session.jsonl не найден ({path}). Передай путь явно.", file=sys.stderr)
-            return 1
+            return obs.KOD_OSHIBKA
         rep = collect(path)
 
     if args.json:
+        rep["ctx_limit"] = ctx_limit
         print(json.dumps(rep, ensure_ascii=False, indent=2))
-        if args.track and tokens(rep["total"]) > TRACK_BUDGET[args.track]:
-            return 3
-        return 0
-    return render(rep, args.track)
+        rc = ctx_verdict(rep.get("max_ctx", 0), ctx_limit)[1]
+        if args.track:
+            rc = max(rc, track_verdict(args.track, tokens(rep["total"]))[1])
+        return rc
+    return render(rep, args.track, ctx_limit)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    obs.zavershit(main)

@@ -11,6 +11,7 @@
 Использование:
     python3 scripts/preflight_search.py
     python3 scripts/preflight_search.py --json
+    python3 scripts/preflight_search.py --selftest
 
 Выход: таблица «канал → статус → что делать». Код возврата 1, если не осталось
 ни одного внешнего канала — тогда охота за внешней практикой не запускается,
@@ -22,10 +23,18 @@ import os
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
+
+
+def resolve_case(cli_case: str) -> str:
+    """Дело прогона: явный --case важнее $THEMIS_CASE. Переменную в бою никто не
+    выставлял — флага не было вовсе (02.09.2026), и мертвый канал не долетал до
+    preflight: источник опрашивался повторно 128 раз за прогон 01.09.2026."""
+    return cli_case or os.environ.get("THEMIS_CASE", "")
 
 
 def _sudact_allowed() -> bool:
@@ -52,9 +61,9 @@ def probe_url(url: str, timeout: int = 8) -> bool:
 
 def check_mcp_key(server: str) -> tuple[bool, str]:
     """Есть ли ключ у MCP-сервера в $HOME/.claude.json."""
-    cfg = os.path.expanduser("$HOME/.claude.json")
+    cfg = str(Path.home() / ".claude.json")
     if not os.path.exists(cfg):
-        return False, "$HOME/.claude.json отсутствует"
+        return False, f"{cfg} отсутствует"
     try:
         data = json.load(open(cfg, encoding="utf-8"))
     except Exception as e:
@@ -133,12 +142,67 @@ def check_sgai() -> tuple[bool, str]:
         return False, str(e)[:40]
 
 
+def selftest() -> int:
+    """Без сети. Порог путь-резолва (b8086b2): check_mcp_key читал литеральный
+    "$HOME/.claude.json" → «отсутствует» при файле в 91 КБ. Фикстура ПО ОБЕ
+    стороны порога: HOME с конфигом — ключ найден, НЕ слепое «отсутствует»;
+    HOME без конфига — честный отказ."""
+    import tempfile
+    checks = []
+    _home0 = os.environ.get("HOME")
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            os.environ["HOME"] = tmp
+            no_ok, no_note = check_mcp_key("tavily")
+            checks.append(("нет конфига → честный отказ, не выдумка",
+                           no_ok is False and "отсутствует" in no_note))
+            with open(os.path.join(tmp, ".claude.json"), "w", encoding="utf-8") as fh:
+                json.dump({"mcpServers": {"tavily": {"env": {"TAVILY_API_KEY": "x"}}}}, fh)
+            ok, note = check_mcp_key("tavily")
+            checks.append(("HOME развернут: конфиг найден, не слепое «отсутствует»",
+                           ok is True and "отсутствует" not in note))
+        finally:
+            if _home0 is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = _home0
+
+    _case0 = os.environ.pop("THEMIS_CASE", None)
+    try:
+        checks.append(("--case работает без $THEMIS_CASE",
+                       resolve_case("cases/klient/delo") == "cases/klient/delo"))
+        checks.append(("без --case и без переменной — дело не опознано",
+                       resolve_case("") == ""))
+        os.environ["THEMIS_CASE"] = "env-delo"
+        checks.append(("явный --case важнее $THEMIS_CASE", resolve_case("flag-delo") == "flag-delo"))
+        checks.append(("без --case используется $THEMIS_CASE", resolve_case("") == "env-delo"))
+    finally:
+        os.environ.pop("THEMIS_CASE", None)
+        if _case0 is not None:
+            os.environ["THEMIS_CASE"] = _case0
+    bad = [n for n, ok in checks if not ok]
+    for n, ok in checks:
+        print(f"  {'✓' if ok else '✗'} {n}")
+    if bad:
+        print(f"selftest ПРОВАЛЕН: {len(bad)} из {len(checks)}")
+        return 1
+    print(f"selftest пройден: {len(checks)}/{len(checks)} — путь-резолв без сети")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--selftest", action="store_true", help="проверка без сети")
+    ap.add_argument("--case", default="", help="путь к делу — общий счет каналов и квот; "
+                    "иначе $THEMIS_CASE")
     a = ap.parse_args()
 
+    if a.selftest:
+        return selftest()
+
     rows = []
+    case = resolve_case(a.case)
 
     ok, note = check_sgai()
     rows.append(("ScrapeGraphAI (sgai)", ok, note,
@@ -166,18 +230,62 @@ def main() -> int:
                      "выключен явно (THEMIS_SUDACT_SEARCH=0)",
                      "искать в knowledge/practice_index.md; акт по URL — --doc"))
     else:
-        # Флаг владельца говорит «искать РАЗРЕШЕНО», но не «источник ЖИВ».
-        # 21.08.2026 источник весь день отдавал HTTP 500, а preflight печатал «OK»,
-        # и охотники записали пустой результат как отсутствие практики. Разрешение
-        # и живость — разные вопросы, спрашиваем оба.
-        alive = probe_sudact()
-        rows.append(("Поиск практики sudact.ru", alive,
-                     "включен владельцем, источник отвечает" if alive
-                     else "включен владельцем, но источник НЕ отвечает",
-                     "practice_search.py ищет" if alive
-                     else "пустой результат НЕ считать отсутствием практики — повторить позже"))
-    rows.append(("WebSearch (квота сессии)", None, "программно не проверяется",
-                 "лимит 200 запросов на сессию — спросить у охотника в первом отчете"))
+        # Мертвый канал из общего файла прогона не опрашивается повторно до
+        # истечения TTL записи — 01.09.2026 мертвый источник опрашивался 128 раз.
+        dead = None
+        chan = None
+        if case:
+            try:
+                sys.path.insert(0, os.path.join(ROOT, "scripts"))
+                import channels as chan  # noqa: F811 — присваиваем в локальную
+                rec = chan.status(case, "sudact")
+                if rec and not rec.get("жив", True):
+                    dead = rec
+            except Exception:
+                dead, chan = None, None
+        if dead is not None:
+            rows.append(("Поиск практики sudact.ru", False,
+                         f"мертв по общему состоянию прогона: "
+                         f"{dead.get('причина') or 'без причины'}",
+                         "не опрашивать до истечения записи (channels.py --show)"))
+        else:
+            # Флаг владельца говорит «искать РАЗРЕШЕНО», но не «источник ЖИВ».
+            # 21.08.2026 источник весь день отдавал HTTP 500, а preflight печатал «OK»,
+            # и охотники записали пустой результат как отсутствие практики. Разрешение
+            # и живость — разные вопросы, спрашиваем оба.
+            alive = probe_sudact()
+            if chan is not None:
+                try:
+                    chan.mark(case, "sudact", alive,
+                              "отвечает" if alive else "источник НЕ отвечает")
+                except Exception:
+                    pass
+            rows.append(("Поиск практики sudact.ru", alive,
+                         "включен владельцем, источник отвечает" if alive
+                         else "включен владельцем, но источник НЕ отвечает",
+                         "practice_search.py ищет" if alive
+                         else "пустой результат НЕ считать отсутствием практики — повторить позже"))
+    # Расход WebSearch — общий счет прогона (scripts/channels.py), не догадка
+    # отдельного охотника: раньше поле было советом «спросить в первом отчете», и
+    # трое охотников независимо отвечали «квоты много» на одном и том же прогоне.
+    ws_used = ws_cap = None
+    if case:
+        try:
+            sys.path.insert(0, os.path.join(ROOT, "scripts"))
+            import channels as _channels
+            ws_used, ws_cap = _channels.quota_status(case, "websearch")
+        except Exception:
+            ws_used = None
+    if ws_used is None:
+        rows.append(("WebSearch (квота сессии)", None,
+                     "дело не опознано ($THEMIS_CASE/--case) — общий счет недоступен",
+                     "передать дело: --case ДЕЛО либо $THEMIS_CASE"))
+    else:
+        ws_ok = not ws_cap or ws_used < ws_cap
+        rows.append(("WebSearch (квота сессии)", ws_ok,
+                     f"общий счет прогона: {ws_used}" + (f" из {ws_cap}" if ws_cap else ""),
+                     "channels.py ДЕЛО --show" if ws_ok
+                     else "КВОТА ИСЧЕРПАНА — не звать WebSearch"))
 
     if a.json:
         print(json.dumps([{"channel": c, "ok": o, "note": n, "action": act}

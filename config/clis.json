@@ -1,15 +1,64 @@
 {
   "_комментарий": "Уроки П26/справки-CLI 23.08.2026: kimi -y/-auto несовместимы с -p; зонд обязан быть настоящим прогоном, не provider list; у codex нет fetch произвольного URL.",
+  "claude-sonnet": {
+    "_почему_есть": "РЕШЕНИЕ ВЛАДЕЛЬЦА 02.09.2026: второй голос через тот же бинарь, другая модель. Причина - зонд 02.09 18:10: kimi отдал 403 «You've reached your 5-hour usage limit», codex «try again at Sep 7th, 2026 9:05 AM». Живым остался ОДИН claude, а маркер гейта требует executor != verifier (helioz-gate.mjs:285), и конвейер не закрыл бы ни одной задачи.",
+    "_чем_это_ослабление": "Разделение ролей СЛАБЕЕ задуманного: исполнитель и судья делят одного провайдера, один бинарь, одну оснастку и общие слепые зоны. Расходятся только веса модели. Отказ провайдера роняет обе роли разом. Пара kimi+claude была сильнее, и она остается ЦЕЛЬЮ: как только зонд покажет kimi живым, доктрина возвращается к ней, а эта запись становится резервом.",
+    "_почему_первым_ключом": "Порядок ключей = порядок кандидатов ротации (helioz-exec.mjs:48,216 - первый живой побеждает). Стоя ПЕРВЫМ, эта запись берет роль исполнителя, а судьей остается запись claude на модели по умолчанию. Судейство - работа тяжелее: именно проверяющий ловил отчет, снятый не с того кода. Ослаблять надо ту роль, которая пишет, а не ту, которая судит.",
+    "invoke_read": [
+      "claude",
+      "-p",
+      "--output-format",
+      "json",
+      "--model",
+      "claude-sonnet-5"
+    ],
+    "invoke_write": [
+      "claude",
+      "-p",
+      "--output-format",
+      "json",
+      "--model",
+      "claude-sonnet-5",
+      "--permission-mode",
+      "acceptEdits",
+      "--allowedTools",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git ls-files:*)",
+      "Bash(git log:*)",
+      "Bash(node:*)",
+      "Bash(shasum:*)",
+      "Bash(mkdir:*)",
+      "Bash(test:*)"
+    ],
+    "stdin_prompt": true,
+    "roles": [
+      "execute",
+      "verify",
+      "advise",
+      "synthesize"
+    ],
+    "web": {
+      "search": "WebSearch",
+      "fetch": "WebFetch"
+    }
+  },
   "claude": {
     "invoke_read": [
       "claude",
       "-p",
+      "--output-format",
+      "json",
       "--allowedTools",
       "Bash,Read,Grep,Glob"
     ],
     "invoke_write": [
       "claude",
       "-p",
+      "--output-format",
+      "json",
       "--permission-mode",
       "acceptEdits",
       "--allowedTools",
@@ -25,7 +74,8 @@
     "web": {
       "search": "WebSearch",
       "fetch": "WebFetch"
-    }
+    },
+    "_pochemu_json_konvert": "02.09.2026: без --output-format json helioz-exec не получает usage, и расход исполнителей - слепая зона (67 ролей за сессию с usage null). Конверт разбирается в helioz-exec.mjs:170: текст берется из j.result и идет в парсер вердикта, usd - из total_cost_usd. Канон Гелиоза этот флаг несет. Откат - config/clis.json.do-zamera-2026-09-02."
   },
   "codex": {
     "invoke_read": [
@@ -64,17 +114,22 @@
       "kimi",
       "-p"
     ],
-    "invoke_write": null,
-    "_почему_без_write": "поведение kimi -p на запись без -y не проверено (справка-CLI §непроверенное); до пробы - только чтение",
+    "invoke_write": [
+      "kimi",
+      "-p"
+    ],
     "stdin_prompt": false,
     "roles": [
+      "execute",
       "verify",
-      "advise"
+      "advise",
+      "synthesize"
     ],
     "web": {
       "search": "WebSearch",
       "fetch": "FetchURL"
-    }
+    },
+    "_почему_с_write": "kimi 0.20.1 -p пишет файлы, гонит node и коммитит - проверено живым прогоном 02.09.2026 в доме Гелиоза (коммит 7682e7b); -y/--auto с -p по-прежнему несовместимы. Решение владельца 02.09.2026: писать Kimi. Откат - config/clis.json.do-kimi-2026-09-02."
   },
   "_урок_25.08.2026_право_на_bash": "acceptEdits без --allowedTools дает агенту правку файлов, но НЕ Bash: в -p режиме запрос прав автоматически отклоняется, и исполнитель физически не может ни проверить себя, ни закоммитить. --dangerously-skip-permissions запрещен конституцией владельца (он сносит хуки). --allowedTools пре-одобряет named-инструменты и при этом НЕ отключает permissions.deny и хуки security-guard/claude_guard — они остаются последним словом."
 }

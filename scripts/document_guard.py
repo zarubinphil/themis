@@ -293,10 +293,18 @@ def money_text(doc) -> str:
                 for c in r.cells:
                     yield from _iz_yacheek(c)
 
+    # Между ячейками строки ставится непробельный барьер « | », как в разметке .md.
+    # Раньше ячейки склеивались переводом строки, и `\s*` в денежной регулярке сшивал
+    # конец одной ячейки с началом соседней: строка таблицы «… Фамилия И. Р. | 5 |
+    # …» читалась как сумма «Р. 5» и требовала прописи у номера строки. Тот же текст
+    # в .md сторож пропускал (там разделитель «|») — один документ давал два
+    # противоположных ответа. Внутри ячейки перевод строки сохранен: сумма и пропись
+    # часто стоят там разными абзацами, и барьер между ними дал бы обратную ложь.
     for table in getattr(doc, "tables", []):
         for row in table.rows:
-            for cell in row.cells:
-                prochee.extend(par.text for par in _iz_yacheek(cell))
+            prochee.append(" | ".join(
+                "\n".join(par.text for par in _iz_yacheek(cell))
+                for cell in row.cells))
     # Поля форм (w:sdt) и надписи (w:txbxContent): doc.paragraphs их не видит,
     # а шаблоны Word и бланки набирают именно ими — ложная сумма внутри поля
     # или надписи проходила мимо всех проверок (проба круга 6, 20.08.2026).
@@ -311,7 +319,10 @@ def money_text(doc) -> str:
                      getattr(sec, "first_page_footer", None)):
             if part is not None:
                 prochee.extend(par.text for par in getattr(part, "paragraphs", []))
-    return "\n".join([telo] + prochee)
+    # Барьер « | » и МЕЖДУ элементами prochee, не только внутри строки таблицы:
+    # «Р.» стояло последней ячейкой одной строки, а «5» — первой ячейкой следующей,
+    # и перевод строки между ними денежная регулярка сшивала так же (проба 01.09.2026).
+    return "\n".join([telo, " | ".join(prochee)])
 
 
 def check_docx(path: str, l3: bool = False, dogovor: bool = False,

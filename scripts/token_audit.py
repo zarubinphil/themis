@@ -23,6 +23,7 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
 
 # $/млн токенов: [input, output, cache-write, cache-read]. Реальные цены Anthropic —
 # те же, что у token_ledger: сверяем СПОСОБ подсчета, а не выдумываем свой прайс.
@@ -56,7 +57,7 @@ def _read_jsonl(path: str):
 
 def _project_dir(cwd: str) -> str:
     key = re.sub(r"[^A-Za-z0-9]", "-", cwd)
-    return os.path.join(os.path.expanduser("$HOME/.claude/projects"), key)
+    return os.path.join(Path.home(), ".claude", "projects", key)
 
 
 def _latest_session(cwd: str) -> str | None:
@@ -108,7 +109,20 @@ def scan_session(session_path: str) -> tuple[int, float]:
     return scan_files([session_path] + _transcripts(session_path))
 
 
+class NoSessions(Exception):
+    """Каталог сессий не найден либо путь не вычислен — ОТКАЗ, не ноль расхода."""
+
+
 def audit(cwd: str) -> tuple[int, float]:
+    """Три РАЗНЫХ состояния, не сваливать в один ноль (урок конвейера: замер,
+    не отличающий «дешево» от «не вижу», обязан краснеть):
+      • каталога сессий нет / путь не вычислен → NoSessions (ОТКАЗ, exit≠0);
+      • каталог есть, журналов нет            → (0, 0.0) честный ноль;
+      • каталог есть, журналы есть             → посчитанный расход.
+    """
+    d = _project_dir(cwd)  # Path.home() бросит, если HOME не вычислим — тоже ОТКАЗ
+    if not os.path.isdir(d):
+        raise NoSessions(d)
     path = _latest_session(cwd)
     if not path or not os.path.isfile(path):
         return 0, 0.0
@@ -123,13 +137,23 @@ def agree(mine: float, ref: float, tol: float) -> bool:
 
 
 def cmd_json(cwd: str) -> int:
-    total, money = audit(cwd)
+    try:
+        total, money = audit(cwd)
+    except NoSessions as e:
+        print(f"token_audit: каталог сессий не найден ({e}) — ОТКАЗ, это не ноль расхода",
+              file=sys.stderr)
+        return 2
     print(json.dumps({"total": total, "money": round(money, 6)}, ensure_ascii=False))
     return 0
 
 
 def cmd_compare(cwd: str, tol: float) -> int:
-    mine_tot, mine_money = audit(cwd)
+    try:
+        mine_tot, mine_money = audit(cwd)
+    except NoSessions as e:
+        print(f"token_audit: каталог сессий не найден ({e}) — сверять нечего, ОТКАЗ",
+              file=sys.stderr)
+        return 2
     # token_ledger импортируется ТОЛЬКО здесь — эталон для сверки. Путь --json его
     # не касается и остается независимым счетчиком.
     import token_ledger
@@ -199,6 +223,38 @@ def selftest() -> int:
         ("нули сходятся", agree(0, 0, DEFAULT_TOL)),
         ("ноль против ненуля — расхождение", not agree(5, 0, DEFAULT_TOL)),
     ]
+
+    # Порог путь-резолва (b8086b2): _project_dir указывал на литеральный "$HOME/..."
+    # → каталог «отсутствовал» при существующем. Три состояния обязаны различаться;
+    # фикстура ПО ОБЕ стороны порога: пустой каталог = честный ноль, отсутствующий
+    # = ОТКАЗ (raise), НЕ слепой ноль.
+    _home0 = os.environ.get("HOME")
+    key = re.sub(r"[^A-Za-z0-9]", "-", "/x/case")
+    with tempfile.TemporaryDirectory() as htmp:
+        try:
+            empty_home = os.path.join(htmp, "empty")
+            os.makedirs(os.path.join(empty_home, ".claude", "projects", key))
+            os.environ["HOME"] = empty_home
+            empty_ok = audit("/x/case") == (0, 0.0)   # каталог пуст → честный ноль
+
+            missing_home = os.path.join(htmp, "missing")
+            os.makedirs(missing_home)   # HOME есть, каталога сессий нет
+            os.environ["HOME"] = missing_home
+            refused = False
+            try:
+                audit("/x/case")
+            except NoSessions:
+                refused = True
+        finally:
+            if _home0 is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = _home0
+    checks += [
+        ("пустой каталог сессий → честный ноль, не отказ", empty_ok),
+        ("каталога сессий нет → ОТКАЗ, не слепой ноль", refused),
+    ]
+
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:
         print(f"  {'✓' if ok else '✗'} {n}")

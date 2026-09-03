@@ -17,18 +17,31 @@
 разворачивается, а «наши дела» — только cases/ ЭТОГО проекта, не любой каталог со
 словом cases (чужой репозиторий, /tmp/cases — мимо).
 Проверка: python3 scripts/claude_guard.py --selftest
+Покрытие deny: python3 scripts/claude_guard.py --deny-covers ПУТЬ
+Пересбор замка: python3 scripts/claude_guard.py --deny-rebuild
+Обслуживание ворот: python3 scripts/claude_guard.py --obsluzhivanie --status
 
 Правила-инварианты продублированы текстом в .claude/CLAUDE.md;
 здесь — их жесткое исполнение (advisory-текст модель может пропустить, хук — нет).
 """
+import atexit
+import fnmatch
 import json
 import os
 import re
 import sys
 import time
 
+try:
+    import context_guard  # правила экономии контекста, см. его модуль
+except ImportError:  # модуля нет — свои правила сторож все равно держит
+    context_guard = None
+
 
 def block(msg: str) -> None:
+    # Claude Code запускает все совпавшие PreToolUse-хуки: код 2
+    # блокирует tool call, но не отменяет соседний Entire; поздний allow
+    # этот deny не переопределяет.
     print(msg, file=sys.stderr)
     sys.exit(2)
 
@@ -179,6 +192,22 @@ def _resolve(path: str, base: str) -> str:
     if not os.path.isabs(p):
         p = os.path.join(base, p)
     return os.path.realpath(p)     # normpath + разбор симлинков; несуществующий путь — лексически
+
+
+def _under_dir(abspath: str, root: str) -> bool:
+    """abspath лежит внутри root (или равен ему). ОБА конца через realpath: на macOS
+    /var — симлинк на /private/var, /tmp — на /private/tmp, и наивное сравнение строк
+    молча делает гейт пустышкой с кодом 0 (урок стоил конвейеру прогона). Регистр не
+    важен — APFS/HFS+ его не различают, `/THEMIS/` и `/themis/` — тот же каталог.
+    Разошедшиеся диски → commonpath кидает ValueError → значит, не внутри."""
+    if not abspath:
+        return False
+    a = os.path.realpath(abspath).casefold()
+    r = os.path.realpath(root).casefold()
+    try:
+        return os.path.commonpath([a, r]) == r
+    except ValueError:
+        return False
 
 
 def _under_cases(abspath: str) -> bool:
@@ -436,6 +465,688 @@ def _workflow_gate(p: str) -> None:
 # Лок каталога черновиков: одни руки в один каталог. Старше 45 минут — держатель,
 # скорее всего, ушел: предупреждаем, но не запираем чужую работу навсегда.
 DRAFTS_LOCK_STALE_MIN = 45
+
+
+_ANCHOR_GATES = (
+    "scripts/claude_guard.py", "scripts/verdict.py", "scripts/document_guard.py",
+    "scripts/quality_gate.py", "scripts/pd_guard.py", "scripts/pii_gate.py",
+    "scripts/loop_gate.py", "scripts/instruction_guard.py", "scripts/table_guard.py",
+    "scripts/gate.sh", "scripts/case_paths.py", "scripts/swarm_contract.py",
+    "scripts/model_policy.py", "scripts/themis_status.py",
+    "scripts/stage4_spec.py", "scripts/stage5_spec.py", "scripts/stage65_spec.py",
+    "scripts/stage6_spec.py", "scripts/stage7_spec.py", "scripts/stage8_spec.py",
+    "scripts/stage9_spec.py", "scripts/priemka_remont.sh",
+    ".claude/settings.json", ".claude/workflows/themis-pipeline.js",
+    ".claude/skills/humanizer-legal/scripts/scan_legal.sh",
+)
+_ANCHOR_NOT_GATES = (
+    "scripts/markdown_extract.py", "scripts/render_tail.py", "scripts/pdf-kit.py",
+    "scripts/calc395.py", "scripts/propis.py", "scripts/sroki.py", "scripts/cite.py",
+    "scripts/cadastre.py", "scripts/practice_search.py", "scripts/gosposhlina.py",
+)
+
+
+def _harness_files(root: str = PROJECT_ROOT) -> set:
+    """Самозащита по ПРИЗНАКУ ВЕРДИКТА, снятому с диска, а не по перечню файлов.
+
+    Защищается то, чей код возврата решает судьбу шага, документа или прогона:
+      · роль вердикта в коде проекта: *_guard / *_gate / gate.sh / verdict /
+        *_policy / *_contract / stage<N>_spec / priemka*.sh — прибор САМ выносит отказ;
+      · проводка: команды хуков (.claude/settings.json и .git/hooks/*), гейты
+        .autoloop/*.json, приборы, которые ИСПОЛНЯЕТ проводник .claude/workflows/*.js,
+        и все, что зовут через обертку кода возврата scripts/gate.sh;
+      · один хоп импорта из перечисленного: чужой модуль внутри ворот считает тот же вердикт.
+
+    Извлечение, счет и показ (markdown_extract, render_tail, cite, calc395, propis,
+    sroki, cadastre, pdf-kit) в набор НЕ входят: их правка не отменяет ни одного вердикта.
+    Прежний признак «в тексте есть --selftest» накрывал 73 прибора из 85 и запирал
+    ремонт — конвейер не мог чинить сам себя (замер 02.09.2026, три задачи подряд
+    встали на просьбе к человеку снять замок).
+    """
+    scripts = os.path.join(root, "scripts")
+    try:
+        names = os.listdir(scripts)
+    except OSError:
+        names = []
+
+    path_re = re.compile(r"(?:scripts|\.claude)/[A-Za-z0-9_./-]+\.(?:py|sh|js)")
+
+    def add_paths(text, into):
+        for rel in path_re.findall(text or ""):
+            if os.path.isfile(os.path.join(root, rel)):
+                into.add(rel)
+
+    # 1. Роль вердикта. Не список имен, а класс: любой новый *_guard/*_gate/stage-спека
+    # входит в слой сам, без правки этого файла.
+    role = re.compile(
+        r"(?:^|_)(?:guard|gate|verdict|policy|contract)(?:_|\.)"
+        r"|^priemka.*\.sh$|^stage\d+_spec\.py$"
+    )
+    core = {"scripts/" + name for name in names if role.search(name)}
+    core.add(".claude/settings.json")
+
+    # 2. Проводка хуков: и Claude Code (PreToolUse), и git (pre-commit/commit-msg).
+    hook_text = []
+    try:
+        settings = json.load(open(os.path.join(root, ".claude", "settings.json"),
+                                  encoding="utf-8"))
+    except (OSError, ValueError, UnicodeError):
+        settings = {}
+    hooks = settings.get("hooks") if isinstance(settings, dict) else None
+    for entries in (hooks.values() if isinstance(hooks, dict) else []):
+        for entry in entries if isinstance(entries, list) else []:
+            inner = entry.get("hooks") if isinstance(entry, dict) else None
+            for hook in inner if isinstance(inner, list) else []:
+                if isinstance(hook, dict):
+                    hook_text.append(str(hook.get("command", "")))
+    git_hooks = os.path.join(root, ".git", "hooks")
+    for name in (os.listdir(git_hooks) if os.path.isdir(git_hooks) else []):
+        if name.endswith(".sample"):
+            continue
+        try:
+            hook_text.append(open(os.path.join(git_hooks, name), encoding="utf-8").read())
+        except (OSError, UnicodeError):
+            continue
+    for text in hook_text:
+        add_paths(text, core)
+
+    # 3. Конфиг гейта задает активную приемку: и сам конфиг, и что он зовет.
+    autoloop = os.path.join(root, ".autoloop")
+    for name in (os.listdir(autoloop) if os.path.isdir(autoloop) else []):
+        if not name.endswith(".json"):
+            continue
+        try:
+            config = json.load(open(os.path.join(autoloop, name), encoding="utf-8"))
+        except (OSError, ValueError, UnicodeError):
+            continue
+        gate = config.get("gate") if isinstance(config, dict) else None
+        if not isinstance(gate, list) or not gate:
+            continue
+        core.add(".autoloop/" + name)
+        for value in gate:
+            if isinstance(value, str):
+                add_paths(value, core)
+
+    # 4. Проводник исполняет гейты сам. Строка КОДА отличается от строки промпта
+    # отсутствием кириллицы: прибор, названный внутри русского текста задания агенту,
+    # проводником не запускается и вердикта не выносит.
+    # ponytail: признак кода — «нет кириллицы в строке»; потолок — англоязычный промпт,
+    # апгрейд — разбор JS в AST, если промпты станут английскими.
+    workflows = os.path.join(root, ".claude", "workflows")
+    cyrillic = re.compile(r"[А-Яа-яЁё]")
+    for name in (os.listdir(workflows) if os.path.isdir(workflows) else []):
+        if not name.endswith(".js"):
+            continue
+        rel = ".claude/workflows/" + name
+        core.add(rel)
+        try:
+            text = open(os.path.join(root, rel), encoding="utf-8").read()
+        except (OSError, UnicodeError):
+            continue
+        for line in text.splitlines():
+            if not cyrillic.search(line):
+                add_paths(line, core)
+
+    # 5. scripts/gate.sh существует ровно затем, чтобы донести код возврата прибора
+    # до вызывающего. Что зовут через нее — вердикт по определению.
+    wrapper = re.compile(
+        r"gate\.sh\s+(?:python3|bash|sh|node)?\s*"
+        r"((?:scripts|\.claude)/[A-Za-z0-9_./-]+\.(?:py|sh|js))"
+    )
+    for base, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs
+                   if d not in {".git", "__pycache__", "node_modules", "cases",
+                                "queue", "graphify-out", ".entire", ".helioz"}]
+        for name in files:
+            if not name.endswith((".md", ".sh", ".py", ".js", ".json")):
+                continue
+            try:
+                text = open(os.path.join(base, name), encoding="utf-8").read()
+            except (OSError, UnicodeError):
+                continue
+            for rel in wrapper.findall(text):
+                if os.path.isfile(os.path.join(root, rel)):
+                    core.add(rel)
+
+    # 5.5. Якорный перечень не только сверяет набор, но и ПОПОЛНЯЕТ его - и делает
+    # это ДО хопа импорта, иначе модуль, который ворота импортируют, вердикта не
+    # получит. Признаки выше опираются на файлы, которых в другом дереве может не
+    # быть: без .autoloop/*.json из слоя выпадал themis_status.py - ворота ПО ДЕКРЕТУ -
+    # а по хопу импорта следом уходил case_graph.py. Публичная вырезка получала от
+    # этого settings.json, запирающий приборы, которые в ее дереве воротами уже не
+    # считались, и селфтест сторожа краснел у нового пользователя (изолированный
+    # прогон 03.09.2026). Якорь, который проверяет, но не держит, - половина механизма.
+    core |= {rel for rel in _ANCHOR_GATES
+             if os.path.exists(os.path.join(root, rel))}
+
+    # 6. Один хоп импорта: модуль, который ворота импортируют, считает их вердикт.
+    # Дальше хопа не идем — иначе через служебные словари в набор втягивается
+    # половина scripts/ (так propis попадал в защиту через money_rule).
+    # Берем только целый модуль (`import X`): им ворота считают вердикт. `from X import
+    # имя` — заимствование утилиты (quality_gate тянет sha_of из markdown_extract), и
+    # правка такой утилиты вердикта не отменяет.
+    local_import = re.compile(r"^\s*import\s+([A-Za-z_][A-Za-z0-9_]*)\b", re.M)
+    found = set(core)
+    for rel in sorted(core):
+        if not rel.endswith(".py"):
+            continue
+        try:
+            text = open(os.path.join(root, rel), encoding="utf-8").read()
+        except (OSError, UnicodeError):
+            continue
+        for name in local_import.findall(text):
+            if os.path.isfile(os.path.join(scripts, name + ".py")):
+                found.add("scripts/" + name + ".py")
+
+    return {path for path in found if os.path.exists(os.path.join(root, path))}
+
+
+_HARNESS_FILES = _harness_files()
+
+
+def _static_lock(root: str = PROJECT_ROOT) -> set:
+    """Файлы, которые держит НЕПОДВИЖНЫЙ слой (permissions.deny + песочница).
+
+    Это сами слои защиты: файл настроек и сторож, названный в его хуках. У них
+    двери быть не может — окно обслуживания снимается сторожем, а сторож не может
+    открывать дверь самому себе. Остальные ворота держит сторож: у него дверь есть,
+    и она оставляет след.
+    """
+    lock = {".claude/settings.json"}
+    try:
+        with open(os.path.join(root, ".claude", "settings.json"), encoding="utf-8") as f:
+            settings = json.load(f)
+    except (OSError, ValueError, UnicodeError):
+        return lock
+    hooks = settings.get("hooks") if isinstance(settings, dict) else None
+    pre = hooks.get("PreToolUse") if isinstance(hooks, dict) else None
+    path_re = re.compile(r"(?:scripts|\.claude)/[A-Za-z0-9_./-]+\.(?:py|sh|js)")
+    for entry in pre if isinstance(pre, list) else []:
+        inner = entry.get("hooks") if isinstance(entry, dict) else None
+        for hook in inner if isinstance(inner, list) else []:
+            command = str(hook.get("command", "")) if isinstance(hook, dict) else ""
+            for rel in path_re.findall(command):
+                if os.path.isfile(os.path.join(root, rel)):
+                    lock.add(rel)
+    return lock
+
+
+_STATIC_LOCK = _static_lock()
+
+
+# ── Якорь приемки ───────────────────────────────────────────────────────────
+# Якорь — НЕ источник набора (набор вычисляет признак в _harness_files), а
+# страховка от качания признака: 02.09.2026 критерий качнулся в «только файл
+# настроек и сторож» (permissions.deny: было 75, стало 3 — verdict, pd_guard и
+# quality_gate открылись), и селфтест согласился сам с собой, потому что судил
+# по тому же неверному критерию. Признак вычисляет, якорь стережет признак:
+# выпадение ЛЮБОГО из _ANCHOR_GATES из набора краснит приемку, попадание любого
+# из _ANCHOR_NOT_GATES в набор — тоже (запертое извлечение останавливает ремонт).
+# Обе половины перечня — по делу о 02.09.2026: это ворота, чей ненулевой код
+# останавливает шаг, документ или прогон, и приборы, чья правка вердикта не отменяет.
+
+
+
+def _anchor_holds_bare_tree() -> list:
+    """Ворота перечня остаются в слое на дереве без .autoloop и без workflows.
+
+    Слой собирается по признакам, а признаки читают файлы, которых в другом дереве
+    может не быть. Проверка на родном доме этого не ловит: дома есть все.
+    """
+    import shutil
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="anchor_bare_")
+    try:
+        for rel in _ANCHOR_GATES:
+            src = os.path.join(PROJECT_ROOT, rel)
+            if not os.path.isfile(src):
+                continue
+            dst = os.path.join(tmp, rel)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copyfile(src, dst)
+        # .autoloop и .claude/workflows намеренно НЕ копируются: это и есть «чужое
+        # дерево», в котором признаки замолкают.
+        bare = _harness_files(tmp)
+        return sorted(rel for rel in _ANCHOR_GATES
+                      if os.path.isfile(os.path.join(tmp, rel)) and rel not in bare)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _anchor_errors() -> list:
+    """Расхождения признака с якорем: ворота выпали либо извлечение заперто."""
+    errors = ["ворота выпали из набора: " + p for p in _ANCHOR_GATES
+              if os.path.exists(os.path.join(PROJECT_ROOT, p))
+              and p not in _HARNESS_FILES]
+    errors += ["извлечение/счет заперты зря: " + p for p in _ANCHOR_NOT_GATES
+               if p in _HARNESS_FILES]
+    return errors
+
+
+# ── Режим обслуживания ворот ───────────────────────────────────────────────
+# Ворота иногда чинить НАДО. Единственным путем ремонта был человек, правящий
+# .claude/settings.json руками (02.09.2026 — трижды за час). Окно обслуживания
+# дает машинный путь и оставляет след: кто, когда, какие файлы, зачем. Оно
+# невозможно при идущем деле, ограничено по времени и закрывается САМО —
+# молчаливое бессрочное окно защитой не является.
+OBSLUZH_STATE = os.path.join(PROJECT_ROOT, ".autoloop", "obsluzhivanie.json")
+OBSLUZH_LOG = os.path.join(PROJECT_ROOT, ".autoloop", "obsluzhivanie.log")
+OBSLUZH_MAX_MIN = 60
+CASE_RUN_ACTIVE_MIN = 24 * 60      # свежий файл прогона = дело идет
+
+
+def _active_cases(root: str = PROJECT_ROOT) -> list:
+    """Дела, идущие прямо сейчас. Признак — с ДИСКА, как у остальных гейтов."""
+    live = []
+    cases = os.path.join(root, "cases")
+    try:
+        clients = sorted(os.listdir(cases))
+    except OSError:
+        return live
+    for client in clients:
+        if client.startswith("_"):
+            continue
+        client_dir = os.path.join(cases, client)
+        try:
+            folders = sorted(os.listdir(client_dir))
+        except OSError:
+            continue
+        for case in folders:
+            base = os.path.join(client_dir, case)
+            marks = ((os.path.join(base, ".agent", "context", "run.json"),
+                      CASE_RUN_ACTIVE_MIN),
+                     (os.path.join(base, ".agent", "drafts", ".owner"),
+                      DRAFTS_LOCK_STALE_MIN))
+            for path, ttl_min in marks:
+                try:
+                    age_min = (time.time() - os.path.getmtime(path)) / 60
+                except OSError:
+                    continue
+                if age_min <= ttl_min:
+                    live.append("cases/%s/%s" % (client, case))
+                    break
+    return live
+
+
+def _obsluzhivanie_window(now=None):
+    """Открытое окно с диска. Истекшее, битое и пустое = закрытое."""
+    try:
+        with open(OBSLUZH_STATE, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError, UnicodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        do_epoch = float(data.get("do_epoch"))
+    except (TypeError, ValueError):
+        return None
+    if (now if now is not None else time.time()) >= do_epoch:
+        return None
+    files = [x for x in data.get("fajly", []) if isinstance(x, str)]
+    if not files:
+        return None
+    data["fajly"] = files
+    return data
+
+
+def _obsluzhivanie_trace(paths, window, what="ПРАВКА") -> None:
+    """Пока окно открыто, сторож не молчит: каждая правка ворот печатается."""
+    line = ("%s %s %s · кто: %s · зачем: %s · окно до %s"
+            % (time.strftime("%d.%m.%Y %H:%M:%S"), what,
+               " ".join(sorted(set(paths))), window.get("kto", "?"),
+               window.get("zachem", "?"), window.get("do", "?")))
+    print("ОБСЛУЖИВАНИЕ ВОРОТ: " + line, file=sys.stderr)
+    try:
+        os.makedirs(os.path.dirname(OBSLUZH_LOG), exist_ok=True)
+        with open(OBSLUZH_LOG, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
+
+
+def _obsluzhivanie_allows(protected) -> bool:
+    """Правка ворот разрешена, только пока окно живо и дело не идет."""
+    window = _obsluzhivanie_window()
+    if not window or _active_cases():
+        return False
+    allowed = {x.casefold() for x in window["fajly"]}
+    if not all(x.casefold() in allowed for x in protected):
+        return False
+    _obsluzhivanie_trace(protected, window)
+    return True
+
+
+def _obsluzhivanie_rel(path: str) -> str:
+    try:
+        rel = os.path.relpath(os.path.realpath(path), os.path.realpath(PROJECT_ROOT))
+    except (OSError, ValueError, TypeError):
+        return path
+    return rel.replace(os.sep, "/")
+
+
+def obsluzhivanie(argv) -> int:
+    """CLI режима обслуживания: открыть, показать, закрыть.
+
+    python3 scripts/claude_guard.py --obsluzhivanie ФАЙЛ… --zachem "причина" [--minut N]
+    python3 scripts/claude_guard.py --obsluzhivanie --status
+    python3 scripts/claude_guard.py --obsluzhivanie --zakryt
+    """
+    if "--selftest" in argv:
+        return obsluzhivanie_selftest()
+
+    if "--status" in argv:
+        window = _obsluzhivanie_window()
+        if not window:
+            print("обслуживание ЗАКРЫТО (окна нет либо срок вышел)")
+            return 1
+        left = int((float(window["do_epoch"]) - time.time()) / 60) + 1
+        print("обслуживание ОТКРЫТО до %s (осталось ~%d мин)" % (window.get("do", "?"), left))
+        print("  кто: %s · зачем: %s" % (window.get("kto", "?"), window.get("zachem", "?")))
+        print("  файлы: " + ", ".join(window["fajly"]))
+        return 0
+
+    if "--zakryt" in argv:
+        window = _obsluzhivanie_window()
+        try:
+            os.remove(OBSLUZH_STATE)
+        except OSError:
+            pass
+        if window:
+            _obsluzhivanie_trace(window["fajly"], window, what="ЗАКРЫТО")
+        print("обслуживание закрыто")
+        return 0
+
+    zachem = ""
+    minut = 30
+    files, rest = [], list(argv)
+    while rest:
+        item = rest.pop(0)
+        if item == "--zachem":
+            zachem = rest.pop(0) if rest else ""
+        elif item == "--minut":
+            try:
+                minut = int(rest.pop(0)) if rest else minut
+            except ValueError:
+                minut = minut
+        elif item.startswith("--"):
+            continue
+        else:
+            files.append(item)
+
+    if not files or not zachem.strip():
+        print("usage: claude_guard.py --obsluzhivanie ФАЙЛ… --zachem \"причина\" "
+              "[--minut N]\n       claude_guard.py --obsluzhivanie --status|--zakryt",
+              file=sys.stderr)
+        return 2
+
+    live = _active_cases()
+    if live:
+        print("ОТКАЗ: идет дело (" + ", ".join(live) + ") — ворота при активном деле "
+              "не обслуживаются. Закрыть прогон и повторить.", file=sys.stderr)
+        return 1
+
+    rels = [_obsluzhivanie_rel(x) for x in files]
+    chuzhie = [rel for rel in rels if rel not in _HARNESS_FILES]
+    if chuzhie:
+        print("ОТКАЗ: это не ворота, окно им не нужно: " + ", ".join(chuzhie) +
+              "\nПравить как обычный файл.", file=sys.stderr)
+        return 2
+
+    minut = max(1, min(minut, OBSLUZH_MAX_MIN))
+    do_epoch = time.time() + minut * 60
+    window = {
+        "kto": os.environ.get("USER") or os.environ.get("LOGNAME") or "?",
+        "kogda": time.strftime("%d.%m.%Y %H:%M:%S"),
+        "do": time.strftime("%d.%m.%Y %H:%M:%S", time.localtime(do_epoch)),
+        "do_epoch": do_epoch,
+        "fajly": sorted(set(rels)),
+        "zachem": zachem.strip(),
+    }
+    os.makedirs(os.path.dirname(OBSLUZH_STATE), exist_ok=True)
+    with open(OBSLUZH_STATE, "w", encoding="utf-8") as f:
+        json.dump(window, f, ensure_ascii=False, indent=1)
+    _obsluzhivanie_trace(window["fajly"], window, what="ОТКРЫТО")
+    print("обслуживание открыто до %s (%d мин): %s"
+          % (window["do"], minut, ", ".join(window["fajly"])))
+    print("закрыть раньше: python3 scripts/claude_guard.py --obsluzhivanie --zakryt")
+    return 0
+
+
+def obsluzhivanie_selftest() -> int:
+    """Одна запускаемая проверка: признак набора и поведение окна."""
+    fails = []
+    # Перечень живет в ОДНОМ экземпляре — якорь _ANCHOR_GATES/_ANCHOR_NOT_GATES;
+    # своя копия списка здесь разошлась бы с ним на первом же новом вороте.
+    fails += _anchor_errors()
+
+    import tempfile
+    saved_state, saved_log = OBSLUZH_STATE, OBSLUZH_LOG
+    tmp = tempfile.mkdtemp()
+    globals()["OBSLUZH_STATE"] = os.path.join(tmp, "obsluzhivanie.json")
+    globals()["OBSLUZH_LOG"] = os.path.join(tmp, "obsluzhivanie.log")
+    try:
+        window = {"kto": "test", "kogda": "-", "do": "-", "fajly": ["scripts/verdict.py"],
+                  "zachem": "проверка"}
+        with open(OBSLUZH_STATE, "w", encoding="utf-8") as f:
+            json.dump(dict(window, do_epoch=time.time() - 1), f)
+        if _obsluzhivanie_window() is not None:
+            fails.append("истекшее окно считается открытым — оно не закрывается само")
+        with open(OBSLUZH_STATE, "w", encoding="utf-8") as f:
+            json.dump(dict(window, do_epoch=time.time() + 600), f)
+        if _obsluzhivanie_window() is None:
+            fails.append("живое окно не читается")
+        if _obsluzhivanie_allows(["scripts/verdict.py"]) and _active_cases():
+            fails.append("окно пропускает правку при активном деле")
+        if not _active_cases() and not _obsluzhivanie_allows(["scripts/verdict.py"]):
+            fails.append("окно не пропускает правку заявленного файла")
+        if _obsluzhivanie_allows(["scripts/quality_gate.py"]):
+            fails.append("окно пропускает файл, который в нем не заявлен")
+        if not os.path.exists(OBSLUZH_LOG):
+            fails.append("след правки не лег на диск")
+    finally:
+        globals()["OBSLUZH_STATE"], globals()["OBSLUZH_LOG"] = saved_state, saved_log
+
+    if fails:
+        for line in fails:
+            print("✗ " + line, file=sys.stderr)
+        print("САМОЗАЩИТА ПРОВАЛЕНА (%d)" % len(fails), file=sys.stderr)
+        return 1
+    print("самозащита: набор %d файлов, окно обслуживания живет и истекает — OK"
+          % len(_HARNESS_FILES))
+    return 0
+
+
+def deny_rebuild() -> int:
+    """Машинный путь: permissions.deny и sandbox.denyWrite пересобираются из признака.
+
+    Edit-deny накрывает ВЕСЬ защищаемый набор (_HARNESS_FILES): 02.09.2026 пересбор
+    из одного _STATIC_LOCK сжал deny с 75 до 3 правил, и verdict/pd_guard/quality_gate
+    остались открыты при зеленом селфтесте. Sandbox держит только неподвижный слой
+    (_STATIC_LOCK): накрой он все ворота — окно обслуживания для Bash перестало бы
+    открываться вовсе, а оно — машинный путь ремонта."""
+    live = _active_cases()
+    if live:
+        print("ОТКАЗ: идет дело (" + ", ".join(live) + ")", file=sys.stderr)
+        return 1
+    path = os.path.join(PROJECT_ROOT, ".claude", "settings.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            settings = json.load(f)
+    except (OSError, ValueError, UnicodeError) as e:
+        print("✗ settings.json не прочитан: %s" % e, file=sys.stderr)
+        return 2
+    permissions = settings.setdefault("permissions", {})
+    old_deny = [x for x in permissions.get("deny", []) if isinstance(x, str)]
+    keep = [x for x in old_deny if not x.startswith("Edit(")]
+    new_deny = keep + sorted("Edit(/%s)" % rel for rel in _HARNESS_FILES)
+    permissions["deny"] = new_deny
+    filesystem = settings.setdefault("sandbox", {}).setdefault("filesystem", {})
+    old_write = [x for x in filesystem.get("denyWrite", []) if isinstance(x, str)]
+    keep_write = [x for x in old_write
+                  if not x.startswith("./scripts/") and not x.startswith("./.claude/")
+                  and not x.startswith("./.autoloop/")]
+    filesystem["denyWrite"] = keep_write + sorted("./" + rel for rel in _STATIC_LOCK)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+    except OSError as e:
+        # Песочница Claude Code держит сам файл настроек на запись из Bash. Это не
+        # поломка прибора: путь — тот же пересбор из редактора либо вне песочницы.
+        print("✗ settings.json не записан (%s). Запустить вне песочницы Bash "
+              "либо применить тот же список редактором." % e, file=sys.stderr)
+        return 2
+    snyato = sorted(set(old_deny) - set(new_deny))
+    print("permissions.deny: было %d, стало %d" % (len(old_deny), len(new_deny)))
+    if snyato:
+        print("снят замок с: " + ", ".join(x[5:-1].lstrip("/") for x in snyato))
+    errors = _settings_contract_errors()
+    for line in errors:
+        print("✗ " + line, file=sys.stderr)
+    return 1 if errors else 0
+
+
+def _case_in_text(value: str, base: str, roots=None) -> str:
+    """Возвращает существующее дело, явно указанное в строке транскрипта."""
+    if not isinstance(value, str) or not value:
+        return ""
+    roots = roots or _CASES_ROOTS
+    value = value.replace("\\", "/")
+
+    # Целиком переданный путь (включая cwd) дешевле и точнее regex.
+    if not re.search(r"[\n;&|<>]", value):
+        candidate = _resolve(value, base)
+        for root in roots:
+            try:
+                rel = os.path.relpath(candidate, os.path.realpath(root)).split(os.sep)
+            except (OSError, ValueError):
+                continue
+            if len(rel) >= 2 and rel[0] != "..":
+                case = os.path.join(root, rel[0], rel[1])
+                if os.path.isdir(case):
+                    return case
+
+    patterns = [r"(?:^|[^A-Za-z0-9._/-])(?:\./)?cases/"
+                r"([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)"]
+    patterns += [re.escape(os.path.realpath(root).replace(os.sep, "/").rstrip("/"))
+                 + r"/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)" for root in roots]
+    for pattern in patterns:
+        for match in re.finditer(pattern, value, re.I):
+            client, matter = match.group(1), match.group(2)
+            for root in roots:
+                case = os.path.join(root, client, matter)
+                if os.path.isdir(case):
+                    return case
+    return ""
+
+
+def _strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for child in value.values():
+            yield from _strings(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _strings(child)
+
+
+def _session_leads_case(payload: dict, roots=None):
+    """Дисковый признак ровно текущей сессии: ее transcript JSONL уже содержит
+    человеческий запрос, cwd или tool_use с путем существующего дела.
+
+    False — транскрипт доказывает maintenance-сессию; None — транскрипт
+    нельзя проверить, поэтому мутация харнесса закрывается fail-closed.
+    """
+    if not isinstance(payload, dict):
+        return None
+    roots = roots or _CASES_ROOTS
+    base = payload.get("cwd") if isinstance(payload.get("cwd"), str) else PROJECT_ROOT
+    if _case_in_text(base, PROJECT_ROOT, roots):
+        return True
+    transcript = payload.get("transcript_path")
+    if not isinstance(transcript, str) or not transcript:
+        return None
+    wanted_session = payload.get("session_id")
+    try:
+        stream = open(os.path.expanduser(transcript), encoding="utf-8")
+    except OSError:
+        return None
+    with stream:
+        for raw in stream:
+            try:
+                entry = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(entry, dict):
+                continue
+            entry_session = entry.get("sessionId") or entry.get("session_id")
+            if wanted_session and entry_session and entry_session != wanted_session:
+                continue
+            entry_base = entry.get("cwd") if isinstance(entry.get("cwd"), str) else base
+            if _case_in_text(entry_base, PROJECT_ROOT, roots):
+                return True
+            values = []
+            if entry.get("type") == "assistant":
+                message = entry.get("message")
+                content = message.get("content") if isinstance(message, dict) else []
+                for part in content if isinstance(content, list) else []:
+                    if isinstance(part, dict) and part.get("type") == "tool_use":
+                        values.extend(_strings(part.get("input")))
+            elif entry.get("type") == "user" and not entry.get("sourceToolAssistantUUID"):
+                values.extend(_strings(entry.get("message")))
+            elif entry.get("type") == "last-prompt":
+                values.extend(_strings(entry.get("lastPrompt")))
+            if any(_case_in_text(value, entry_base, roots) for value in values):
+                return True
+    return False
+
+
+def _harness_mutation_gate(paths, payload=None, roots=None) -> None:
+    """Не дает сессии, ведущей дело, менять собственные ворота и приемку.
+
+    Прямые Claude file tools держит внешний слой permissions.deny. Этот слой ловит
+    те же цели в Bash, включая удаление. Признак берем из transcript_path,
+    который Claude Code передает хуку; чужой живой .owner не запирает maintenance-сессию.
+    Законный путь: закрыть Claude Code и изменить файл внешним редактором.
+    Project settings действуют только при primary cwd в проекте.
+    """
+    protected = []
+    protected_cf = {p.casefold() for p in _HARNESS_FILES}
+    for path in paths:
+        try:
+            rel = os.path.relpath(os.path.realpath(path), os.path.realpath(PROJECT_ROOT))
+        except (OSError, ValueError, TypeError):
+            continue
+        rel = rel.replace(os.sep, "/")
+        rel_cf = rel.casefold().rstrip("/")
+        if (rel_cf in protected_cf
+                or rel_cf in {"", "."}
+                or any(p.startswith(rel_cf + "/") for p in protected_cf)):
+            protected.append(rel)
+    if not protected:
+        return
+    if _obsluzhivanie_allows(protected):
+        return
+    leads_case = _session_leads_case(payload, roots)
+    # ponytail: сканируем transcript только при попытке мутации харнесса;
+    # потолок — project-scope и строка пути, апгрейд — managed hook + case lease
+    # с session_id, если дела разрешат вести из primary cwd вне проекта.
+    listed = ", ".join(sorted(set(protected)))
+    if leads_case is not False:
+        reason = ("сессия ведет дело" if leads_case else
+                  "не удалось проверить дисковый транскрипт сессии")
+        block(
+            f"БЛОК САМОЗАЩИТЫ: {reason}, поэтому ворота и приемку не трогаем: {listed}. "
+            "Закрыть дело; ремонт — в режиме обслуживания."
+        )
+    block(
+        f"БЛОК САМОЗАЩИТЫ: ворота правятся только в режиме обслуживания: {listed}. "
+        "Открыть окно (след на диске, срок ≤ 60 мин, при активном деле не открывается):\n"
+        f"  python3 scripts/claude_guard.py --obsluzhivanie {listed.replace(', ', ' ')} "
+        "--zachem \"что чиним\" --minut 30"
+    )
 
 
 def _drafts_lock_gate(p: str) -> None:
@@ -966,6 +1677,30 @@ def _under_protected(path: str) -> bool:
                           norm, re.I))
 
 
+def _is_services_registry(path: str) -> bool:
+    """Цель — белый список внешних сервисов knowledge/allowed-services.md.
+
+    01.09.2026 список был дописан ПОСРЕДИ прогона проверяемой стороной: два канала
+    появились абзацем по ходу работы, правка так и осталась незакоммиченной.
+    Разрешение, выданное себе на ходу, разрешением владельца не является. Законный
+    путь один — scripts/channel_grant.py: он ставит машинную строку с датой,
+    причиной и ссылкой на санкцию, а история решений не переписывается задним числом.
+    """
+    norm = path.replace(os.sep, "/").strip("'\"")
+    return norm.endswith("/knowledge/allowed-services.md")
+
+
+_SERVICES_BLOCK = (
+    "БЛОК: knowledge/allowed-services.md правится ТОЛЬКО прибором "
+    "python3 scripts/channel_grant.py --host ДОМЕН --reason «зачем» --owner-approved "
+    "(отмена — тот же прибор с --deny). Прямая правка запрещена: белый список "
+    "ограничивает ту же сторону, которая его пишет, поэтому санкция владельца "
+    "оформляется машинной записью с датой и причиной, а не абзацем по ходу прогона. "
+    "Решение по поиску на sudact.ru здесь не дублировать — его точка правды "
+    "SUDACT_SEARCH_ALLOWED в scripts/practice_search.py."
+)
+
+
 # mv УДАЛЯЕТ источник, scp/rsync УВОЗЯТ его за границу — перенос СУЩЕСТВУЮЩЕГО файла
 # ИЗ 00_intake/_baselines так же разрушителен/утечен, как перезапись, хотя цель (последний
 # аргумент) лежит вне охраняемых папок и по ней одной это не видно. scp/rsync — «перенос
@@ -1234,6 +1969,66 @@ def _sudact_allowed() -> bool:
     return bool(re.search(r"^SUDACT_SEARCH_ALLOWED\s*=\s*True", src, re.M))
 
 
+# Правовой запрос — словарь маркеров в КОДЕ, а не догадка модели: детерминированно,
+# проверяемо, одинаково в хуке и в селфтесте. Список узкий, из явно юридических слов
+# (не «право»/«дело» — они всплывают в бытовых запросах и дали бы ложную тревогу).
+# ponytail: подстрочное вхождение — груба, но дешева и достаточна для гейта порядка
+# поиска; нужна морфология — вынести в отдельный прибор, а не раздувать хук.
+_LEGAL_QUERY_WORDS = (
+    "суд", "иск", "истц", "истец", "ответчик", "апелляц", "кассац", "надзор",
+    "пленум", "гк рф", "гпк", "апк рф", " кас ", "упк", "коап", "нк рф",
+    "постановление", "определение", "судебн", "практик", "взыскан", "неустойк",
+    "договор", "жалоб", "ходатайств", "вс рф", "верховн", "арбитраж",
+    "госпошлин", "исковой давност", "кадастр", "егрн", "наследств",
+)
+
+
+def _is_legal_query(query: str) -> bool:
+    q = (query or "").lower()
+    return any(w in q for w in _LEGAL_QUERY_WORDS)
+
+
+def _session_start_time(payload: dict) -> float:
+    """Момент старта ТЕКУЩЕЙ сессии — ФАКТ с диска, не из памяти модели: время рождения
+    файла транскрипта (Claude Code кладет его путь в payload и создает при старте сессии).
+    Нет пути/birthtime → +inf: старт «в будущем» не засчитает ни один прошлый кеш —
+    fail-closed к порядку поиска (вчерашний кеш не откроет сегодняшний WebSearch)."""
+    tp = payload.get("transcript_path")
+    if not isinstance(tp, str) or not tp:
+        return float("inf")
+    try:
+        st = os.stat(os.path.expanduser(tp))
+    except OSError:
+        return float("inf")
+    return getattr(st, "st_birthtime", None) or st.st_ctime
+
+
+def _practice_search_used(session_start: float) -> bool:
+    """Лестница поиска практики пройдена, если practice_search.py оставил кеш В ЭТОМ
+    прогоне. Признак — ФАКТ с диска: json-попадание в {корень}/.cache/practice, чей mtime
+    НЕ старше старта текущей сессии. «Есть хоть один json» само по себе НЕ в счет: на
+    рабочей машине там тысячи вчерашних попаданий (замер: 2787, свежие от 17.08.2026), и
+    признак был бы истинным ВСЕГДА, а блок WebSearch не срабатывал бы никогда (дефект R05,
+    второй круг). Override THEMIS_PRACTICE_SEARCHED — для детерминированного селфтеста."""
+    env = os.environ.get("THEMIS_PRACTICE_SEARCHED")
+    if env is not None:
+        return env == "1"
+    cache = os.path.join(PROJECT_ROOT, ".cache", "practice")
+    try:
+        entries = os.listdir(cache)
+    except OSError:
+        return False
+    for n in entries:
+        if not n.endswith(".json"):
+            continue
+        try:
+            if os.path.getmtime(os.path.join(cache, n)) >= session_start:
+                return True
+        except OSError:
+            continue
+    return False
+
+
 # Чужой CLI за границей процесса — мимо наших ворот. claude_guard живет ВНУТРИ
 # нашего процесса; прямой вызов чужого CLI из Bash уносит материалы дела
 # без обезличивания и пробы, а за границей процесса сторожа нет вовсе (проба
@@ -1337,6 +2132,202 @@ def _expand_exec_heredocs(raw: str) -> str:
     return _EXEC_HEREDOC_EXPAND_RE.sub(repl, raw)
 
 
+# ── Спавн агентов конвейера (M01) ──────────────────────────────
+# Корень №1 разбора 01.09.2026: ворота протокола жили ТЕКСТОМ (CLAUDE.md, скиллы),
+# а текст исполняется вероятностно — за боевой прогон проводник не вызван ни разу,
+# все 27 спавнов сделаны напрямую из главного потока мимо порядка фаз. Тут — жесткое
+# исполнение на спавне Agent.
+#
+# ГРАНИЦА ВИДИМОСТИ. PreToolUse срабатывает на вызовах ГЛАВНОГО потока. Спавны
+# субагентов из субагента (case-mapper зовет ридеров; проводник-workflow зовет
+# case-mapper/охотника/drafter) этот хук НЕ видит — и это правильно: порядок внутри
+# проводника держит сам проводник, а гейт ловит прямой обход из главного потока.
+#
+# СОСЕД НА ТОМ ЖЕ matcher. Рядом стоит отдельный PreToolUse c matcher "Agent" —
+# хук Entire (pre-task трекинг). Хуки Claude Code исполняются независимо: наш exit 2
+# запрещает спавн, но НЕ отменяет процесс Entire (его pre-task отработает как обычно,
+# просто задача не выполнится). Отслеживание Entire мы не трогаем и не отключаем.
+HUNTER_AGENTS = {"practice-hunter-classic", "practice-hunter-skeptic",
+                 "practice-hunter-tactical"}
+# Ключевые агенты дела: их прямой спавн из главного потока идет только через проводник.
+KEY_CASE_AGENTS = HUNTER_AGENTS | {
+    "case-mapper", "case-reconciler", "doc-drafter", "doc-reviewer"}
+
+
+def _agent_case(ti: dict, base: str) -> str:
+    """Дело, к которому относится спавн: из пути в промпте/описании, иначе из
+    единственного свежего лока черновиков. Пусто — дело НЕ опознано (fail-open)."""
+    for key in ("prompt", "description"):
+        v = ti.get(key)
+        if isinstance(v, str):
+            c = _case_in_text(v, base)
+            if c:
+                return c
+    # Fallback: ровно один свежий .agent/drafts/.owner среди наших дел. Несколько
+    # или ни одного — дело не опознано. ponytail: неглубокий скан по делам (их
+    # десятки), апгрейд — case-lease с session_id, если понадобится точность.
+    fresh = []
+    for root in _CASES_ROOTS:
+        if not os.path.isdir(root):
+            continue
+        try:
+            clients = os.listdir(root)
+        except OSError:
+            continue
+        for client in clients:
+            cdir = os.path.join(root, client)
+            if not os.path.isdir(cdir) or client.startswith("_"):
+                continue
+            try:
+                matters = os.listdir(cdir)
+            except OSError:
+                continue
+            for matter in matters:
+                owner = os.path.join(cdir, matter, ".agent", "drafts", ".owner")
+                try:
+                    if (time.time() - os.path.getmtime(owner)) / 60 <= DRAFTS_LOCK_STALE_MIN:
+                        fresh.append(os.path.join(cdir, matter))
+                except OSError:
+                    continue
+    return fresh[0] if len(fresh) == 1 else ""
+
+
+def _swarm_live_slot(name: str, ti: dict, payload: dict) -> None:
+    """Потолок ЧИСЛА одновременных агентов (пункт 6): счет живых на диске в
+    swarm_contract, спавн за потолком отбит. Формула потолка без счета — печать
+    числа, а не принуждение (замер судьи 02.09.2026: concurrency_cap звали только
+    печать и селфтест). Fail-open по импорту как у соседних гейтов: сорванный
+    прибор не глушит все спавны."""
+    try:
+        import swarm_contract
+        reason = swarm_contract.live_register(
+            name,
+            session=str(payload.get("session_id") or ""),
+            background=bool(ti.get("run_in_background")),
+        )
+    except Exception:
+        return
+    if reason:
+        block("БЛОК ПОТОЛКА РОЯ: " + reason)
+
+
+def _agent_gate(ti: dict, payload: dict) -> None:
+    """Жесткое исполнение порядка конвейера на спавне ключевого агента дела."""
+    name = ""
+    for key in ("subagent_type", "agentType", "subagentType"):
+        v = ti.get(key)
+        if isinstance(v, str) and v:
+            name = v
+            break
+
+    base = payload.get("cwd") if isinstance(payload.get("cwd"), str) else os.getcwd()
+
+    # Контракт роя (scripts/swarm_contract.py) — единый источник правды о спавне:
+    # типизация роли (general-purpose под охоту практики → блок) и наследование
+    # действующей поправки прогона вниз по рою (лист без нее → блок). Судим ДО
+    # раннего выхода ниже: эти агенты ВНЕ KEY_CASE_AGENTS. own_type пуст — главный
+    # поток не агент; спавн агентом СВОЕГО типа делает координатор-субагент, его
+    # этот хук не видит, его ловит swarm_contract --audit-run по транскриптам.
+    # Без этого вызова прибор оставался сиротой — тот самый дефект, ради которого
+    # затеян ремонт (ворота есть, а исполнение в них не заходит). Fail-open по
+    # импорту как у соседних гейтов: сорванный импорт не должен глушить все спавны.
+    prompt = " ".join(str(ti.get(k) or "") for k in ("prompt", "description"))
+    amendment = ""
+    if name == "practice-leaf":
+        c = _agent_case(ti, base)
+        if c:
+            try:
+                import case_paths
+                amendment = str(case_paths.run_read(c).get("amendment", "") or "")
+            except Exception:
+                amendment = ""
+    try:
+        import swarm_contract
+        reason = swarm_contract.spawn_verdict(name, prompt, "", amendment)
+    except Exception:
+        reason = ""
+    if reason:
+        block("БЛОК КОНТРАКТА РОЯ: " + reason)
+
+    if name not in KEY_CASE_AGENTS:
+        _swarm_live_slot(name, ti, payload)     # слот живого агента до выхода
+        return                              # не ключевой агент дела — не наш гейт
+
+    # doc-reviewer — только из doc-drafter (его Шаг 9), не из главного потока: за
+    # прогон 01.09 запрет \xabвторой раз не звать\xbb нарушил САМ оркестратор дважды
+    # (23,19 долл.). Спавн doc-drafter-ом этот хук не видит (субагентный контекст);
+    # значит любой doc-reviewer, что виден здесь, — прямой из главного потока.
+    # Escape для харнесса, поднимающего субагентные спавны в этот хук: THEMIS_DOC_REVIEWER_OK.
+    if name == "doc-reviewer" and not os.environ.get("THEMIS_DOC_REVIEWER_OK"):
+        block(
+            "БЛОК ПРОТОКОЛА: doc-reviewer из главного потока запрещен. Проверку Кони "
+            "запускает сам doc-drafter (его Шаг 9), владелец ревью — один. Второй "
+            "прямой вызов за прогон 01.09.2026 стоил 23,19 долл."
+        )
+
+    case = _agent_case(ti, base)
+    if not case:
+        _swarm_live_slot(name, ti, payload)
+        return                              # дело не опознано → ведем себя как раньше
+
+    ctx = os.path.join(case, ".agent", "context")
+    km = os.path.join(ctx, "knowledge-map.md")
+    try:
+        import case_paths
+        st = case_paths.run_read(case)
+    except Exception:
+        st = {}                             # прибор недоступен — состояние пусто
+
+    # Проводник обязателен: его отметка ложится в файл прогона. Ворота в самом файле
+    # проводника не ставим (за прогон его не открыли ни разу) — держим на спавне.
+    # ponytail: отметка проводника персистентна по делу (потолок); апгрейд — run-id/свежесть.
+    if not st.get("guide"):
+        block(
+            "БЛОК ПРОВОДНИКА: ключевой агент дела (" + name + ") спавнится напрямую, "
+            "минуя проводник themis-pipeline. Прогон дела идет только им: "
+            'Workflow({ name: "themis-pipeline", args: "' + case + '" }) — он держит '
+            "порядок фаз 0→5 и сам стампует прогон. Прямой спавн мимо проводника — "
+            "корень №1 разбора 01.09.2026 (0 вызовов проводника, 27 прямых спавнов)."
+        )
+
+    if name in HUNTER_AGENTS:
+        # Карта — жестко, исключений НЕТ (решение владельца 01.09.2026): поиск
+        # практики бессмыслен, пока нет карты дела. Жесткий срок основанием не является.
+        if not _has_marker(km, r"## КАРТА ГОТОВА ✓"):
+            block(
+                "БЛОК ПРОТОКОЛА: охотник за практикой без карты дела. Поиск практики "
+                "бессмыслен, пока нет карты (решение владельца 01.09.2026, исключений "
+                "нет). Сначала case-mapper → маркер \xab## КАРТА ГОТОВА ✓\xbb в "
+                "knowledge-map.md. Практику из ДРУГОГО дела берут без охотников вовсе."
+            )
+        code = st.get("preflight_code")
+        if isinstance(code, int) and code != 0 and not st.get("preflight_override"):
+            block(
+                "БЛОК: последний preflight_search вернул код " + str(code) + " — внешних "
+                "каналов поиска нет, охоту не запускать (269 950 токенов за \xabинструмент "
+                "недоступен\xbb — прецедент). Решение владельца записью на диске: "
+                "python3 scripts/case_paths.py --run-set " + case + " preflight_override "
+                "'работать по practice_index' — либо починить канал и повторить preflight."
+            )
+
+    if name == "doc-drafter":
+        # Предшественник (Шаги 1-2): карта + практика. MICRO их отменяет — там
+        # свой честный маркер брифа (единый предикат с _workflow_gate, без расхождения).
+        pr = os.path.join(ctx, "practice.md")
+        brief = os.path.join(ctx, "_working", "brief.md")
+        if not _has_marker(brief, r"## MICRO-ТРЕК ПОДТВЕРЖДЕН"):
+            if not _has_marker(km, r"## КАРТА ГОТОВА ✓") or not _has_marker(pr, PRACTICE_MARKER):
+                block(
+                    "БЛОК ПРОТОКОЛА: doc-drafter до готовых карты и практики (Шаги 1-2). "
+                    "Нет маркера карты и/или практики. Пройти конвейер по порядку. "
+                    "Статус: python3 scripts/themis_status.py " + case
+                )
+
+    # Все гейты пройдены — спавн состоится, берем слот ПОСЛЕДНИМ: заблокированный
+    # спавн не должен был занять место живого агента.
+    _swarm_live_slot(name, ti, payload)
+
+
 def main() -> None:
     raw = sys.stdin.read()
     if not raw.strip():
@@ -1365,7 +2356,26 @@ def main() -> None:
     def as_str(v) -> str:
         return v if isinstance(v, str) else ""
 
-    if tool in ("WebFetch", "WebSearch") and tool == "WebFetch":
+    # Экономия контекста — машинная часть (потолок контекста фазы, повторное чтение
+    # того же среза, вес файлов инструкций в байтах). Три редакции CLAUDE.md просили
+    # этого текстом, и три редакции правило не исполнялось: замер 02.09.2026 дал
+    # 55,7 % счета прогона на повторную доставку уже прочитанного.
+    if context_guard is not None:
+        prichina = context_guard.check(d)
+        if prichina:
+            block(prichina)
+
+    # Ollama/qwen/gemma выведены из системы (галлюцинируют на русском, прецедент
+    # 02.08.2026). Бинарь в системе стоит, поэтому запрет держится хуком, а не текстом.
+    if tool == "Bash" and re.search(r"(?<![\w./-])ollama(?![\w-])", as_str(ti.get("command"))):
+        block(
+            "БЛОК: ollama выведен из системы Фемиды — извлечение идет Apple Vision "
+            "(bin/vision-doc) и markitdown через scripts/markdown_extract.py, "
+            "reasoning — на моделях Claude. Локальные LLM разрушали кириллицу и "
+            "выдумывали содержимое (knowledge/lessons-log.md, 02.08.2026)."
+        )
+
+    if tool == "WebFetch":
         url = as_str(ti.get("url"))
         m = re.match(r"[a-z]+://([^/?#]+)", url, re.I)
         host = (m.group(1) if m else "").split("@")[-1].split(":")[0].lower()
@@ -1396,6 +2406,26 @@ def main() -> None:
                     f"WebSearch → официальные публикаторы."
                 )
 
+    # WebSearch — не WebFetch: у него нет url (проверять хост нечего), есть query.
+    # Правило другое: правовой запрос идет наружу только ПОСЛЕ прибора practice_search.
+    if tool == "WebSearch":
+        if _is_legal_query(as_str(ti.get("query"))) and not _practice_search_used(_session_start_time(d)):
+            block(
+                "БЛОК: WebSearch по правовому запросу до scripts/practice_search.py. "
+                "Порядок поиска практики: knowledge/practice_index.md (грепом) → "
+                "python3 scripts/practice_search.py → и только потом WebSearch → "
+                "официальные публикаторы. Прогони practice_search.py — его кеш снимет "
+                "этот блок."
+            )
+
+    # Списание ОБЩЕЙ квоты идет ПОСЛЕ проверок ветвей выше: заблокированное
+    # обращение наружу не состоялось, и списывать за него нечестно.
+    if tool in ("WebSearch", "WebFetch"):
+        _spisat_kvotu(d)
+
+    if tool == "Agent":
+        _agent_gate(ti, d)
+
     if tool == "Read":
         p = as_str(ti.get("file_path"))
         _ext = os.path.splitext(p)[1].lower().lstrip(".")
@@ -1414,7 +2444,7 @@ def main() -> None:
         # Гейт держим на файлах проекта: внешние материалы (справки, чужие репозитории)
         # аудитор обязан читать целиком, и запрещать ему это — не экономия, а слепота.
         if (re.search(r"\.(md|txt|jsonl|log|csv)$", p_res, re.I)
-                and re.search(r"/themis/", p_res.replace("\\", "/"), re.I)
+                and _under_dir(p_res, PROJECT_ROOT)
                 and not ti.get("offset") and not ti.get("limit")):
             try:
                 size = os.path.getsize(p_res)
@@ -1434,6 +2464,7 @@ def main() -> None:
         p_raw = as_str(ti.get("file_path")) or as_str(ti.get("notebook_path"))
         wcwd = as_str(d.get("cwd")) or os.getcwd()
         p = _resolve(p_raw, wcwd)
+        _harness_mutation_gate([p], payload=d)
         if re.search(r"/00_intake/", p.replace(os.sep, "/"), re.I):   # APFS: 00_INTAKE == 00_intake
             block(
                 "БЛОК: 00_intake/ неприкосновенен — исходники клиента "
@@ -1446,6 +2477,8 @@ def main() -> None:
                 "БЛОК: _baselines/ неприкосновенна — база «ДО» для разбора правок "
                 "доверителя. Снимок кладет create_docx.save(), Write ее не перезаписывает."
             )
+        if _is_services_registry(p):
+            block(_SERVICES_BLOCK)
         _cases_write_gate([p])
         _workflow_gate(p)
         _drafts_lock_gate(p)
@@ -1475,7 +2508,18 @@ def main() -> None:
             )
 
         targets = _write_targets(cmd, base)
+        removal_targets = (_rm_targets(cmd, base) + _git_destruct_targets(cmd, base)
+                           + _interp_removal_targets(cmd, base))
+        moved_sources = [_resolve(s, base) for s in _mv_sources(cmd)]
+        link_sources = _link_sources(cmd, base)
+        _harness_mutation_gate(targets + removal_targets + moved_sources + link_sources,
+                               payload=d)
         _cases_write_gate(targets)
+        # Тот же запрет в Bash: редирект, sed -i и cp по белому списку — та же
+        # правка мимо прибора, что и Write.
+        for t in targets + removal_targets + moved_sources:
+            if _is_services_registry(t):
+                block(_SERVICES_BLOCK)
         for t in targets:
             _workflow_gate(t)      # документ въезжает в GOTOVO и обычным cp, не только Write
             _drafts_lock_gate(t)   # лок черновиков держит и cp/mv в .agent/drafts, не только Write
@@ -1508,8 +2552,6 @@ def main() -> None:
         # «ДО» так же, как удаление их самих (проба круга 5) — а по имени цели не видно.
         # find судим по СЫРОЙ команде: _normalize срезает `-exec rm {} ;` в `; rm {} ;`,
         # и по нормализованной строке разрушительность find уже не видна.
-        removal_targets = (_rm_targets(cmd, base) + _git_destruct_targets(cmd, base)
-                           + _interp_removal_targets(cmd, base))
         if (any(_under_protected(t) or _is_protected_ancestor(t) or _is_cases_root(t)
                 for t in removal_targets)
                 or _find_destruct_hits(stripped, base)
@@ -1540,8 +2582,7 @@ def main() -> None:
         # что реально пишется, а не как это названо в командной строке.
         # Увоз/переименование родителя (`mv {дело} /tmp`, `mv {клиент} {клиент}-старое`)
         # уносит первичку и базу «ДО» целиком — mv-источник судим и как предок поддерева.
-        removed_sources = [_resolve(s, base) for s in _mv_sources(cmd)]
-        removed_sources = [s for s in removed_sources
+        removed_sources = [s for s in moved_sources
                            if _under_protected(s) or _is_protected_ancestor(s)
                            or _is_cases_root(s)]     # `mv cases /tmp` уносит все дела
         # Опасная запись в первичку — защищенная цель, к которой пишет ЛЮБАЯ операция,
@@ -1561,7 +2602,7 @@ def main() -> None:
             )
         # Ссылка (жесткая/символьная) на первичку выносит ее наружу мимо сторожа и
         # дает править оригинал по ссылке — увод, которого по цели-записи не видать.
-        if any(_under_protected(s) for s in _link_sources(cmd, base)):
+        if any(_under_protected(s) for s in link_sources):
             block(
                 "БЛОК: ссылка на 00_intake/ или _baselines/ выносит первичку наружу — "
                 "правка по жесткой/символьной ссылке меняет оригинал, а копия уходит "
@@ -1583,11 +2624,330 @@ def main() -> None:
     # Работа вне корня проекта — прецедент 25.07.2026: сессия шла мимо cases/,
     # правила проекта не грузились, счет 49,5 млн токенов. Предупреждаем, не блокируем.
     cwd = as_str(d.get("cwd"))
-    if cwd and "themis" not in cwd:
+    if cwd and not _under_dir(cwd, PROJECT_ROOT):
         print(f"⚠ Фемида: cwd={cwd} вне корня проекта — правила проекта могут не действовать.",
               file=sys.stderr)
 
     sys.exit(0)
+
+
+def _delo_progona(d) -> str:
+    """Дело прогона для ОБЩЕГО счета квоты: сначала каталог, потом переменная.
+
+    Вывод из пути важнее $THEMIS_CASE: переменную в бою никто не выставлял
+    (M07, замер 02.09.2026), и общий счет молча падал бы в пустоту. Тихий ноль
+    в счетчике неотличим от отсутствия расхода.
+    """
+    cwd = str(d.get("cwd") or "") or os.getcwd()
+    koren = os.path.join(PROJECT_ROOT, "cases") + os.sep
+    if cwd.startswith(koren):
+        chasti = cwd[len(koren):].split(os.sep)
+        if len(chasti) >= 2 and chasti[0] and chasti[1]:
+            return os.path.join(PROJECT_ROOT, "cases", chasti[0], chasti[1])
+    peremennaya = os.environ.get("THEMIS_CASE", "")
+    if peremennaya:
+        return peremennaya
+    # Третий источник и единственный, который работает в бою: рой и проводник
+    # ходят из корня проекта, а хук запускается харнессом и среды проводника не
+    # видит. Указатель пишет проводник в начале прогона (M07, круг 02.09.2026).
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import channels
+        return channels.tekushchee_delo()
+    except Exception:
+        return ""
+
+
+def _spisat_kvotu(d, name: str = "websearch") -> None:
+    """Списать единицу ОБЩЕЙ квоты канала и отбить, когда потолок пройден.
+
+    Квота — общий счет прогона, а не догадка отдельного охотника: списывает
+    сторож на каждом обращении наружу, читает ее preflight через
+    channels.quota_status. Без этого вызова читающая половина всегда видит ноль.
+    """
+    case = _delo_progona(d)
+    if not case:
+        return                      # вне дела счета нет — считать некуда и незачем
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import channels
+        used, cap, hvatilo = channels.spend(case, name)
+    except Exception:
+        return                      # счет не обязан ронять работу по делу
+    if not hvatilo:
+        block(
+            "БЛОК: общая квота канала «%s» исчерпана — %d из %d за прогон. "
+            "Это ОБЩИЙ счет всех агентов прогона, а не счет твоей сессии: "
+            "лимит стоит у источника, и обход его делением на агентов не лечит. "
+            "Что делать: сузить запрос, взять из knowledge/practice_index.md "
+            "либо продолжить в следующем прогоне." % (name, used, cap)
+        )
+
+
+def _main_tool_names() -> set:
+    """Имена tool, для которых в main есть явная ветка обработки."""
+    import ast
+
+    tree = ast.parse(open(os.path.realpath(__file__), encoding="utf-8").read())
+    main_node = next(n for n in tree.body
+                     if isinstance(n, ast.FunctionDef) and n.name == "main")
+    names = set()
+    for node in ast.walk(main_node):
+        if not isinstance(node, ast.Compare) or len(node.ops) != 1:
+            continue
+        if not isinstance(node.left, ast.Name) or node.left.id != "tool":
+            continue
+        right = node.comparators[0]
+        if isinstance(node.ops[0], ast.Eq) and isinstance(right, ast.Constant):
+            if isinstance(right.value, str):
+                names.add(right.value)
+        elif isinstance(node.ops[0], ast.In) and isinstance(right, (ast.Tuple, ast.List, ast.Set)):
+            names.update(x.value for x in right.elts
+                         if isinstance(x, ast.Constant) and isinstance(x.value, str))
+    return names
+
+
+def _glob_parts_match(pattern: list, path: list) -> bool:
+    """Gitignore-подобный glob: `*` внутри сегмента, `**` через каталоги."""
+    seen = set()
+
+    def match(i: int, j: int) -> bool:
+        if (i, j) in seen:
+            return False
+        seen.add((i, j))
+        if i == len(pattern):
+            return j == len(path)
+        if pattern[i] == "**":
+            return match(i + 1, j) or (j < len(path) and match(i, j + 1))
+        return (j < len(path)
+                and fnmatch.fnmatchcase(path[j], pattern[i])
+                and match(i + 1, j + 1))
+
+    return match(0, 0)
+
+
+def _edit_rule_matches(rule: str, path: str, cwd: str = None) -> bool:
+    """Совпадение Edit(path) по документированным якорям Claude Code.
+
+    `/path` в project settings — от primary working directory, `//path` — от
+    корня ФС. Источник: https://code.claude.com/docs/en/permissions#read-and-edit
+    """
+    if rule in {"Edit", "Edit(*)"}:
+        return True
+    m = re.fullmatch(r"Edit\((.*)\)", rule)
+    if not m or not m.group(1):
+        return False
+    raw = m.group(1)
+    cwd = os.path.realpath(cwd or os.getcwd())
+    if raw.startswith("//"):
+        pattern = os.path.join(os.sep, raw[2:])
+    elif raw.startswith("~/"):
+        pattern = os.path.expanduser(raw)
+    elif raw.startswith("/"):
+        pattern = os.path.join(PROJECT_ROOT, raw[1:])
+    else:
+        anchored = raw.startswith("./")
+        raw = raw[2:] if anchored else raw
+        # В deny один голый сегмент (`.env`) и `secrets/**` ищутся на любой
+        # глубине; прочие относительные шаблоны якорятся к cwd.
+        if not anchored and ("/" not in raw or re.fullmatch(r"[^/]+/\*\*", raw)):
+            raw = "**/" + raw
+        pattern = os.path.join(cwd, raw)
+
+    pattern_parts = [part for part in os.path.normpath(pattern).replace(os.sep, "/").split("/")
+                     if part and part != "."]
+    target = os.path.expanduser(path)
+    if not os.path.isabs(target):
+        target = os.path.join(cwd, target)
+    targets = {os.path.abspath(target), os.path.realpath(target)}
+    return any(_glob_parts_match(
+        pattern_parts,
+        [part for part in candidate.replace(os.sep, "/").split("/") if part]
+    ) for candidate in targets)
+
+
+def _deny_covering_rules(path: str, settings=None, cwd: str = None) -> list:
+    """Edit-deny, которые реально накрывают конкретный путь."""
+    if settings is None:
+        try:
+            settings = json.load(open(os.path.join(PROJECT_ROOT, ".claude", "settings.json"),
+                                      encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+    permissions = settings.get("permissions") if isinstance(settings, dict) else None
+    deny = permissions.get("deny") if isinstance(permissions, dict) else None
+    if not isinstance(deny, list):
+        return []
+    return [rule for rule in deny
+            if isinstance(rule, str) and _edit_rule_matches(rule, path, cwd)]
+
+
+def deny_covers(path: str) -> int:
+    """CLI: ноль, только если живой permissions.deny накрывает путь для Edit."""
+    settings_path = os.path.join(PROJECT_ROOT, ".claude", "settings.json")
+    try:
+        settings = json.load(open(settings_path, encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        print(f"✗ permissions.deny не прочитан: {e}", file=sys.stderr)
+        return 2
+    rules = _deny_covering_rules(path, settings)
+    shown = os.path.relpath(os.path.abspath(path), PROJECT_ROOT) \
+        if os.path.isabs(path) else path
+    if rules:
+        print(f"✓ deny накрывает {shown}: {', '.join(rules)}")
+        return 0
+    print(f"✗ deny не накрывает {shown}", file=sys.stderr)
+    return 1
+
+
+def _settings_contract_errors(settings=None) -> list:
+    """Расхождения самозащиты и фактической проводки PreToolUse."""
+    if settings is None:
+        path = os.path.join(PROJECT_ROOT, ".claude", "settings.json")
+        try:
+            settings = json.load(open(path, encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            return [f".claude/settings.json не прочитан: {e}"]
+    if not isinstance(settings, dict):
+        return [".claude/settings.json: корень не объект"]
+
+    errors = []
+    permissions = settings.get("permissions")
+    deny = permissions.get("deny") if isinstance(permissions, dict) else None
+    if not isinstance(deny, list) or not deny:
+        errors.append("permissions.deny пуст")
+        deny = []
+    if "Read(./.entire/metadata/**)" not in deny:
+        errors.append("permissions.deny не держит: Read(./.entire/metadata/**)")
+    uncovered = [path for path in sorted(_HARNESS_FILES)
+                 if not _deny_covering_rules(os.path.join(PROJECT_ROOT, path), settings,
+                                             PROJECT_ROOT)]
+    if uncovered:
+        errors.append("permissions.deny не накрывает: " + ", ".join(uncovered))
+    # Лишний замок так же вреден, как отсутствующий: запертое извлечение
+    # останавливает ремонт и заставляет человека снимать запрет руками.
+    try:
+        tools = sorted(os.listdir(os.path.join(PROJECT_ROOT, "scripts")))
+    except OSError:
+        tools = []
+    lishnie = [name for name in tools
+               if name.endswith((".py", ".sh"))
+               and "scripts/" + name not in _HARNESS_FILES
+               and _deny_covering_rules(os.path.join(PROJECT_ROOT, "scripts", name),
+                                        settings, PROJECT_ROOT)]
+    if lishnie:
+        errors.append("permissions.deny запирает приборы без вердикта: "
+                      + ", ".join(lishnie))
+    ordinary = ".claude/skills/doc-drafter/SKILL.md"
+    if _deny_covering_rules(os.path.join(PROJECT_ROOT, ordinary), settings, PROJECT_ROOT):
+        errors.append("permissions.deny лишне накрывает обычный файл: " + ordinary)
+
+    # permissions.deny держит файловые tools, native sandbox — Bash
+    # и все его subprocess. Второму слою нельзя оставлять escape hatch.
+    sandbox = settings.get("sandbox")
+    sandbox = sandbox if isinstance(sandbox, dict) else {}
+    if sandbox.get("enabled") is not True:
+        errors.append("sandbox.enabled не true")
+    if sandbox.get("failIfUnavailable") is not True:
+        errors.append("sandbox.failIfUnavailable не true")
+    if sandbox.get("allowUnsandboxedCommands") is not False:
+        errors.append("sandbox.allowUnsandboxedCommands не false")
+    if sandbox.get("autoAllowBashIfSandboxed") is not False:
+        errors.append("sandbox.autoAllowBashIfSandboxed не false")
+    filesystem = sandbox.get("filesystem")
+    filesystem = filesystem if isinstance(filesystem, dict) else {}
+    deny_write = filesystem.get("denyWrite")
+    deny_write = ({value for value in deny_write if isinstance(value, str)}
+                  if isinstance(deny_write, list) else set())
+    needed_write = {"./" + path for path in _STATIC_LOCK}
+    missing_write = sorted(needed_write - deny_write)
+    if missing_write:
+        errors.append("sandbox.filesystem.denyWrite не накрывает: "
+                      + ", ".join(missing_write))
+
+    hooks = settings.get("hooks")
+    pre = hooks.get("PreToolUse") if isinstance(hooks, dict) else None
+    pre = pre if isinstance(pre, list) else []
+    matcher_tools = set()
+    guard_seen = False
+    matcher_bad = []
+    entire_agent = False
+    for entry in pre:
+        if not isinstance(entry, dict):
+            continue
+        entry_hooks = entry.get("hooks")
+        entry_hooks = entry_hooks if isinstance(entry_hooks, list) else []
+        commands = [str(h.get("command", "")) for h in entry_hooks
+                    if isinstance(h, dict)]
+        is_guard = any("scripts/claude_guard.py" in command for command in commands)
+        raw_matchers = entry.get("matcher", "")
+        raw_matchers = raw_matchers if isinstance(raw_matchers, list) else [raw_matchers]
+        parts = []
+        entry_bad = []
+        for matcher in raw_matchers:
+            if not isinstance(matcher, str):
+                entry_bad.append(repr(matcher))
+                continue
+            chunks = [x.strip() for x in matcher.split("|") if x.strip()]
+            if not chunks or any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", x)
+                                 for x in chunks):
+                entry_bad.append(matcher)
+                continue
+            parts.extend(chunks)
+        if is_guard:
+            guard_seen = True
+            matcher_tools.update(parts)
+            matcher_bad.extend(entry_bad)
+        if "Agent" in parts and any("entire hooks claude-code pre-task" in command
+                                    for command in commands):
+            entire_agent = True
+
+    if not guard_seen:
+        errors.append("claude_guard.py не зарегистрирован в PreToolUse")
+    if matcher_bad:
+        errors.append("matcher claude_guard должен быть явным списком имен: "
+                      + ", ".join(matcher_bad))
+    handled = _main_tool_names()
+    required_old = {"Read", "Write", "Edit", "NotebookEdit", "Bash", "Agent"}
+    if not required_old <= matcher_tools:
+        errors.append("с матчера сняты старые инструменты: "
+                      + ", ".join(sorted(required_old - matcher_tools)))
+    if matcher_tools != handled:
+        errors.append("matcher != main(): matcher=" + ",".join(sorted(matcher_tools))
+                      + "; main=" + ",".join(sorted(handled)))
+    if not entire_agent:
+        errors.append("отдельный PreToolUse Agent хук Entire отсутствует")
+    # Сверяем только записи, реально зовущие claude_guard. Соседний Agent/Entire
+    # остается отдельным: matcher-ы могут пересекаться, а exit 2 любого хука все
+    # равно запрещает вызов и не превращается в allow ответом другого хука.
+    return errors
+
+
+def _claude_runtime_errors(version_output=None) -> list:
+    """Узкий Edit(path) держит Write только с Claude Code 2.1.228.
+
+    До этой версии path-deny в settings не может считаться жестким внешним слоем.
+    Источник контракта: https://code.claude.com/docs/en/permissions#read-and-edit
+    """
+    if version_output is None:
+        try:
+            import subprocess
+            result = subprocess.run(["claude", "--version"], capture_output=True,
+                                    text=True, timeout=5)
+        except (OSError, subprocess.SubprocessError) as e:
+            return [f"Claude Code version не проверена: {e}"]
+        if result.returncode:
+            return [f"claude --version вернул {result.returncode}"]
+        version_output = result.stdout or result.stderr
+    match = re.search(r"\b(\d+)\.(\d+)\.(\d+)\b", str(version_output))
+    if not match:
+        return [f"версия Claude Code не разобрана: {version_output!r}"]
+    version = tuple(int(part) for part in match.groups())
+    minimum = (2, 1, 228)
+    if version < minimum:
+        return [f"Claude Code {'.'.join(map(str, version))} < 2.1.228: "
+                "Edit(path) не гарантирует deny для Write"]
+    return []
 
 
 def selftest() -> int:
@@ -1596,18 +2956,30 @@ def selftest() -> int:
     import tempfile
 
     me = [sys.executable, __file__]
-    tmp = tempfile.mkdtemp() + "/themis"  # гейт большого Read действует внутри проекта
-    os.makedirs(tmp, exist_ok=True)
-    big = tmp + "/big.md"
+    # Селфтест ГЕРМЕТИЧЕН: имя каталога ПОСТОРОННЕЕ (mkdtemp без «themis»). Раньше tmp
+    # звался «…/themis», и гейт большого Read проходил по литералу «/themis/» в пути —
+    # фикстура сама создавала признак, который проверяла, и не видела переименования
+    # папки (дефект R05). Теперь гейт судит по PROJECT_ROOT, поэтому его фикстуры
+    # обязаны жить ВНУТРИ настоящего корня проекта — под случайным именем, не «themis».
+    tmp = tempfile.mkdtemp()          # посторонее имя — гейты 00_intake/cases судят по литералу/якорю
+    proj_tmp = tempfile.mkdtemp(dir=PROJECT_ROOT)  # внутри корня, имя случайное — для гейта большого Read
+    # Уборка снимается СРАЗУ и на atexit, а не только строкой в конце функции:
+    # при раннем выходе (первый же провал, sys.exit) каталог на 49 КБ оставался
+    # в корне дома миссии. Четыре таких вычищено руками, пятый пойман живьем
+    # 02.09.2026. atexit держит любой путь выхода, не только счастливый.
+    # shutil в этой функции импортируется ниже по телу, поэтому берем его в момент
+    # выхода, а не сейчас: иначе регистрация падает на несвязанном имени.
+    atexit.register(lambda d=proj_tmp: __import__("shutil").rmtree(d, ignore_errors=True))
+    big = proj_tmp + "/big.md"
     with open(big, "w", encoding="utf-8") as f:
         f.write("x" * (BIG_READ_BYTES + 10))
-    small = tmp + "/small.md"
+    small = proj_tmp + "/small.md"
     with open(small, "w", encoding="utf-8") as f:
         f.write("ok")
-    # Обход бюджета Read: симлинк ИЗ вне проекта на большой файл внутри — путь ссылки
-    # «/themis/» не содержит, но realpath ведет в проект. И большой файл вне проекта —
-    # его аудитор читает целиком, гейт молчит (обе оси, круг 4).
-    ext = tempfile.mkdtemp()          # без «themis» в пути — внешний материал
+    # Обход бюджета Read: симлинк ИЗ вне проекта на большой файл ВНУТРИ проекта — путь
+    # ссылки корня проекта не содержит, но realpath ведет внутрь. И большой файл вне
+    # проекта — его аудитор читает целиком, гейт молчит (обе оси, круг 4).
+    ext = tempfile.mkdtemp()          # вне корня проекта — внешний материал
     ext_big = ext + "/plain.md"
     with open(ext_big, "w", encoding="utf-8") as f:
         f.write("y" * (BIG_READ_BYTES + 10))
@@ -1626,11 +2998,280 @@ def selftest() -> int:
         f.write("scan")
     new_intake = intake + "/novyy.pdf"
 
-    def run(payload, raw=None):
+    def run(payload, raw=None, env=None):
         data = raw if raw is not None else json.dumps(payload, ensure_ascii=False)
-        return subprocess.run(me, input=data, capture_output=True, text=True).returncode
+        e = None
+        if env:
+            e = dict(os.environ)
+            e.update(env)
+        return subprocess.run(me, input=data, capture_output=True, text=True, env=e).returncode
+
+    discovery_root = os.path.join(tmp, "harness-discovery")
+    discovery_scripts = os.path.join(discovery_root, "scripts")
+    os.makedirs(discovery_scripts, exist_ok=True)
+    with open(os.path.join(discovery_scripts, "gate.sh"), "w", encoding="utf-8") as f:
+        f.write('#!/bin/sh\n"$@"\n')
+    fixtures = {
+        # через обертку кода возврата — вердикт
+        "cherez-gate.py": "pass\n",
+        # исполняется проводником — вердикт
+        "iz-provodnika.py": "pass\n",
+        # назван в гейте .autoloop — вердикт
+        "aktivnyy.py": "pass\n",
+        # импортирован воротами целиком — считает их вердикт
+        "vnutri-vorot.py": "pass\n",
+        "stage9_spec.py": "import vnutri_vorot\n",
+        # старый признак: selftest в тексте больше НЕ запирает прибор
+        "selftest-s-diska.py": "# --selftest\n",
+        # назван только в русском промпте проводника — не вердикт
+        "iz-prompta.py": "pass\n",
+        "obychnyy.py": "pass\n",
+    }
+    for name, content in fixtures.items():
+        with open(os.path.join(discovery_scripts, name), "w", encoding="utf-8") as f:
+            f.write(content)
+    with open(os.path.join(discovery_scripts, "vnutri_vorot.py"), "w", encoding="utf-8") as f:
+        f.write("pass\n")
+    discovery_autoloop = os.path.join(discovery_root, ".autoloop")
+    os.makedirs(discovery_autoloop, exist_ok=True)
+    with open(os.path.join(discovery_autoloop, "live.json"), "w", encoding="utf-8") as f:
+        json.dump({"gate": ["{python}", "scripts/aktivnyy.py"]}, f)
+    discovery_workflows = os.path.join(discovery_root, ".claude", "workflows")
+    os.makedirs(discovery_workflows, exist_ok=True)
+    with open(os.path.join(discovery_workflows, "provodnik.js"), "w", encoding="utf-8") as f:
+        f.write("gate('python3 scripts/iz-provodnika.py', 'x')\n"
+                "const p = 'Проверь через python3 scripts/iz-prompta.py и доложи'\n")
+    with open(os.path.join(discovery_root, "SKILL.md"), "w", encoding="utf-8") as f:
+        f.write("scripts/gate.sh python3 scripts/cherez-gate.py FILE\n")
+    discovered = _harness_files(discovery_root)
+    expected_discovery = {
+        ".autoloop/live.json",
+        ".claude/workflows/provodnik.js",
+        "scripts/aktivnyy.py",
+        "scripts/cherez-gate.py",
+        "scripts/gate.sh",
+        "scripts/iz-provodnika.py",
+        "scripts/stage9_spec.py",
+        "scripts/vnutri_vorot.py",
+    }
+    ne_vorota = {"scripts/obychnyy.py", "scripts/selftest-s-diska.py",
+                 "scripts/iz-prompta.py"}
+    disk_discovery_ok = (expected_discovery <= discovered
+                         and not (ne_vorota & discovered))
+
+    # Проводка сторожа и внешний deny проверяются на живых settings.
+    # Отрицательные пробы меняют только копию в памяти: сама приемка не
+    # правит свой контракт.
+    settings_path = os.path.join(PROJECT_ROOT, ".claude", "settings.json")
+    try:
+        with open(settings_path, encoding="utf-8") as f:
+            live_settings = json.load(f)
+    except (OSError, ValueError):
+        live_settings = {}
+
+    empty_deny = json.loads(json.dumps(live_settings))
+    empty_deny["permissions"] = {"deny": []}
+    empty_deny_errors = _settings_contract_errors(empty_deny)
+
+    missing_self = json.loads(json.dumps(live_settings))
+    permissions = missing_self.get("permissions")
+    if not isinstance(permissions, dict):
+        permissions = {}
+        missing_self["permissions"] = permissions
+    deny_copy = permissions.get("deny")
+    deny_copy = deny_copy if isinstance(deny_copy, list) else []
+    permissions["deny"] = [x for x in deny_copy
+                           if not (isinstance(x, str) and "claude_guard.py" in x)]
+    missing_self_errors = _settings_contract_errors(missing_self)
+
+    missing_sandbox_self = json.loads(json.dumps(live_settings))
+    sandbox = missing_sandbox_self.get("sandbox")
+    filesystem = sandbox.get("filesystem") if isinstance(sandbox, dict) else None
+    deny_write_copy = filesystem.get("denyWrite") if isinstance(filesystem, dict) else []
+    if isinstance(filesystem, dict):
+        filesystem["denyWrite"] = [x for x in deny_write_copy
+                                   if x != "./scripts/claude_guard.py"]
+    missing_sandbox_self_errors = _settings_contract_errors(missing_sandbox_self)
+
+    verdict_target = os.path.join(PROJECT_ROOT, "scripts", "verdict.py")
+    project_anchor = {"permissions": {"deny": ["Edit(/scripts/verdict.py)"]}}
+    fs_anchor = {"permissions": {"deny": ["Edit(//scripts/verdict.py)"]}}
+    project_anchor_hit = bool(_deny_covering_rules(
+        verdict_target, project_anchor, PROJECT_ROOT))
+    fs_anchor_miss = bool(_deny_covering_rules(
+        verdict_target, fs_anchor, PROJECT_ROOT))
+
+    matcher_drift = json.loads(json.dumps(live_settings))
+    drift_hooks = matcher_drift.get("hooks")
+    drift_pre = drift_hooks.get("PreToolUse") if isinstance(drift_hooks, dict) else []
+    for entry in drift_pre if isinstance(drift_pre, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        entry_hooks = entry.get("hooks")
+        entry_hooks = entry_hooks if isinstance(entry_hooks, list) else []
+        if not any(isinstance(h, dict) and "scripts/claude_guard.py" in str(h.get("command", ""))
+                   for h in entry_hooks):
+            continue
+        matcher = entry.get("matcher")
+        if isinstance(matcher, str):
+            parts = [x for x in matcher.split("|") if x]
+            entry["matcher"] = "|".join(x for x in parts if x != "Read")
+        break
+    matcher_drift_errors = _settings_contract_errors(matcher_drift)
+
+    # Хук отличает сессию дела по ее transcript JSONL на диске,
+    # а не по чужому глобальному .owner. В обычной project-сессии хук может
+    # пропустить вызов, но безусловные permissions.deny и sandbox его все равно закроют.
+    def _harness_probe(paths, payload, roots):
+        try:
+            _harness_mutation_gate(paths, payload=payload, roots=roots)
+            return 0
+        except SystemExit as e:
+            return e.code if isinstance(e.code, int) else 2
+
+    def _main_harness_probe(payload, roots):
+        """Проба боевой проводки: JSON -> main() -> гейт, без записи на диск."""
+        import io
+
+        global _CASES_ROOTS
+        saved_roots, saved_stdin = _CASES_ROOTS, sys.stdin
+        _CASES_ROOTS = list(roots)
+        sys.stdin = io.StringIO(json.dumps(payload, ensure_ascii=False))
+        try:
+            main()
+        except SystemExit as e:
+            return e.code if isinstance(e.code, int) else 2
+        finally:
+            _CASES_ROOTS = saved_roots
+            sys.stdin = saved_stdin
+
+    live_cases = os.path.join(tmp, "live-cases")
+    live_drafts = os.path.join(live_cases, "k", "d", ".agent", "drafts")
+    os.makedirs(live_drafts, exist_ok=True)
+    live_owner = os.path.join(live_drafts, ".owner")
+    case_transcript = os.path.join(tmp, "case-session.jsonl")
+    maintenance_transcript = os.path.join(tmp, "maintenance-session.jsonl")
+    case_entry = {
+        "type": "assistant", "sessionId": "case-session", "cwd": PROJECT_ROOT,
+        "message": {"content": [{
+            "type": "tool_use", "name": "Read",
+            "input": {"file_path": os.path.join(live_cases, "k", "d", "_case.md")},
+        }]},
+    }
+    with open(case_transcript, "w", encoding="utf-8") as f:
+        f.write(json.dumps(case_entry, ensure_ascii=False) + "\n")
+    with open(maintenance_transcript, "w", encoding="utf-8") as f:
+        f.write(json.dumps({
+            "type": "user", "sessionId": "maintenance", "cwd": PROJECT_ROOT,
+            "message": {"content": "D02 maintenance"},
+        }, ensure_ascii=False) + "\n")
+    case_payload = {
+        "session_id": "case-session", "transcript_path": case_transcript,
+        "cwd": PROJECT_ROOT,
+    }
+    maintenance_payload = {
+        "session_id": "maintenance", "transcript_path": maintenance_transcript,
+        "cwd": PROJECT_ROOT,
+    }
+    guard_target = os.path.join(PROJECT_ROOT, "scripts", "claude_guard.py")
+    settings_target = os.path.join(PROJECT_ROOT, ".claude", "settings.json")
+    spec_target = os.path.join(PROJECT_ROOT, "scripts", "stage9_spec.py")
+    with open(live_owner, "w", encoding="utf-8") as f:
+        f.write("other-session token=selftest")
+    # Пробы ворот идут при СВОЕМ состоянии обслуживания: настоящее окно проекта не
+    # должно ни зеленить, ни красить приемку, а приемка — писать в .autoloop проекта.
+    saved_obsluzh = (OBSLUZH_STATE, OBSLUZH_LOG)
+    globals()["OBSLUZH_STATE"] = os.path.join(tmp, "obsluzh-zakryto.json")
+    globals()["OBSLUZH_LOG"] = os.path.join(tmp, "obsluzhivanie.log")
+    try:
+        free_harness = _harness_probe([guard_target], maintenance_payload, [live_cases])
+        locked_harness = all(_harness_probe([p], case_payload, [live_cases]) == 2
+                             for p in (guard_target, settings_target, spec_target))
+        rm_harness = _harness_probe(
+            _rm_targets("rm scripts/claude_guard.py", PROJECT_ROOT),
+            case_payload, [live_cases])
+        rm_harness_parent = _harness_probe(
+            _rm_targets("rm -rf scripts", PROJECT_ROOT), case_payload, [live_cases])
+        link_harness = _harness_probe(
+            _link_sources("ln scripts/claude_guard.py /tmp/guard-copy", PROJECT_ROOT),
+            case_payload, [live_cases])
+        main_write_harness = _main_harness_probe(case_payload | {
+            "tool_name": "Write", "cwd": PROJECT_ROOT,
+            "tool_input": {"file_path": "scripts/claude_guard.py", "content": "x"},
+        }, [live_cases])
+        main_rm_harness = _main_harness_probe(case_payload | {
+            "tool_name": "Bash", "cwd": PROJECT_ROOT,
+            "tool_input": {"command": "rm scripts/claude_guard.py"},
+        }, [live_cases])
+        ordinary_path = os.path.join(
+            PROJECT_ROOT, ".claude", "skills", "doc-drafter", "SKILL.md")
+        ordinary_harness = _harness_probe([ordinary_path], case_payload, [live_cases])
+        missing_transcript = _harness_probe(
+            [guard_target], {"cwd": PROJECT_ROOT}, [live_cases])
+        main_write_free = _main_harness_probe(maintenance_payload | {
+            "tool_name": "Write", "cwd": PROJECT_ROOT,
+            "tool_input": {"file_path": "scripts/claude_guard.py", "content": "x"},
+        }, [live_cases])
+        globals()["OBSLUZH_STATE"] = os.path.join(tmp, "obsluzhivanie.json")
+        with open(OBSLUZH_STATE, "w", encoding="utf-8") as f:
+            json.dump({"kto": "test", "kogda": "-", "do": "-", "zachem": "приемка",
+                       "fajly": ["scripts/claude_guard.py"],
+                       "do_epoch": time.time() + 600}, f)
+        main_write_okno = _main_harness_probe(maintenance_payload | {
+            "tool_name": "Write", "cwd": PROJECT_ROOT,
+            "tool_input": {"file_path": "scripts/claude_guard.py", "content": "x"},
+        }, [live_cases])
+    finally:
+        globals()["OBSLUZH_STATE"], globals()["OBSLUZH_LOG"] = saved_obsluzh
+    if _active_cases():
+        # при живом деле окно не открывается вовсе — это держит obsluzhivanie_selftest
+        main_write_okno = 0
 
     cases = [
+        ("settings: deny и matcher согласованы", _settings_contract_errors(), []),
+        ("settings: пустой deny краснит",
+         any("permissions.deny пуст" in e for e in empty_deny_errors), True),
+        ("settings: deny без сторожа краснит",
+         any("claude_guard.py" in e for e in missing_self_errors), True),
+        ("settings: sandbox без сторожа краснит",
+         any("sandbox.filesystem.denyWrite" in e
+             for e in missing_sandbox_self_errors), True),
+        ("settings: список защиты идет из вызовов на диске", disk_discovery_ok, True),
+        # Якорь стережет признак: выпадение любых ворот из перечня либо запирание
+        # извлечения краснит приемку, даже если признак согласен сам с собой.
+        ("якорь: все ворота перечня в наборе, извлечение — вне", _anchor_errors(), []),
+        # Тот же якорь на ЧУЖОМ дереве. Публичная вырезка не везет .autoloop/*.json и
+        # часть .claude/, и признаки, опирающиеся на эти файлы, там молчат. Проверка
+        # выше в родном доме зеленая всегда - она не увидела бы, что у нового
+        # пользователя из слоя выпали themis_status, case_graph, token_ledger и
+        # preflight_search, а settings.json продолжил их запирать (03.09.2026).
+        ("якорь держит слой и в дереве без необязательных конфигов",
+         _anchor_holds_bare_tree(), []),
+        ("settings: / якорится к корню проекта", project_anchor_hit, True),
+        ("settings: // якорится к корню ФС", fs_anchor_miss, False),
+        ("settings: обычный скилл не накрыт deny",
+         bool(_deny_covering_rules(ordinary_path, live_settings, PROJECT_ROOT)), False),
+        ("settings: matcher не равен main() краснит",
+         any("matcher != main()" in e for e in matcher_drift_errors), True),
+        ("settings: старый инструмент с матчера не снимается",
+         any("с матчера сняты старые инструменты" in e
+             for e in matcher_drift_errors), True),
+        ("ворота вне дела тоже под сторожем: правка блокируется",
+         free_harness, 2),
+        ("транскрипт сессии дела закрывает ворота и приемку", locked_harness, True),
+        ("транскрипт сесии дела закрывает rm сторожа", rm_harness, 2),
+        ("транскрипт сесии дела закрывает rm каталога со сторожем",
+         rm_harness_parent, 2),
+        ("транскрипт сессии дела закрывает ссылку на сторожа", link_harness, 2),
+        ("main: Write сторожа в сессии дела закрыт",
+         main_write_harness, 2),
+        ("main: Bash rm сторожа в сессии дела закрыт",
+         main_rm_harness, 2),
+        ("обычный скрипт при живом деле не закрыт", ordinary_harness, 0),
+        ("без дискового транскрипта гейт закрыт fail-closed", missing_transcript, 2),
+        ("main: Write в ворота без окна обслуживания — блок", main_write_free, 2),
+        ("main: Write в ворота при открытом окне обслуживания проходит",
+         main_write_okno, 0),
         ("битый JSON блокируется", run(None, raw="{не json"), 2),
         ("пустой вход пропускается", run(None, raw="  "), 0),
         ("Read .docx блокируется",
@@ -1641,6 +3282,16 @@ def selftest() -> int:
          run({"tool_name": "Read", "tool_input": {"file_path": big, "offset": 1, "limit": 50}}), 0),
         ("Read маленького .md пропускается",
          run({"tool_name": "Read", "tool_input": {"file_path": small}}), 0),
+        # Белый список сервисов — только через channel_grant.py (M07).
+        ("Write в белый список сервисов блокируется",
+         run({"tool_name": "Write", "tool_input": {
+             "file_path": os.path.join(PROJECT_ROOT, "knowledge", "allowed-services.md")}}), 2),
+        ("дописывание белого списка редиректом блокируется",
+         run({"tool_name": "Bash", "tool_input": {
+             "command": "echo '| avito.ru |' >> knowledge/allowed-services.md"}}), 2),
+        ("обычный файл knowledge не блокируется",
+         run({"tool_name": "Write", "tool_input": {
+             "file_path": os.path.join(PROJECT_ROOT, "knowledge", "redlines.md")}}), 0),
         ("Write в 00_intake блокируется",
          run({"tool_name": "Write", "tool_input": {"file_path": "/c/cases/x/y/00_intake/z.md"}}), 2),
         # _baselines охраняется в дереве дел (…/cases/…/_baselines); чужая папка вне
@@ -2036,7 +3687,64 @@ def selftest() -> int:
         ("zip-архив ВНУТРЬ дела мимо конвейера — блок",
          run({"tool_name": "Bash", "tool_input": {
              "command": "zip -r cases/klient/delo-2026/GOTOVO/out.zip /tmp/x"}}), 2),
+        # ── WebFetch/WebSearch: ветки РАЗНЫЕ (дефект R05 — мертвая конъюнкция) ──
+        # WebFetch судит хост по белому списку; хоста нет в списке — блок.
+        ("WebFetch хоста вне белого списка — блок",
+         run({"tool_name": "WebFetch", "tool_input": {
+             "url": "https://blocked-test-host.zzz/x"}}), 2),
+        # WebSearch: у него нет url — правовой запрос до practice_search блокируется,
+        # признак прохождения лестницы берется с диска (override для детерминизма).
+        ("WebSearch правового запроса без practice_search — блок",
+         run({"tool_name": "WebSearch", "tool_input": {
+             "query": "неустойка по договору практика ВС РФ"}},
+             env={"THEMIS_PRACTICE_SEARCHED": "0"}), 2),
+        ("WebSearch правового запроса ПОСЛЕ practice_search — пропуск",
+         run({"tool_name": "WebSearch", "tool_input": {
+             "query": "неустойка по договору практика ВС РФ"}},
+             env={"THEMIS_PRACTICE_SEARCHED": "1"}), 0),
+        ("WebSearch бытового запроса — пропуск (не правовой)",
+         run({"tool_name": "WebSearch", "tool_input": {
+             "query": "погода в казани на завтра"}},
+             env={"THEMIS_PRACTICE_SEARCHED": "0"}), 0),
     ]
+
+    # ── Анти-регресс R05: НИ ОДИН литерал имени каталога не вернулся в логику поиска корня ──
+    # Ловим СТРУКТУРУ, а не одно ожидаемое имя: сверка с basename(PROJECT_ROOT) ослепла бы
+    # ровно так, как ослепла в первом круге — проверяющий вернул литерал СТАРОГО имени при
+    # НОВОМ корне, и detected=[]. Легитимный код судит корень только через PROJECT_ROOT/
+    # _under_dir; строкового литерала членства в этих двух конструкциях быть НЕ должно вовсе:
+    #   • «"имя" in cwd» / «"имя" not in cwd» — уникальная форма, ноль законных вхождений; antireg-rootlit
+    #   • «re.search(r"/имя/", cwd|p_res …)» — сегмент-литерал по корневому/read-пути (гейты antireg-rootlit
+    #     дела судят p/norm, а не cwd/p_res, поэтому /cases/ и /00_intake/ сюда не попадают). antireg-rootlit
+    # Строки самого сканера помечены sentinel и выкинуты из скана, иначе он поймал бы себя.
+    _sentinel = "anti" "reg-rootlit"                                              # antireg-rootlit
+    src = open(os.path.realpath(__file__), encoding="utf-8").read()              # antireg-rootlit
+    scan_src = "\n".join(l for l in src.splitlines() if _sentinel not in l)      # antireg-rootlit
+    _rootlit_re = re.compile(                                                    # antireg-rootlit
+        r'"[\w.\-]+"\s+(?:not\s+)?in\s+cwd\b'                                    # antireg-rootlit
+        r'|re\.search\(\s*r?"/[\w.\-]+/"[^)\n]*\b(?:cwd|p_res)\b')               # antireg-rootlit
+    detected = _rootlit_re.findall(scan_src)                                     # antireg-rootlit
+    cases += [("нет литерала имени каталога в логике поиска корня", detected, [])]
+
+    # ── Живой дом R05 (второй круг): существование кеша НЕ засчитывает practice_search ──
+    # Проверяем на НАСТОЯЩЕМ {корень}/.cache/practice, а не во временном каталоге: пустой
+    # tmp дал бы зеленый на неисправном стороже (фикстура по эту сторону порога). Старт-в-
+    # будущем не должен видеть вчерашний кеш; старт-в-эпохе — обязан видеть любой mtime>0.
+    _saved_ps = os.environ.pop("THEMIS_PRACTICE_SEARCHED", None)
+    try:
+        _ps_dir = os.path.join(PROJECT_ROOT, ".cache", "practice")
+        _has_cache = os.path.isdir(_ps_dir) and any(
+            n.endswith(".json") for n in os.listdir(_ps_dir))
+        future_blind = _practice_search_used(float("inf"))   # старт «в будущем» → старый кеш не в счет
+        epoch_sees = _practice_search_used(0.0)              # старт в эпохе → существующий кеш в счет
+    finally:
+        if _saved_ps is not None:
+            os.environ["THEMIS_PRACTICE_SEARCHED"] = _saved_ps
+    cases.append(("живой кеш: старт-в-будущем не засчитывает вчерашний practice_search",
+                  future_blind, False))
+    if _has_cache:   # без кеша обе стороны False — проверять «видит» нечего
+        cases.append(("живой кеш: старт-в-эпохе засчитывает существующий practice_search",
+                      epoch_sees, True))
 
     # ── Лок каталога черновиков .agent/drafts/.owner ──
     # Проверяем гейт напрямую: _case_rel опирается на _CASES_ROOTS (вычислены от места
@@ -2085,14 +3793,152 @@ def selftest() -> int:
         ("протухший лок (>45 мин) не блокирует", stale, 0),
     ]
 
+    # ── Спавн агентов конвейера (M01) ──
+    # Отдельный корень cases/ под tmp; дело с картой/практикой/файлом прогона строим
+    # по шагам и через main() гоняем спавн Agent — тот же путь, что в бою.
+    import case_paths as _cp
+    ag_root = os.path.join(tmp, "cases")
+    ag_case = os.path.join(ag_root, "klient", "delo-2026")
+    os.makedirs(os.path.join(ag_case, ".agent", "context", "_working"), exist_ok=True)
+    saved_ag_roots = _CASES_ROOTS
+    _CASES_ROOTS = list(_CASES_ROOTS) + [ag_root]
+
+    # Реестр живых агентов — в tmp, чтобы пробы не писали в боевой .cache/ и не
+    # дрались с реальным прогоном. ag() чистит реестр ПЕРЕД пробой: пробы идут
+    # последовательно, «предыдущий агент завершился» — иначе 7 проходящих проб
+    # уперлись бы в потолок, который проверяется отдельно (ниже, ag_keep).
+    live_tmp = os.path.join(tmp, "swarm_live.json")
+    saved_live = os.environ.get("THEMIS_SWARM_LIVE")
+    os.environ["THEMIS_SWARM_LIVE"] = live_tmp
+
+    def ag(name, prompt=None):
+        try:
+            os.unlink(live_tmp)
+        except OSError:
+            pass
+        return _main_harness_probe({
+            "tool_name": "Agent", "cwd": PROJECT_ROOT,
+            "tool_input": {"subagent_type": name,
+                           "prompt": prompt if prompt is not None
+                           else ("Работай по делу " + os.path.realpath(ag_case))},
+        }, _CASES_ROOTS)
+
+    def ag_keep(name):
+        """Проба БЕЗ чистки реестра: живые записи накапливаются — проверка потолка."""
+        return _main_harness_probe({
+            "tool_name": "Agent", "cwd": PROJECT_ROOT,
+            "tool_input": {"subagent_type": name, "run_in_background": True,
+                           "prompt": "фоновая задача вне дела"},
+        }, _CASES_ROOTS)
+
+    saved_dr = os.environ.pop("THEMIS_DOC_REVIEWER_OK", None)
+    try:
+        no_guide = ag("case-mapper")                       # нет проводника → блок
+        nonkey = ag("archivist")                           # неключевой → пуск
+        unknown = ag("case-mapper", "сделай что-нибудь")   # дело не опознано → fail-open
+        _cp.run_write(ag_case, guide="themis-pipeline")
+        guided_mapper = ag("case-mapper")                  # проводник есть → пуск
+        hunter_nomap = ag("practice-hunter-tactical")      # карты нет → блок
+        _cp.knowledge_map(ag_case).write_text("## КАРТА ГОТОВА ✓\n", encoding="utf-8")
+        hunter_ok = ag("practice-hunter-classic")          # карта есть, preflight не задан → пуск
+        _cp.run_write(ag_case, preflight_code=1)
+        hunter_pf = ag("practice-hunter-classic")          # preflight упал → блок
+        _cp.run_write(ag_case, preflight_override="по индексу")
+        hunter_ovr = ag("practice-hunter-classic")         # решение владельца → пуск
+        drafter_no = ag("doc-drafter")                     # практики нет → блок
+        _cp.practice(ag_case).write_text("## FAST-СИНТЕЗ ФЕМИДЫ\n", encoding="utf-8")
+        drafter_ok = ag("doc-drafter")                     # карта+практика → пуск
+        reviewer_main = ag("doc-reviewer")                 # из главного потока → блок
+        os.environ["THEMIS_DOC_REVIEWER_OK"] = "1"
+        reviewer_ok = ag("doc-reviewer")                   # escape из doc-drafter → пуск
+        # Потолок числа живых — принуждение, а не печать формулы: реестр полон →
+        # спавн отбит; слот освобожден → проходит. Проба боевой проводкой через
+        # main() → _agent_gate → block(), а не сверкой формулы с самой собой.
+        import swarm_contract as _sc
+        try:
+            os.unlink(live_tmp)             # реестр пуст: считаем ровно до крышки
+        except OSError:
+            pass
+        for i in range(_sc.concurrency_cap()):
+            assert _sc.live_register(f"zanyato-{i}", session="selftest",
+                                     background=True) == ""
+        over_cap = ag_keep("archivist")                    # слотов нет → блок
+        _recs = _sc.live_load(_sc.live_state_path())
+        assert _sc.live_release(_recs[0]["id"]) == 0
+        freed = ag_keep("archivist")                       # слот освобожден → пуск
+    finally:
+        _CASES_ROOTS = saved_ag_roots
+        if saved_dr is None:
+            os.environ.pop("THEMIS_DOC_REVIEWER_OK", None)
+        else:
+            os.environ["THEMIS_DOC_REVIEWER_OK"] = saved_dr
+        if saved_live is None:
+            os.environ.pop("THEMIS_SWARM_LIVE", None)
+        else:
+            os.environ["THEMIS_SWARM_LIVE"] = saved_live
+    cases += [
+        ("agent: ключевой агент без проводника заблокирован", no_guide, 2),
+        ("agent: неключевой агент проходит", nonkey, 0),
+        ("agent: неопознанное дело fail-open", unknown, 0),
+        ("agent: проводник есть — case-mapper проходит", guided_mapper, 0),
+        ("agent: охотник без карты заблокирован", hunter_nomap, 2),
+        ("agent: охотник с картой проходит", hunter_ok, 0),
+        ("agent: охотник при упавшем preflight заблокирован", hunter_pf, 2),
+        ("agent: охотник с решением владельца проходит", hunter_ovr, 0),
+        ("agent: doc-drafter без практики заблокирован", drafter_no, 2),
+        ("agent: doc-drafter с картой+практикой проходит", drafter_ok, 0),
+        ("agent: doc-reviewer из главного потока заблокирован", reviewer_main, 2),
+        ("agent: doc-reviewer с escape-токеном проходит", reviewer_ok, 0),
+        ("agent: спавн за потолком живых отбит счетом, не формулой", over_cap, 2),
+        ("agent: освобожденный слот пускает спавн", freed, 0),
+    ]
+
+    # proj_tmp живет ВНУТРИ корня проекта (нужен гейту большого Read) — за собой убираем,
+    # чтобы не сорить в репозиторий. tmp/ext — в системном /tmp, их подметет ОС.
+    import shutil
+    shutil.rmtree(proj_tmp, ignore_errors=True)
+
     bad = [name for name, got, want in cases if got != want]
     for name, got, want in cases:
         print(f"  {'✓' if got == want else '✗'} {name}" + ("" if got == want else f" (ждали {want}, вышло {got})"))
+    print("окружение отдельно: python3 scripts/claude_guard.py --runtime")
     print(f"selftest {'пройден' if not bad else 'ПРОВАЛЕН'}: {len(cases) - len(bad)}/{len(cases)}")
     return 1 if bad else 0
 
 
+def runtime() -> int:
+    """Отдельный короткий вывод проверки версии Claude Code."""
+    errors = []
+    if not _claude_runtime_errors("2.1.227"):
+        errors.append("граница версии сломана: 2.1.227 принята")
+    if _claude_runtime_errors("2.1.228"):
+        errors.append("граница версии сломана: 2.1.228 отвергнута")
+    errors.extend(_claude_runtime_errors())
+    for err in errors:
+        print(f"  ✗ {err}")
+    if not errors:
+        print("  ✓ runtime: версия Claude Code держит path-deny для Write")
+        print("runtime пройден")
+        return 0
+    print("что делать: обновить Claude Code до 2.1.228+ (до нее permissions.deny на\n"
+          "путь не держит Write — жесткий внешний слой самозащиты не жесткий). Решение\n"
+          "об обновлении — за владельцем.")
+    print("runtime ПРОВАЛЕН")
+    return 1
+
+
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--deny-covers"]:
+        if len(sys.argv) != 3:
+            print("usage: claude_guard.py --deny-covers ПУТЬ", file=sys.stderr)
+            sys.exit(2)
+        sys.exit(deny_covers(sys.argv[2]))
+    if sys.argv[1:2] == ["--obsluzhivanie"]:
+        sys.exit(obsluzhivanie(sys.argv[2:]))
+    if sys.argv[1:2] == ["--deny-rebuild"]:
+        sys.exit(deny_rebuild())
     if "--selftest" in sys.argv:
         sys.exit(selftest())
+    if "--runtime" in sys.argv:
+        sys.exit(runtime())
     main()

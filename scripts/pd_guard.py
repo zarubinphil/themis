@@ -68,23 +68,49 @@ _LAT_TO_CYR_CONFUSABLES = str.maketrans({
 })
 
 
+_LAT_RUN = re.compile("[" + "".join(
+    re.escape(chr(c)) for c in _LAT_TO_CYR_CONFUSABLES) + "]+")
+_CYR_RUN = re.compile("[" + "".join(
+    re.escape(chr(c)) for c in _CYR_TO_LAT_CONFUSABLES) + "]+")
+_CYR_CHAR = re.compile("[А-Яа-яЁё]")
+_LAT_CHAR = re.compile("[A-Za-z]")
+
+
+def _fold_confusables(text: str, table: dict, run: re.Pattern,
+                      neighbor: re.Pattern) -> str:
+    """Прогон омоглифов, касающийся чужого алфавита, переводится в этот алфавит.
+
+    Раньше это делали два `re.sub` с классом `[омоглифы]+` и проверкой соседа
+    справа. На длинной строке из одних омоглифов движок брал максимальный прогон,
+    проваливал проверку и откатывался по одному знаку: замер 03.09.2026 —
+    102 секунды на 100 КБ в ОДНУ строку против 0,112 с на те же 100 КБ, разбитые
+    на строки. Такая строка не экзотика: `graph.json` графа знаний — 34 МБ одной
+    строкой, туда же минифицированный js и base64. Сторож, повисший на файле
+    коммита, — это сторож, которого выключат. Здесь прогон берется один раз,
+    соседи читаются по индексу: линейно, отката нет, результат прежний.
+    """
+    out, pos = [], 0
+    for m in run.finditer(text):
+        s, e = m.span()
+        left = text[s - 1] if s else ""
+        right = text[e] if e < len(text) else ""
+        if neighbor.match(left) or neighbor.match(right):
+            out.append(text[pos:s])
+            out.append(m.group(0).translate(table))
+            pos = e
+    if not out:
+        return text
+    out.append(text[pos:])
+    return "".join(out)
+
+
 def normalize_public_scan(text: str) -> str:
     """Для публичных каналов: NFKC, без невидимых знаков, mixed-script homograph."""
     text = unicodedata.normalize("NFKC", text)
-    text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
-    lat = "".join(re.escape(chr(ch)) for ch in _LAT_TO_CYR_CONFUSABLES)
-    text = re.sub(
-        rf"(?<=[А-Яа-яЁё])[{lat}]+|[{lat}]+(?=[А-Яа-яЁё])",
-        lambda m: m.group(0).translate(_LAT_TO_CYR_CONFUSABLES),
-        text,
-    )
-    cyr = "".join(re.escape(chr(ch)) for ch in _CYR_TO_LAT_CONFUSABLES)
-    text = re.sub(
-        rf"(?<=[A-Za-z])[{cyr}]+|[{cyr}]+(?=[A-Za-z])",
-        lambda m: m.group(0).translate(_CYR_TO_LAT_CONFUSABLES),
-        text,
-    )
-    return text
+    if any(unicodedata.category(ch) == "Cf" for ch in text):
+        text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+    text = _fold_confusables(text, _LAT_TO_CYR_CONFUSABLES, _LAT_RUN, _CYR_CHAR)
+    return _fold_confusables(text, _CYR_TO_LAT_CONFUSABLES, _CYR_RUN, _LAT_CHAR)
 
 
 def client_names(cases_dir: str = CASES) -> list[str]:
@@ -635,25 +661,100 @@ def check_local_logs(root: str = ROOT) -> list[str]:
     return problems
 
 
-HOOK = """#!/bin/sh
-# Поставлен scripts/pd_guard.py --install. Фамилия доверителя не уходит наружу.
-exec python3 "$(git rev-parse --show-toplevel)/scripts/pd_guard.py" %s
-"""
+# Маркер собственного хука: по нему install узнает СВОЙ хук и не заворачивает его
+# в цепочку сам к себе. У Entire-хуков этой строки нет, у наших — есть всегда.
+HOOK_MARKER = "pd_guard.py --install"
+# Эти каналы читают git-данные со STDIN (список ref-ов). Если рядом стоит чужой
+# хук, STDIN нельзя «съесть» разово — его буферизуем в файл и подаём обоим.
+_STDIN_HOOKS = ("pre-push", "reference-transaction")
+HOOK_INSTALL = (("pre-commit", "--staged"),
+                ("commit-msg", '--msg "$1"'),
+                ("pre-push", "--push"),
+                ("reference-transaction", '--ref-txn "$1"'))
 
 
-def install() -> int:
-    hooks = git("rev-parse", "--git-path", "hooks").strip() or ".git/hooks"
-    hooks = hooks if os.path.isabs(hooks) else os.path.join(ROOT, hooks)
-    os.makedirs(hooks, exist_ok=True)
-    for name, arg in (("pre-commit", "--staged"),
-                      ("commit-msg", '--msg "$1"'),
-                      ("pre-push", "--push"),
-                      ("reference-transaction", '--ref-txn "$1"')):
-        path = os.path.join(hooks, name)
+def _hook_src(name: str, arg: str, prev: str | None) -> str:
+    """Тело хука. Три инварианта: (1) прибора нет → тихо exit 0; (2) чужой хук
+    зовётся цепочкой, не затирается; (3) STDIN-каналам чужой хук получает свой
+    поток целиком, а не объедки после нашего прохода."""
+    head = ["#!/bin/sh",
+            "# Поставлен scripts/pd_guard.py --install. Фамилия доверителя не уходит наружу.",
+            "# Хук общемашинный: в репозиториях без прибора тихо выходит 0.",
+            '_pd="$(git rev-parse --show-toplevel 2>/dev/null)/scripts/pd_guard.py"']
+    reads_stdin = name in _STDIN_HOOKS
+    if prev and reads_stdin:
+        body = [
+            '_pd_in="$(mktemp)"; cat >"$_pd_in"',
+            f'[ -f "$_pd" ] && {{ python3 "$_pd" {arg} <"$_pd_in" || {{ rm -f "$_pd_in"; exit 1; }}; }}',
+            f'_pd_prev="$(dirname "$0")/{prev}"',
+            '[ -x "$_pd_prev" ] && { "$_pd_prev" "$@" <"$_pd_in"; _pd_rc=$?; rm -f "$_pd_in"; exit $_pd_rc; }',
+            'rm -f "$_pd_in"; exit 0']
+    elif prev:
+        body = [
+            f'[ -f "$_pd" ] && {{ python3 "$_pd" {arg} || exit $?; }}',
+            f'_pd_prev="$(dirname "$0")/{prev}"',
+            '[ -x "$_pd_prev" ] && exec "$_pd_prev" "$@"',
+            'exit 0']
+    else:
+        body = [f'[ -f "$_pd" ] || exit 0',
+                f'exec python3 "$_pd" {arg}']
+    return "\n".join(head + body) + "\n"
+
+
+def _is_our_hook(path: str) -> bool:
+    try:
+        return HOOK_MARKER in open(path, encoding="utf-8", errors="ignore").read()
+    except OSError:
+        return False
+
+
+def _chain_existing(path: str) -> str | None:
+    """Чужой хук сохранить рядом как <name>.pre-pd-guard и вернуть это имя для
+    цепочки (образец — установщик Entire с суффиксом .pre-entire). Идемпотентно:
+    свой хук не архивируется, уже сделанный бэкап не перезаписывается."""
+    backup = path + ".pre-pd-guard"
+    if os.path.exists(path) and not _is_our_hook(path):
+        if not os.path.exists(backup):
+            os.rename(path, backup)
+        # ponytail: если бэкап уже занят прежним чужим хуком — этот теряем; на
+        # практике второй чужой хук поверх нашего не встречается. Апгрейд —
+        # датировать бэкап, когда/если появится реальный кейс.
+    return os.path.basename(backup) if os.path.exists(backup) else None
+
+
+def _hooks_dirs() -> tuple[str, bool]:
+    """Каталог хуков и флаг «он общемашинный». core.hooksPath задан вне
+    репозитория → rev-parse отдаёт ОБЩИЙ каталог: хук встанет во все репозитории."""
+    common = git("rev-parse", "--git-common-dir").strip() or ".git"
+    common = common if os.path.isabs(common) else os.path.join(ROOT, common)
+    local = os.path.realpath(os.path.join(common, "hooks"))
+    eff = git("rev-parse", "--git-path", "hooks").strip() or os.path.join(common, "hooks")
+    eff = eff if os.path.isabs(eff) else os.path.join(ROOT, eff)
+    eff = os.path.realpath(eff)
+    return eff, eff != local
+
+
+def install(force_global: bool = False) -> int:
+    target, shared = _hooks_dirs()
+    if shared and not force_global:
+        print(f"⛔ core.hooksPath ведёт ВНЕ репозитория: {target}", file=sys.stderr)
+        print("Это ОБЩЕМАШИННЫЙ каталог — хук встанет во ВСЕ репозитории машины,\n"
+              "а не только в этот. Молча писать в общий каталог запрещено.\n"
+              "Осознанно: python3 scripts/pd_guard.py --install --force-global",
+              file=sys.stderr)
+        return 1
+    if shared:
+        print(f"⚠️  ставлю в ОБЩЕМАШИННЫЙ каталог {target}", file=sys.stderr)
+        print("    хук будет запускаться во ВСЕХ репозиториях; где прибора нет — тихо выйдет 0.",
+              file=sys.stderr)
+    os.makedirs(target, exist_ok=True)
+    for name, arg in HOOK_INSTALL:
+        path = os.path.join(target, name)
+        prev = _chain_existing(path)
         with open(path, "w", encoding="utf-8") as f:
-            f.write(HOOK % arg)
+            f.write(_hook_src(name, arg, prev))
         os.chmod(path, 0o755)
-        print(f"поставлен {path}")
+        print(f"поставлен {path}" + (f" (цепочка → {prev})" if prev else ""))
     print("Теперь ни коммит, ни тег с фамилией доверителя не пройдет наружу.")
     return 0
 
@@ -688,12 +789,14 @@ def main() -> int:
     ap.add_argument("--ref-txn", metavar="STATE",
                     help="reference-transaction: тело/имя тега (фаза prepared)")
     ap.add_argument("--install", action="store_true", help="поставить git-хуки")
+    ap.add_argument("--force-global", action="store_true",
+                    help="согласие ставить в общемашинный каталог (core.hooksPath вне репо)")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
         return selftest()
     if a.install:
-        return install()
+        return install(force_global=a.force_global)
     if os.environ.get("PD_GUARD") == "0":
         print("ПД-сторож выключен переменной PD_GUARD=0 — под ответственность автора коммита",
               file=sys.stderr)
@@ -745,6 +848,86 @@ def _local_logs_probe(force_add: bool = False) -> int:
             subprocess.run(["git", "add", "-f", "audit.log"], cwd=tmp, capture_output=True)
         return len(check_local_logs(tmp))
 
+
+def _install_probe() -> dict:
+    """Три дефекта установщика 02.09.2026 — во ВРЕМЕННОМ репозитории со СВОИМ
+    core.hooksPath, чтобы проба не тронула машину так же, как это сделал прогон.
+
+    Возвращает флаги, каждый краснеет на возврате своего дефекта:
+      refuse/nothing_written — тихая запись в общемашинный каталог;
+      chained/prev_ran       — затирание чужого хука вместо цепочки;
+      foreign_repo_ok        — хук без проверки существования прибора.
+    """
+    global ROOT
+    import tempfile, shutil
+    old_root = ROOT
+    tmp = tempfile.mkdtemp(prefix="pdguard-install-")
+    res: dict = {}
+
+    def _g(cwd, *a):
+        return subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True)
+
+    def _mkrepo(path, shared, with_tool):
+        os.makedirs(os.path.join(path, "scripts"), exist_ok=True)
+        if with_tool:
+            shutil.copy(__file__, os.path.join(path, "scripts", "pd_guard.py"))
+        _g(path, "init", "-q")
+        _g(path, "config", "user.email", "t@t")
+        _g(path, "config", "user.name", "t")
+        _g(path, "config", "core.hooksPath", shared)  # ЛОКАЛЬНО — только этот репо
+
+    try:
+        shared = os.path.join(tmp, "shared-hooks")
+        os.makedirs(shared)
+        repo = os.path.join(tmp, "repo")
+        _mkrepo(repo, shared, with_tool=True)
+
+        # Дефект 1: без флага — отказ и НИ ОДНОГО файла в общем каталоге.
+        ROOT = repo
+        res["refuse"] = install() != 0
+        res["nothing_written"] = not os.path.exists(os.path.join(shared, "pre-commit"))
+
+        # Чужой commit-msg заранее — образец цепочки (как .pre-entire у Entire).
+        sentinel = os.path.join(tmp, "prev-ran")
+        foreign = os.path.join(shared, "commit-msg")
+        with open(foreign, "w", encoding="utf-8") as f:
+            f.write(f'#!/bin/sh\ntouch "{sentinel}"\nexit 0\n')
+        os.chmod(foreign, 0o755)
+
+        # Дефект 3: с флагом ставим, чужой хук сохранён и зовётся цепочкой.
+        res["force_ok"] = install(force_global=True) == 0
+        res["installed"] = os.access(os.path.join(shared, "pre-commit"), os.X_OK)
+        res["chained"] = os.path.exists(foreign + ".pre-pd-guard")
+        with open(os.path.join(repo, "a.txt"), "w", encoding="utf-8") as f:
+            f.write("chistyy\n")
+        _g(repo, "add", "a.txt")
+        c = _g(repo, "commit", "-qm", "chistyy")
+        res["commit_clean_ok"] = c.returncode == 0
+        res["prev_ran"] = os.path.exists(sentinel)  # чужой хук отработал по цепочке
+
+        # Дефект 2: соседний репо БЕЗ прибора, тот же общий каталог — коммит проходит.
+        repo2 = os.path.join(tmp, "repo2")
+        _mkrepo(repo2, shared, with_tool=False)
+        with open(os.path.join(repo2, "b.txt"), "w", encoding="utf-8") as f:
+            f.write("hello\n")
+        _g(repo2, "add", "b.txt")
+        res["foreign_repo_ok"] = _g(repo2, "commit", "-qm", "bezpribora").returncode == 0
+    finally:
+        ROOT = old_root
+        shutil.rmtree(tmp, ignore_errors=True)
+    return res
+
+
+
+def _long_line_probe() -> bool:
+    """Одна строка на 2 МБ разбирается за секунды, и фамилия в ней найдена."""
+    import time
+    names = ["familiya-ab"]
+    pat = name_pattern(names)
+    line = "a" * 2_000_000 + " familiya-ab " + "o" * 2_000_000
+    started = time.monotonic()
+    found = scan_text(line, pat, "long")
+    return len(found) == 1 and time.monotonic() - started < 5.0
 
 def selftest() -> int:
     import tempfile
@@ -829,6 +1012,11 @@ def selftest() -> int:
          len(scan_text("fami\u200bliya", pat, "f")) == 1),
         ("гомоглиф в фамилии не снимает сторож",
          len(scan_text("familiy\u0430", pat, "f")) == 1),
+        # 03.09.2026: normalize_public_scan откатывался по знаку на длинном прогоне
+        # омоглифов и вешал сторож (102 с на 100 КБ в одну строку). graph.json
+        # графа знаний — 34 МБ ОДНОЙ строкой, минифицированный js и base64 тоже.
+        # Проверяем и потолок времени, и что находка в такой строке не потеряна.
+        ("длинная строка омоглифов не вешает сторож", _long_line_probe()),
         ("фамилия в имени ветки ловится pre-push",
          len(check_push_refs(pat, "refs/heads/autoloop/familiya-ab abc "
                              "refs/heads/autoloop/familiya-ab abc\n")) == 2),
@@ -915,6 +1103,19 @@ def selftest() -> int:
          scan_text("файл drugoy.md",
                    name_pattern(names, owner_url_probe="github.com/familiyaphil/x"),
                    "проба") != []),
+    ]
+
+    ip = _install_probe()
+    checks += [
+        # Дефект 1: молча писать в общемашинный каталог запрещено.
+        ("установка в общий каталог без флага — отказ", ip["refuse"]),
+        ("отказ ничего не пишет в общий каталог", ip["nothing_written"]),
+        ("с --force-global установка проходит", ip["force_ok"] and ip["installed"]),
+        # Дефект 3: чужой хук сохранён рядом и вызван цепочкой, не затёрт.
+        ("чужой хук сохранён как .pre-pd-guard", ip["chained"]),
+        ("чужой хук отработал по цепочке", ip["commit_clean_ok"] and ip["prev_ran"]),
+        # Дефект 2: в репозитории без прибора хук тихо выходит 0.
+        ("коммит в чужом репо без прибора проходит", ip["foreign_repo_ok"]),
     ]
     for name, ok in checks:
         print(f"  {'✓' if ok else '✗'} {name}")

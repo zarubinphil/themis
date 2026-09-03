@@ -25,7 +25,7 @@
     python3 scripts/retro.py --selftest
 
 Код возврата: 0 — разбор закрыт (урок записан сегодня); 1 — урок не записан,
-работа НЕ закончена; 2 — данных о расходе нет (не тот файл сессии).
+работа НЕ закончена; 2 — журнал расхода не найден либо не разобран.
 """
 import argparse
 import json
@@ -145,13 +145,50 @@ def diagnose(rep: dict, track: str | None = None) -> list[str]:
     return out
 
 
-def collect_retro(session: str | None = None, track: str | None = None) -> dict:
-    from token_ledger import collect, latest_session, tokens
+def session_path(session: str | None, cwd: str) -> tuple[str | None, str | None]:
+    """Найти журнал либо назвать точную причину, почему разбор невозможен."""
+    from token_ledger import latest_session, project_dir
 
-    path = session or latest_session(os.getcwd())
-    if not path or not os.path.isfile(path):
-        return {"ошибка": "файл сессии не найден", "итого": 0}
-    rep = collect(path)
+    if session:
+        if os.path.isfile(session):
+            return session, None
+        return None, f"файл сессии не найден по пути {session}"
+    try:
+        sessions_dir = project_dir(cwd)
+    except Exception as e:
+        return None, f"путь каталога сессий не вычислен: {e}"
+    if not sessions_dir:
+        return None, "путь каталога сессий не вычислен"
+    if not os.path.isdir(sessions_dir):
+        return None, f"каталог сессий не найден по пути {sessions_dir}"
+    try:
+        path = latest_session(cwd)
+    except Exception as e:
+        return None, f"путь журнала сессии не вычислен для каталога {sessions_dir}: {e}"
+    if not path:
+        try:
+            with os.scandir(sessions_dir) as entries:
+                empty = next(entries, None) is None
+        except OSError as e:
+            return None, f"каталог сессий не прочитан по пути {sessions_dir}: {e}"
+        if empty:
+            return None, f"каталог сессий пуст по пути {sessions_dir}"
+        return None, f"журнал сессии не найден в непустом каталоге {sessions_dir}"
+    if not os.path.isfile(path):
+        return None, f"файл сессии не найден по пути {path}"
+    return path, None
+
+
+def collect_retro(session: str | None = None, track: str | None = None) -> dict:
+    from token_ledger import collect, tokens
+
+    path, error = session_path(session, os.getcwd())
+    if error:
+        return {"ошибка": error, "итого": 0}
+    try:
+        rep = collect(path)
+    except Exception as e:
+        return {"ошибка": f"журнал сессии не разобран по пути {path}: {e}", "итого": 0}
     total = tokens(rep["total"])
     steps = sorted(((k, tokens(v)) for k, v in rep["by_step"].items()),
                    key=lambda kv: -kv[1])
@@ -189,16 +226,18 @@ def main() -> int:
         print("⛔ урок пуст: разбор не закрывается пустой записью. Нужен текст правила: "
               "что было не так → почему → какое правило это закрывает.", file=sys.stderr)
         return 1
+    r = collect_retro(a.session, a.track)
+    if r.get("ошибка"):
+        if a.json:
+            print(json.dumps(r, ensure_ascii=False, indent=2))
+        print(f"⛔ РАЗБОР НЕ ЗАКРЫТ: расход не измерен: {r['ошибка']}.", file=sys.stderr)
+        return 2
     if a.lesson:
         print("урок записан:", append_lesson(a.lesson))
-
-    r = collect_retro(a.session, a.track)
+        r["урок записан сегодня"] = True
     if a.json:
         print(json.dumps(r, ensure_ascii=False, indent=2))
     else:
-        if r.get("ошибка"):
-            print(f"⚠ {r['ошибка']}", file=sys.stderr)
-            return 2
         print(f"РАЗБОР РАБОТЫ · сессия {r['сессия']}")
         print(f"итого {r['итого']:,} токенов ≈ ${r['деньги']}".replace(",", " "))
         st = r["статьи"]
@@ -226,7 +265,11 @@ def main() -> int:
 
 
 def selftest() -> int:
+    import shutil
+    import subprocess
     import tempfile
+    import token_ledger
+
     tmp = tempfile.mkdtemp()
     log = os.path.join(tmp, "lessons.md")
     open(log, "w", encoding="utf-8").write("# Уроки\n\n## 01.01.2020 — старый урок\n\nтекст\n")
@@ -310,6 +353,83 @@ def selftest() -> int:
                     {"1 карта": 1_000_000}), track="FULL"))),
         ("доли считаются от целого", share(25, 100) == 25.0),
         ("деление на ноль не роняет", share(5, 0) == 0.0),
+    ]
+
+    # Нет каталога, пустой каталог и нечитаемый журнал — разные причины отказа.
+    home0 = os.environ.get("HOME")
+    cwd = os.getcwd()
+    sessions_tmp = os.path.join(tmp, "sessions")
+    os.makedirs(sessions_tmp)
+    try:
+        missing_home = os.path.join(sessions_tmp, "missing")
+        os.makedirs(missing_home)
+        os.environ["HOME"] = missing_home
+        missing = collect_retro()
+        missing_cli = subprocess.run(
+            [sys.executable, os.path.abspath(__file__)], cwd=cwd,
+            env={**os.environ, "HOME": missing_home}, text=True,
+            capture_output=True, check=False)
+        missing_output = missing_cli.stdout + missing_cli.stderr
+        isolated = os.path.join(tmp, "isolated")
+        isolated_scripts = os.path.join(isolated, "scripts")
+        os.makedirs(isolated_scripts)
+        os.makedirs(os.path.join(isolated, "knowledge"))
+        # Копия ПОЛНАЯ: все модули scripts/ верхнего уровня, а не список имен.
+        # Список разошелся сразу: после M04 token_ledger импортирует _obshee,
+        # неполная копия умирала от окружения, не дойдя до проверяемого условия.
+        scripts_dir = os.path.dirname(os.path.abspath(__file__))
+        for f in os.listdir(scripts_dir):
+            if f.endswith(".py"):
+                shutil.copy2(os.path.join(scripts_dir, f),
+                             os.path.join(isolated_scripts, f))
+        isolated_retro = os.path.join(isolated_scripts, "retro.py")
+        close_log = os.path.join(isolated, "knowledge", "lessons-log.md")
+        before = "# Уроки\n"
+        open(close_log, "w", encoding="utf-8").write(before)
+        blocked = subprocess.run(
+            [sys.executable, isolated_retro, "--lesson", "не писать урок без журнала"],
+            cwd=isolated, env={**os.environ, "HOME": missing_home},
+            text=True, capture_output=True, check=False)
+        blocked_lesson = open(close_log, encoding="utf-8").read() != before
+
+        empty_home = os.path.join(sessions_tmp, "empty")
+        os.environ["HOME"] = empty_home
+        os.makedirs(token_ledger.project_dir(cwd))
+        empty = collect_retro()
+
+        broken_home = os.path.join(sessions_tmp, "broken")
+        os.environ["HOME"] = broken_home
+        broken_dir = token_ledger.project_dir(cwd)
+        os.makedirs(broken_dir)
+        with open(os.path.join(broken_dir, "broken.jsonl"), "w", encoding="utf-8") as fh:
+            fh.write("{}\n")
+        collect0 = token_ledger.collect
+
+        def unreadable(_path: str) -> dict:
+            raise OSError("синтетически нечитаемый журнал")
+
+        token_ledger.collect = unreadable
+        try:
+            broken = collect_retro()
+        finally:
+            token_ledger.collect = collect0
+    finally:
+        if home0 is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = home0
+    checks += [
+        ("нет каталога → отказ называет путь",
+         "каталог сессий не найден по пути" in missing.get("ошибка", "")),
+        ("retro без каталога не закрывает прогон и называет причину",
+         missing_cli.returncode == 2 and "РАЗБОР НЕ ЗАКРЫТ" in missing_output
+         and "каталог сессий не найден по пути" in missing_output),
+        ("retro --lesson без журнала не пишет урок",
+         blocked.returncode == 2 and not blocked_lesson),
+        ("пустой каталог назван отдельно",
+         "каталог сессий пуст по пути" in empty.get("ошибка", "")),
+        ("нечитаемый журнал назван отдельно",
+         "не разобран" in broken.get("ошибка", "")),
     ]
     for name, ok in checks:
         print(f"  {'✓' if ok else '✗'} {name}")

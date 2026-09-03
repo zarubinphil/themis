@@ -23,6 +23,7 @@ import datetime
 import hashlib
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -173,14 +174,43 @@ def _nuzhno_kodeksov() -> int:
 NUZHNO_KODEKSOV = _nuzhno_kodeksov()
 
 
-def brief(case: Path, level: str) -> None:
+def graph_state(case: Path) -> str:
+    """Одна строка о графе дела. Граф, о котором молчат, становится тихим артефактом.
+
+    Состояние ЧИТАЕТСЯ, а не чинится: сводка старта сессии не выполняет работу, и
+    пересборка графа никогда не является «следующим шагом» — граф производная, он
+    не может быть работой. Ошибка прибора гасится: статус дела не смеет упасть
+    из-за вспомогательного артефакта.
+    """
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import case_graph
+    except Exception:
+        return "прибор case_graph недоступен"
+    try:
+        graph = Path(case) / case_graph.GRAPH_DIR / "graph.json"
+        if not graph.is_file():
+            _, refusals = case_graph.build_graph(str(case))
+            return ("не построен: " + refusals[0]) if refusals \
+                else "не построен (карта по контракту, соберется при первом запросе)"
+        bad = case_graph.stale(str(case))
+        if not bad:
+            import json
+            n = json.load(open(graph, encoding="utf-8"))
+            return f"{len(n.get('nodes', []))} узлов, свеж"
+        return "УСТАРЕЛ, разошлись: " + ", ".join(bad) + " — пересоберется при запросе"
+    except Exception as e:
+        return f"состояние не определено ({e.__class__.__name__})"
+
+
+def brief(case: Path, level: str, stage: str = "не определена") -> None:
     """Сводка старта сессии: то, ради чего конституция велела читать шесть файлов."""
     case_txt = read(case / "_case.md")
     client_dir = case.parent
     client_txt = read(client_dir / "_client.md")
 
     head = " · ".join(x for x in (
-        f"стадия: {field(case_txt, 'Стадия')}" if field(case_txt, "Стадия") else "",
+        f"стадия: {stage}",
         f"суд: {field(case_txt, 'Суд')}" if field(case_txt, "Суд") else "",
         f"дело № {field(case_txt, 'Номер дела')}" if field(case_txt, "Номер дела") else "",
         f"судья: {field(case_txt, 'Судья')}" if field(case_txt, "Судья") else "",
@@ -197,6 +227,7 @@ def brief(case: Path, level: str) -> None:
     fio = field(client_txt, "ФИО") or "профиль пуст"
     print(f"  доверитель: {fio}"
           f"{'' if (client_dir / '_client.md').exists() else ' ⚠ файла _client.md нет'}")
+    print(f"  граф дела: {graph_state(case)}")
 
     intake = case / "00_intake"
     files = [f for f in intake.rglob("*") if f.is_file() and not f.name.startswith((".", "~$"))] \
@@ -266,6 +297,43 @@ def read(f: Path) -> str:
         return f.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return ""
+
+
+def verdict_checks(drafts: list[Path]) -> list[tuple[Path, int, str]]:
+    """Шаг 5 читает только канонический CLI verdict.py --check.
+
+    `review_log.md` остается человеческим протоколом и сюда не попадает. Один
+    документ — один ответ прибора, привязанный к sha текущей редакции.
+    """
+    tool = Path(__file__).resolve().with_name("verdict.py")
+    rows = []
+    for md in drafts:
+        try:
+            p = subprocess.run([sys.executable, str(tool), str(md), "--check"],
+                               capture_output=True, text=True, timeout=360,
+                               stdin=subprocess.DEVNULL)
+            rows.append((md, p.returncode, ((p.stdout or "") + (p.stderr or "")).strip()))
+        except (OSError, subprocess.TimeoutExpired) as e:
+            rows.append((md, 1, f"verdict.py --check не отработал: {e}"))
+    return rows
+
+
+def protocol_stage(s1: bool, s2: bool, pr_fresh: bool, s3_done: bool,
+                   drafts: list[Path], approved: bool, published: bool) -> str:
+    """Стадия выводится только из маркеров и артефактов на диске."""
+    if not s1:
+        return "картирование"
+    if not s2 or not pr_fresh:
+        return "поиск практики"
+    if not s3_done:
+        return "формирование позиции"
+    if not drafts:
+        return "составление документа"
+    if not approved:
+        return "рецензия"
+    if not published:
+        return "выкладка в GOTOVO"
+    return "готово к финализации"
 
 
 def age_minutes(f: Path) -> float:
@@ -397,72 +465,65 @@ def main() -> int:
     # Ареопага («СОГЛАСОВАНО СОВЕТОМ»), FAST — синтез Фемидой («## FAST-ПОЗИЦИЯ
     # ФЕМИДЫ»). Без второго маркера FAST-прогон упирался в шаг 3 навсегда: совета
     # на нем не бывает, а ставить «СОГЛАСОВАНО СОВЕТОМ» без совета — врать прибору.
-    s3 = has_marker(pos, r"#{0,3}\s*СОГЛАСОВАНО СОВЕТОМ") or has_marker(pos, r"## FAST-ПОЗИЦИЯ ФЕМИДЫ")
-    s3_skip = has_marker(case_md, r"position-council пропущен", anchored=False)
+    s3_full = has_marker(pos, r"#{0,3}\s*СОГЛАСОВАНО СОВЕТОМ")
+    s3_fast = has_marker(pos, r"## FAST-ПОЗИЦИЯ ФЕМИДЫ")
+    # M02: фраза «position-council пропущен» в карточке была прозой, которую
+    # машина принимала за состояние. Новый формат только добавляется: явный
+    # заголовок-маркер живет в positions.md; старые карточки не переписываются.
+    s3_skip = has_marker(pos, r"## POSITION-COUNCIL ПРОПУЩЕН")
+    s3 = s3_full or s3_fast or s3_skip
 
-    level = "?"
-    try:
-        m = re.search(r"\bL[123]\b", case_md.read_text(encoding="utf-8"))
-        if m:
-            level = m.group(0)
-    except OSError:
-        pass
+    # Старые L1-дела не требуют positions.md. Совместимость держит точное
+    # структурное поле-маркер, а не любое упоминание L1 в прозе карточки.
+    level = field(read(case_md), "Уровень") or "?"
     s3_not_needed = level == "L1"
-
-    if a.brief:
-        brief(case, level)
-
     drafts = sorted((case / ".agent/drafts").glob("*.md")) if (case / ".agent/drafts").is_dir() else []
     drafts = [d for d in drafts if "_working" not in d.parts and "_baselines" not in d.parts]
-    # Вердикт приемки лежал только по одному захардкоженному пути, а Кони пишет
-    # его куда придется: на диске «ГОТОВ К ПОДАЧЕ» встречается в 14 файлах, из них
-    # по каноническому пути — 2. Из-за этого машина печатала «Шаг 5 ✗» примерно в
-    # 95% дел и приучала оператора себя игнорировать. Ищем везде, где он бывает.
-    # Вердикт — ОТДЕЛЬНЫЙ артефакт рецензента, а не подстрока где угодно.
-    # Прежний glob по всему дереву черновиков брал под сканирование САМ
-    # проверяемый документ: фраза «думаю, он уже ГОТОВ К ПОДАЧЕ» в теле
-    # черновика закрывала шаг 5 и открывала подачу, хотя Кони не запускалась
-    # (проба круга 9). Ищем в файлах ОТЧЕТА: review_log.md на любом уровне
-    # дела плюс *_review*.md — и в _case.md, куда вердикт заносят вручную.
-    candidates = [case / ".agent/drafts" / "_working" / "review_log.md",
-                  ctx / "review_log.md", case / "_case.md"]
-    for korn in (case / ".agent", case / "02_hearings"):
-        if korn.is_dir():
-            candidates += sorted(q for q in korn.rglob("*.md")
-                                 if q.name == "review_log.md" or "_review" in q.name
-                                 or q.name.startswith("review"))
-    # Черновики из списка исключены явно: документ не одобряет сам себя.
-    drafts_dir = (case / ".agent" / "drafts").resolve()
-    candidates = [q for q in candidates
-                  if not (q.resolve().parent == drafts_dir and q.name != "review_log.md")]
-    # Подстрока «ГОТОВ К ПОДАЧЕ» входит в отрицательный вердикт «НЕ ГОТОВ К ПОДАЧЕ»
-    # и в «документ пока НЕ готов к подаче» — машина принимала отказ Кони за приемку
-    # и пускала протокол на шаг вперед. Отрицание отсекаем явно.
-    approved_in = next((f for f in candidates
-                        if has_marker(f, r"(?<!НЕ )(?<!не )ГОТОВ К ПОДАЧЕ",
-                                      anchored=False)), None)
-    approved = approved_in is not None
+    verdict_rows = verdict_checks(drafts)
+    approved_rows = [row for row in verdict_rows if row[1] == 0]
+    blocked_rows = [row for row in verdict_rows if row[1] != 0]
+    # Один старый зеленый v1 не маскирует новый красный v2: шаг закрыт, только
+    # когда verdict.py разрешает КАЖДЫЙ черновик верхнего уровня.
+    approved = bool(verdict_rows) and not blocked_rows
+
+    gotovo = case / "GOTOVO"
+    gotovo_docx = ([f for f in sorted(gotovo.glob("*.docx")) if not f.name.startswith("~$")]
+                   if gotovo.is_dir() else [])
+    stage = protocol_stage(s1, s2, pr_fresh, s3 or s3_not_needed,
+                           drafts, approved, bool(gotovo_docx))
+    if a.brief:
+        brief(case, level, stage)
 
     def mark(ok: bool) -> str:
         return "✓" if ok else "✗"
 
-    print(f"# Статус протокола — {case.name} (уровень: {level})")
+    print(f"# Статус протокола — {case.name} (уровень: {level}; стадия: {stage})")
     print(f"Шаг 1 Карта:     {mark(s1)}  knowledge-map.md {'с маркером' if s1 else '— нет маркера КАРТА ГОТОВА'}")
     fresh_note = "" if not s2 else (f" (свежая, ≤{PRACTICE_TTL_DAYS} дн.)" if pr_fresh else f" (в базе {age_days(pr)} дн., порог {PRACTICE_TTL_DAYS} — проверить актуальность)")
     track = " [FULL, совет]" if s2_full else (" [FAST, синтез Фемиды]" if s2_fast else "")
     print(f"Шаг 2 Практика:  {mark(s2)}  practice.md "
           f"{'с маркером' + track + fresh_note if s2 else '— нет маркера (нужен СОВЕТ ЗАВЕРШЕН либо FAST-СИНТЕЗ ФЕМИДЫ)'}")
     if s3_not_needed:
-        print("Шаг 3 Позиция:   —  L1: не требуется")
+        print("Шаг 3 Позиция:   —  L1: не требуется (маркер Уровень в _case.md)")
     elif s3_skip:
-        print("Шаг 3 Позиция:   ✓  пропуск зафиксирован в _case.md")
+        print("Шаг 3 Позиция:   ✓  positions.md: POSITION-COUNCIL ПРОПУЩЕН")
     else:
-        s3_how = ("СОГЛАСОВАНО СОВЕТОМ" if has_marker(pos, r"#{0,3}\s*СОГЛАСОВАНО СОВЕТОМ")
-                  else "FAST-ПОЗИЦИЯ ФЕМИДЫ" if s3 else "— нет маркера")
+        s3_how = ("СОГЛАСОВАНО СОВЕТОМ" if s3_full
+                  else "FAST-ПОЗИЦИЯ ФЕМИДЫ" if s3_fast else "— нет маркера")
         print(f"Шаг 3 Позиция:   {mark(s3)}  positions.md {s3_how}")
     print(f"Шаг 4 Черновики: {mark(bool(drafts))}  {len(drafts)} файл(ов) в .agent/drafts")
-    print(f"Шаг 5 Кони:      {mark(approved)}  "
-          f"{'ГОТОВ К ПОДАЧЕ — ' + approved_in.name if approved else 'вердикта ГОТОВ К ПОДАЧЕ нет'}")
+    if approved:
+        names = ", ".join(row[0].name for row in approved_rows)
+        detail = f"ГОТОВ К ПОДАЧЕ через verdict.py --check: {names}"
+    elif blocked_rows:
+        lines = [line.strip(" ·") for line in blocked_rows[0][2].splitlines()
+                 if line.strip() and "СБОРКА .docx ЗАПРЕЩЕНА" not in line]
+        detail = ("verdict.py --check: " + (lines[0] if lines else "сборка запрещена")
+                  + (f"; одобрено {len(approved_rows)}, заблокировано {len(blocked_rows)}"
+                     if approved_rows else ""))
+    else:
+        detail = "нет черновиков для verdict.py --check"
+    print(f"Шаг 5 Кони:      {mark(approved)}  {detail}")
 
     # Состояния «артефакт шага N есть, а шага N-1 нет» в модели раньше не было:
     # для дела с готовым документом и пустым конвейером скрипт бодро печатал
@@ -473,6 +534,20 @@ def main() -> int:
               f"но не пройдено: {missing}. Документ создан вне конвейера — "
               f"проверять реквизиты вручную, к подаче не готов.")
 
+    # Готовый документ, не доехавший до GOTOVO/, для владельца не существует.
+    # Прецедент 01.09.2026: вердикт «ГОТОВ К ПОДАЧЕ» стоял, .docx лежал в
+    # .agent/drafts/, конвейер отчитался «готово, вот файл» — GOTOVO/ была пуста,
+    # и владелец сообщил, что видит это не впервые. Текстовое правило в скилле
+    # исполняется вероятностно, поэтому расхождение ловит прибор.
+    # Временные файлы Word «~$имя.docx» появляются, когда владелец открыл документ,
+    # и за готовый документ не считаются: иначе сторож молчит именно в тот момент,
+    # когда папка пуста, а Word открыт на прошлой копии (проба 01.09.2026).
+    if approved and not gotovo_docx:
+        print("\n⚠ ДОКУМЕНТ НЕ У ВЛАДЕЛЬЦА: вердикт «ГОТОВ К ПОДАЧЕ» есть, "
+              "а в GOTOVO/ нет ни одного .docx. Готовый документ живет в GOTOVO/ — "
+              "это единственная папка, за которой владелец приходит за результатом. "
+              "Положить его туда и только потом докладывать о готовности.")
+
     if not s1:
         nxt = "Шаг 1 — case-mapper (карта дела)"
     elif not s2:
@@ -480,8 +555,9 @@ def main() -> int:
     elif not pr_fresh:
         nxt = (f"Шаг 2 — практика в базе {age_days(pr)} дн. (порог {PRACTICE_TTL_DAYS}): подтвердить актуальность "
                f"или обновить охоту")
-    elif not (s3 or s3_skip or s3_not_needed):
-        nxt = "Шаг 3 — /position-council (или зафиксировать пропуск в _case.md)"
+    elif not (s3 or s3_not_needed):
+        nxt = ("Шаг 3 — /position-council (либо добавить явный маркер "
+               "## POSITION-COUNCIL ПРОПУЩЕН в positions.md)")
     elif not drafts:
         nxt = "Шаг 4 — /draft (doc-drafter)"
     elif not approved:
@@ -587,6 +663,12 @@ def selftest() -> int:
         ("не в кеше — не засчитан", extracted(files) != len(files)),
         ("сводка называет суд", "Советский районный суд" in out),
         ("сводка называет доверителя", "Тестова" in out),
+        # Граф, о котором сводка молчит, превращается в тихий артефакт: им
+        # перестают пользоваться и не замечают, что он отстал.
+        ("сводка называет состояние графа дела", "граф дела:" in out),
+        ("состояние графа не выдумано: карта фикстуры контракту не отвечает",
+         "не построен" in out),
+        ("стадия из прозы _case.md не читается", "Первая инстанция" not in out),
         # События сортируются по имени: даты ISO, последнее — старшее.
         ("последнее событие — самое свежее", "2026-06-29_zasedanie" in out
          and "2026-05-12_beseda" not in out),
@@ -612,6 +694,92 @@ def selftest() -> int:
         ("есть .owner — назван держатель лока", "Мейер" in est_owner),
         # Трек считается по объему: два скана, извлечен один — еще FULL.
         ("трек по объему — FULL", track_hint(case) == "FULL"),
+    ]
+
+    # M02: человеческий протокол может говорить что угодно, шаг 5 отвечает
+    # только verdict.py --check. Сначала честное одобрение, затем правка .md:
+    # review_log остается зеленым, машинный статус обязан стать красным.
+    os.environ["THEMIS_VERDICT_KEY"] = "selftest-key-do-not-use-in-prod"
+    import verdict as vd
+    status_md = drafts / "status.md"
+    status_md.write_text("# Ходатайство\n\nПрошу суд отложить заседание "
+                         "(ст. 158 АПК РФ).\n", encoding="utf-8")
+    vd._write_preflight(status_md, vd.sha(status_md), True, [{
+        "tool": "selftest", "code": 0, "output_sha256": "0" * 64,
+    }])
+    assert vd.record(status_md, vd.READY, source="doc-reviewer") is not None
+    green = verdict_checks([status_md])
+    human_log = drafts / "_working" / ("review" + "_log.md")
+    human_log.parent.mkdir(parents=True, exist_ok=True)
+    human_log.write_text("r1: ГОТОВ К ПОДАЧЕ — status.md\n", encoding="utf-8")
+    status_md.write_text(read(status_md) + "\nНовая редакция после одобрения.\n",
+                         encoding="utf-8")
+    red = verdict_checks([status_md])
+    # Враждебная сквозная проба main(): зеленая запись человеческого протокола
+    # не вправе перебить красный verdict.py. Заодно карточная фраза о пропуске
+    # шага 3 не считается маркером; новый явный маркер в positions.md считается.
+    (case / ".agent/context" / "practice.md").write_text(
+        "## FAST-СИНТЕЗ ФЕМИДЫ\n", encoding="utf-8")
+    (case / "_case.md").write_text(
+        read(case / "_case.md")
+        + "\nКоординатор: position-council пропущен; это якобы L1.\n",
+        encoding="utf-8")
+    old_green = drafts / "old_green.md"
+    old_green.write_text("# Ходатайство\n\nПрошу суд приобщить документы.\n",
+                         encoding="utf-8")
+    vd._write_preflight(old_green, vd.sha(old_green), True, [{
+        "tool": "selftest", "code": 0, "output_sha256": "0" * 64,
+    }])
+    assert vd.record(old_green, vd.READY, source="doc-reviewer") is not None
+
+    old_argv = sys.argv[:]
+    old_frontmatter, old_rashod, old_korpus = check_frontmatter, rashod_stroka, _korpus_counts
+
+    def run_status():
+        buf = io.StringIO()
+        sys.argv = [__file__, str(case)]
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            main()
+        return buf.getvalue()
+
+    try:
+        globals()["check_frontmatter"] = lambda: []
+        globals()["rashod_stroka"] = lambda *_: ("расход: тест", False, False)
+        globals()["_korpus_counts"] = lambda *_: (NUZHNO_KODEKSOV, 1)
+        card_prose_out = run_status()
+        l2_card = read(case / "_case.md")
+        (case / "_case.md").write_text(
+            l2_card.replace("**Уровень:** L2", "**Уровень:** L1"), encoding="utf-8")
+        l1_marker_out = run_status()
+        (case / "_case.md").write_text(l2_card, encoding="utf-8")
+        (case / ".agent/context" / "positions.md").write_text(
+            "## POSITION-COUNCIL ПРОПУЩЕН\n", encoding="utf-8")
+        marker_out = run_status()
+    finally:
+        globals()["check_frontmatter"] = old_frontmatter
+        globals()["rashod_stroka"] = old_rashod
+        globals()["_korpus_counts"] = old_korpus
+        sys.argv = old_argv
+
+    checks += [
+        ("честный verdict.py --check закрывает шаг 5", green[0][1] == 0),
+        ("расхождение review_log и verdicts.jsonl красит шаг 5 по verdict.py",
+         red[0][1] == 1 and "ДРУГУЮ редакцию" in red[0][2]),
+        ("main не принимает review_log вместо verdict.py",
+         "Шаг 5 Кони:      ✗" in marker_out
+         and "СЛЕДУЮЩИЙ ШАГ: Шаг 5" in marker_out),
+        ("старый зеленый черновик не маскирует новый красный",
+         all(code != 0 for _, code, _ in verdict_checks([old_green, status_md]))),
+        ("реплика координатора в _case.md не двигает стадию",
+         "Шаг 3 Позиция:   ✗" in card_prose_out
+         and "СЛЕДУЮЩИЙ ШАГ: Шаг 3" in card_prose_out),
+        ("структурный маркер Уровень: L1 сохраняет старый обход позиции",
+         "L1: не требуется" in l1_marker_out
+         and "СЛЕДУЮЩИЙ ШАГ: Шаг 5" in l1_marker_out),
+        ("аддитивный маркер пропуска в positions.md двигает стадию",
+         "POSITION-COUNCIL ПРОПУЩЕН" in marker_out),
+        ("стадия считается из маркеров, не карточки",
+         protocol_stage(True, True, True, True, [status_md], False, False) == "рецензия"),
     ]
     import token_ledger as tl
     old_latest, old_collect, old_tokens = tl.latest_session, tl.collect, tl.tokens

@@ -307,11 +307,14 @@ if [ "$THEMIS_LANG" = "ru" ]; then
   echo ""
   echo "  Библиотеки Python, около 200 МБ. Без них я не открою ни одного"
   echo "  документа:"
-  echo "    · pymupdf, markitdown, python-docx — читать PDF, Word и Excel"
+  echo "    · pypdfium2, pypdf, markitdown, python-docx — читать PDF, Word и Excel"
   echo "    · Pillow — работать с фотографиями документов"
+  echo "    · reportlab — собирать PDF на подпись"
   echo "    · fastapi, uvicorn — панель, где видно ход работы по делу"
   echo "    · openai-whisper — расшифровывать голосовые прямо у тебя,"
   echo "      не отправляя запись наружу"
+  echo "    Весь состав с версиями и лицензиями — в файле requirements.txt,"
+  echo "    ставится только он."
   echo ""
   if [ "$(uname)" = "Darwin" ]; then
     echo "  Еще соберу распознавание сканов. Оно работает на технологии,"
@@ -332,11 +335,14 @@ else
   echo ""
   echo "  Python libraries, about 200 MB. Without them I cannot open a single"
   echo "  document:"
-  echo "    · pymupdf, markitdown, python-docx — to read PDF, Word and Excel"
+  echo "    · pypdfium2, pypdf, markitdown, python-docx — to read PDF, Word and Excel"
   echo "    · Pillow — to handle photographs of documents"
+  echo "    · reportlab — to build PDFs for signature"
   echo "    · fastapi, uvicorn — the panel that shows what I am doing"
   echo "    · openai-whisper — to transcribe voice notes on your own computer,"
   echo "      without sending the recording anywhere"
+  echo "    The full list with versions and licenses is requirements.txt,"
+  echo "    and that file is all I install."
   echo ""
   if [ "$(uname)" = "Darwin" ]; then
     echo "  I will also build scan recognition. It runs on technology already"
@@ -363,12 +369,36 @@ if [ "${THEMIS_YES:-}" = "1" ]; then
   SOGLASIE="y"                      # для неинтерактивной установки: THEMIS_YES=1
 elif [ -r /dev/tty ] && [ -t 1 ]; then
   read -r SOGLASIE < /dev/tty || SOGLASIE="__net__"
-elif [ ! -t 0 ]; then
+elif [ -p /dev/stdin ]; then
+  # На входе ТРУБА: кто-то скармливает нам скрипт (`curl … | bash`). Ровно здесь
+  # и случился прецедент 21.08.2026 - ответ ушел мимо /dev/tty, и «n» прошло как
+  # согласие. Молчание трубы согласием не считаем никогда.
   read -r SOGLASIE || SOGLASIE="__net__"
+elif [ ! -t 0 ] && [ ! -t 1 ]; then
+  # Ни терминала, ни трубы - это автоматический прогон: проверка публичного
+  # дерева на чистой машине (public-repo-gate isolated-run), CI, образ. Спросить
+  # физически некого, и ОТКАЗ здесь означал бы, что установку не проверяет никто:
+  # гейт зеленел бы на дереве, которое никто ни разу не поставил. Ставим и
+  # говорим об этом вслух - решение владельца 03.09.2026.
+  SOGLASIE="y"
+  THEMIS_AVTO="1"
 else
   SOGLASIE="__net__"
 fi
-[ -z "$SOGLASIE" ] && [ "${THEMIS_YES:-}" != "1" ] && [ ! -t 0 ] && SOGLASIE="__net__"
+[ -z "$SOGLASIE" ] && [ "${THEMIS_YES:-}" != "1" ] && [ "${THEMIS_AVTO:-}" != "1" ] && [ ! -t 0 ] && SOGLASIE="__net__"
+
+# Автоматический прогон обязан назвать себя: тихая установка без спроса
+# неотличима от установки, на которую согласились.
+if [ "${THEMIS_AVTO:-}" = "1" ]; then
+  echo ""
+  if [ "$THEMIS_LANG" = "ru" ]; then
+    echo "  Терминала нет и трубы нет - это автоматический прогон. Ставлю без вопроса."
+    echo "  Человеку я задаю его всегда: bash install.sh в терминале."
+  else
+    echo "  No terminal and no pipe - this is an automated run. Installing without asking."
+    echo "  A person always gets the question: run bash install.sh in a terminal."
+  fi
+fi
 
 if [ "$SOGLASIE" = "__net__" ]; then
   echo ""
@@ -400,13 +430,67 @@ esac
 echo ""
 echo "[1/7] Python-пакеты…"
 PIP="pip3"
-$PIP install --quiet --upgrade \
-  pymupdf Pillow markitdown python-docx markitdown-mcp \
-  fastapi uvicorn openai-whisper 2>/dev/null || \
-$PIP install pymupdf Pillow markitdown python-docx markitdown-mcp fastapi uvicorn openai-whisper
-echo "      ✓ извлечение: pymupdf, Pillow, markitdown, python-docx"
-echo "      ✓ cockpit:    fastapi, uvicorn"
-echo "      ✓ медиа:      openai-whisper (расшифровка аудио/видео)"
+# Состав объявлен ОДИН раз — в requirements.txt, который собирается с диска
+# (python3 scripts/setup_doctor.py --licenses) из фактических импортов приборов.
+# Раньше список жил здесь руками и расходился с составом в обе стороны: четыре
+# живых зависимости не ставились вовсе, а AGPL-пакет ехал незамеченным (M11).
+$PIP install --quiet -r requirements.txt 2>/dev/null || \
+$PIP install --quiet --user -r requirements.txt 2>/dev/null || \
+$PIP install --quiet --break-system-packages -r requirements.txt 2>/dev/null || \
+$PIP install -r requirements.txt
+# ПРОВЕРЯЕМ ПО ФАКТУ, а не по коду pip. На чужой машине системный Python бывает
+# «externally managed» (PEP 668): pip отказывает, а установщик печатал галочку и
+# шел дальше - изолированный прогон 03.09.2026 поймал ровно это, PIL не появился,
+# и sign_and_pdf падал уже у человека. Тихий отказ хуже честного красного.
+NEDOSTAET=""
+for M in fitz PIL docx yaml fastapi reportlab pypdfium2 pypdf; do
+  python3 -c "import $M" 2>/dev/null || NEDOSTAET="$NEDOSTAET $M"
+done
+if [ -n "$NEDOSTAET" ]; then
+  echo ""
+  if [ "$THEMIS_LANG" = "ru" ]; then
+    echo "  ✗ Пакеты не встали:$NEDOSTAET"
+    echo "    Похоже, системный Python защищен (PEP 668). Обходные пути:"
+    echo "      python3 -m venv .venv && . .venv/bin/activate && bash install.sh"
+    echo "      либо  pip3 install --user -r requirements.txt"
+  else
+    echo "  ✗ Packages did not install:$NEDOSTAET"
+    echo "    The system Python is probably externally managed (PEP 668). Options:"
+    echo "      python3 -m venv .venv && . .venv/bin/activate && bash install.sh"
+    echo "      or    pip3 install --user -r requirements.txt"
+  fi
+  exit 1
+fi
+echo "      ✓ состав из requirements.txt (лицензии — столбцом в нем же)"
+echo "      ✓ извлечение · cockpit · медиа"
+
+# ── 1.5 Шрифт судебных документов ────────────────────────────────────────────
+# PT Serif везется В РЕПОЗИТОРИИ (assets/fonts, SIL OFL, лицензия рядом) по
+# решению владельца 03.09.2026. Раньше он не приезжал ниоткуда: на машине
+# владельца лежал с давних пор, а у чужого человека документ на подпись не
+# собирался вовсе - поймано изолированным прогоном гейта публикации.
+# Ставим в систему, иначе Word подставит свой, и документ уйдет в суд не в том
+# виде, в каком его проверяли.
+echo ""
+echo "[1.5] Шрифт PT Serif…"
+if [ "$(uname)" = "Darwin" ]; then
+  FONT_DIR="$HOME/Library/Fonts"
+else
+  FONT_DIR="$HOME/.local/share/fonts"
+fi
+mkdir -p "$FONT_DIR"
+POSTAVLENO=0
+for F in assets/fonts/PT_Serif-Web-*.ttf; do
+  [ -f "$F" ] || continue
+  if [ ! -f "$FONT_DIR/$(basename "$F")" ]; then
+    cp "$F" "$FONT_DIR/" && POSTAVLENO=$((POSTAVLENO + 1))
+  fi
+done
+if [ "$POSTAVLENO" -gt 0 ]; then
+  echo "      ✓ поставлено начертаний: $POSTAVLENO → $FONT_DIR"
+else
+  echo "      ✓ PT Serif уже на месте"
+fi
 
 # ── 2. Apple Vision OCR (сборка из исходника) ────────────────────────────────
 echo ""
@@ -536,6 +620,53 @@ else
   bash "$SMLTLK_SRC/scripts/build_app.sh" && echo "      ✓ SMLTLK собран" || \
     echo "      ⚠ сборка SMLTLK не удалась — Фемида работает и без диктовки"
 fi
+
+# ── Метида: НЕОБЯЗАТЕЛЬНАЯ часть, спрашиваем отдельно ────────────────────────
+# Почему отдельным вопросом, а не молча. Метида - самостоятельный проект, она
+# сжимает контекст перед отправкой модели. Без нее Фемида работает целиком: сжатие
+# просто выключено, и прибор говорит об этом вслух. Раньше ее отсутствие роняло
+# селфтест и выглядело поломкой продукта - изолированный прогон 03.09.2026.
+echo ""
+if [ "$THEMIS_LANG" = "ru" ]; then
+  echo "[доп.] Метида — сжатие контекста (необязательно)"
+  echo "  Отдельный инструмент. Он ужимает материал перед отправкой модели:"
+  echo "  меньше токенов на том же деле. Фемида работает и без него — сжатие"
+  echo "  тогда выключено, и приборы говорят об этом прямо, а не молчат."
+else
+  echo "[optional] Metida - context compression (optional)"
+  echo "  A separate tool. It squeezes material before it goes to the model:"
+  echo "  fewer tokens on the same case. Themis works fine without it - the"
+  echo "  compression is simply off, and the instruments say so out loud."
+fi
+METIDA_OTVET="n"
+if [ "${THEMIS_YES:-}" = "1" ] || [ "${THEMIS_AVTO:-}" = "1" ]; then
+  METIDA_OTVET="n"                 # автоматический прогон ничего лишнего не тянет
+elif [ -r /dev/tty ] && [ -t 1 ]; then
+  if [ "$THEMIS_LANG" = "ru" ]; then
+    printf "  Подключить Метиду? [Enter — нет, y — да]: "
+  else
+    printf "  Connect Metida? [Enter - no, y - yes]: "
+  fi
+  read -r METIDA_OTVET < /dev/tty || METIDA_OTVET="n"
+fi
+case "$METIDA_OTVET" in
+  y|Y|да|yes)
+    if [ "$THEMIS_LANG" = "ru" ]; then
+      echo "  Назови каталог с исходниками Метиды и положи его в переменную:"
+      echo "      export THEMIS_METIZ_DIR=/путь/к/metiz"
+      echo "  После этого сжатие включится само, проверить: node scripts/themis-metiz.mjs --selftest"
+    else
+      echo "  Point the tool at the Metida sources:"
+      echo "      export THEMIS_METIZ_DIR=/path/to/metiz"
+      echo "  Compression turns on by itself; check with: node scripts/themis-metiz.mjs --selftest"
+    fi ;;
+  *)
+    if [ "$THEMIS_LANG" = "ru" ]; then
+      echo "      ✓ без Метиды — так и задумано, ничего не сломается"
+    else
+      echo "      ✓ without Metida - by design, nothing breaks"
+    fi ;;
+esac
 
 python3 scripts/setup_doctor.py || DOCTOR_RC=$?
 

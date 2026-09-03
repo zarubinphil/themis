@@ -51,6 +51,43 @@ TRACK_SUBTITLE_PT = 0.6
 
 FONT = FONT_BODY  # обратная совместимость
 
+
+def find_scan_legal():
+    """Путь к scan_legal.sh гейта humanizer-legal. ЕДИНАЯ точка поиска для
+    verdict.py и DocBuilder — два места искали один файл, полярности разошлись.
+
+    Скилл едет ВНУТРИ репозитория, поэтому свежий клон работает сразу. Прецедент
+    21.08.2026: гейт искал скрипт только в $HOME/.claude/skills/, на второй машине
+    его не было, и ни один судебный документ не выпускался вовсе. Домашняя копия
+    остается только запасным путем, а не вторым источником правок.
+
+    Репозиторная копия на месте → она; иначе путь домашней (даже если и той нет —
+    вызывающий проверяет .is_file() и называет путь в отказе, fail-closed).
+    """
+    from pathlib import Path
+    repo = Path(__file__).resolve().parent.parent / \
+        ".claude/skills/humanizer-legal/scripts/scan_legal.sh"
+    home = Path.home() / ".claude/skills/humanizer-legal/scripts/scan_legal.sh"
+    if repo.is_file():
+        if home.is_file():
+            try:
+                drift = repo.read_bytes() != home.read_bytes()
+            except OSError as e:
+                print(f"ОШИБКА: копии scan_legal.sh не сверены ({e}); "
+                      f"выпуск остановлен.", file=sys.stderr)
+            else:
+                if drift:
+                    # Отказ, а не выбор: scan_legal.sh сам встанет с кодом 2
+                    # (check_copy_drift), оба вызывающих трактуют это как
+                    # fail-closed. «Использовать канон» молча нельзя — резерв
+                    # могли править осознанно, и тогда канон устарел.
+                    print(f"ОШИБКА: резервная копия {home} отличается "
+                          f"от канона {repo}; выпуск остановлен — "
+                          f"синхронизировать или удалить резерв.",
+                          file=sys.stderr)
+        return repo
+    return home
+
 # Порядок дочерних элементов w:rPr по ECMA-376. Элемент, вставленный не на
 # свое место, схема считает недопустимым, и рендерер молча его игнорирует.
 _RPR_ORDER = [
@@ -403,18 +440,18 @@ class DocBuilder:
         return p
 
     def add_section(self, text):
-        """Заголовок раздела I/II/III: 12pt, bold, JUSTIFY, sb=12, sa=6."""
+        """Заголовок раздела I/II/III: 12pt, bold, CENTER, sb=12, sa=6."""
         p = self.doc.add_paragraph()
-        p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p.paragraph_format.space_before = Pt(12)
         p.paragraph_format.space_after  = Pt(6)
         _set_font(p.add_run(text), 12, bold=True, family=FONT_DISPLAY)
         return p
 
     def add_subsection(self, text):
-        """Нумерованный подраздел: 12pt, bold, JUSTIFY, sb=6, sa=3."""
+        """Нумерованный подраздел: 12pt, bold, CENTER, sb=6, sa=3."""
         p = self.doc.add_paragraph()
-        p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p.paragraph_format.space_before = Pt(6)
         p.paragraph_format.space_after  = Pt(3)
         _set_font(p.add_run(text), 12, bold=True, family=FONT_DISPLAY)
@@ -1126,38 +1163,37 @@ class DocBuilder:
         """Прогнать текст через scan_legal.sh. Вернуть список сработавших
         блокирующих категорий; пустой список — документ чист.
 
-        Скрипт недоступен — гейт не срабатывает, но об этом печатается
-        предупреждение: молчаливое отключение проверки хуже ее отсутствия.
+        Скрипт недоступен или не отработал → возвращается блокирующая запись,
+        а не пустой список: fail-closed, как в verdict.py. Молчаливый пропуск
+        анти-AI-гейта хуже отказа — документ со следами автогенерации в суд не
+        выпускается. Пропуск проверки допустим только явным флагом с называнием
+        причины, а не тем, что скрипт «не нашелся».
         """
         import subprocess
-        from pathlib import Path as _P
 
-        # Скилл едет ВНУТРИ репозитория, поэтому свежая установка на другом
-        # устройстве работает сразу. Прецедент 21.08.2026: гейт искал скрипт
-        # только в $HOME/.claude/skills/, на второй машине его не было, и ни один
-        # судебный документ не выпускался вовсе. Домашняя копия остается
-        # запасным путем: у владельца скилл живет там и правится там.
-        scan = _P(__file__).resolve().parent.parent / \
-            ".claude/skills/humanizer-legal/scripts/scan_legal.sh"
-        if not scan.exists():
-            scan = _P.home() / ".claude/skills/humanizer-legal/scripts/scan_legal.sh"
-        if not scan.exists():
-            print(f"ВНИМАНИЕ: {scan} не найден — проверка humanizer-legal не выполнена.")
-            return []
+        scan = find_scan_legal()
+        if not scan.is_file():
+            return [f"scan_legal.sh не найден ({scan}) — humanizer-legal не проверен, fail-closed"]
         try:
-            out = subprocess.run(
+            p = subprocess.run(
                 ["bash", str(scan), "-"], input=self._document_text(),
-                capture_output=True, text=True, timeout=60).stdout
+                capture_output=True, text=True, timeout=60,
+                env={**os.environ, "THEMIS_PROJECT_ROOT":
+                     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))})
         except (OSError, subprocess.SubprocessError) as e:
-            print(f"ВНИМАНИЕ: humanizer-legal не отработал ({e}) — проверка не выполнена.")
-            return []
+            return [f"humanizer-legal не отработал ({e}) — не проверен, fail-closed"]
 
+        out = p.stdout or ""
         hits = []
         for line in out.splitlines():
             parts = line.strip().split(None, 1)
             if len(parts) == 2 and parts[0].isdigit() and int(parts[0]) > 0:
                 if parts[1] in self.HUMANIZER_BLOCKERS:
                     hits.append(f"{parts[1]} ({parts[0]})")
+        if p.returncode not in (0, 1):
+            return [f"humanizer-legal не отработал (код {p.returncode}) — fail-closed"]
+        if p.returncode == 1 and not hits:
+            return ["humanizer-legal вернул код 1 без блокирующей категории — fail-closed"]
         return hits
 
     def save(self, path):
@@ -1177,6 +1213,7 @@ class DocBuilder:
         import filecmp
         import os
         import shutil
+        import tempfile
         from pathlib import Path as _P
 
         self._strip_yo()
@@ -1207,6 +1244,7 @@ class DocBuilder:
         # стоит на ЛЮБОМ документе дела, а не только на сегменте GOTOVO:
         # прежде .docx в .agent/drafts/ собирался вообще без вердикта и без
         # парного .md (проба круга 6, 20.08.2026).
+        approved_sha = None
         if is_case_doc:
             import verdict as _v
             md = None
@@ -1230,22 +1268,9 @@ class DocBuilder:
                     print("  · " + x)
                 print("  Провести раунд Кони и записать вердикт: "
                       "python3 scripts/verdict.py ЧЕРНОВИК.md --record --verdict "
-                      "'ГОТОВ К ПОДАЧЕ' -r N")
+                      "'ГОТОВ К ПОДАЧЕ'")
                 return
-            # Отпечаток .md доказывает лишь неизменность .md — а не то, что в
-            # .docx собрали ИМЕННО одобренный текст. Проба круга 6: Кони
-            # одобрил «взыскать 100 000 (сто тысяч) рублей задолженности», а
-            # в суд собрали «5 000 000 и обратить взыскание на квартиру» —
-            # сборка прошла. Собранный документ обязан содержать одобренную
-            # редакцию дословно (после нормализации разметки и «ё») — и
-            # исчерпываться ею: дописать требование в конец нельзя, допустим
-            # только хвост-подпись (круг 7, этап 9.19).
-            if not self._matches_approved(md):
-                print(f"СТОП, НЕ СОХРАНЕНО: собранный текст не совпадает с "
-                      f"одобренной редакцией {md.name}. Отпечаток вердикта "
-                      f"привязан к .md — собирать нужно его, а не другой текст.")
-                return
-
+            approved_sha = _v.sha(md)
         if (is_case_doc and p.exists() and bfile.exists()
                 and not filecmp.cmp(p, bfile, shallow=False)):
             print(f"СТОП, НЕ СОХРАНЕНО: {p} отличается от _baselines/ — "
@@ -1271,20 +1296,81 @@ class DocBuilder:
                       f"  Прогнать `python3 scripts/verdict.py ФАЙЛ.md --scan`, затем повторить.")
                 return
 
-        self.doc.save(path)
-        print(f"Сохранено: {path}")
-        if is_case_doc:
-            try:
-                bfile.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(path, bfile)  # перезапись: baseline = свежая версия
-            except OSError as e:
-                # Fail-open закрыт: без снимка разбор правок доверителя сравнивает
-                # документ сам с собой и молча ничему не учится. Прежде здесь стояло
-                # предупреждение, которое никто не читал.
+        if not is_case_doc:
+            self.doc.save(path)
+            print(f"Сохранено: {path}")
+            return
+
+        # Выкладка дела: сначала сборка во временный файл, потом ОБЯЗАТЕЛЬНАЯ
+        # сверка document_guard, затем замена GOTOVO + baseline. До зеленого
+        # guard оба старых файла остаются нетронутыми.
+        import document_guard as _dg
+
+        p.parent.mkdir(parents=True, exist_ok=True)
+        bfile.parent.mkdir(parents=True, exist_ok=True)
+
+        def temp_in(parent, prefix, suffix):
+            fd, name = tempfile.mkstemp(dir=parent, prefix=prefix, suffix=suffix)
+            os.close(fd)
+            return _P(name)
+
+        staged = temp_in(p.parent, f".{p.stem}-", ".docx")
+        staged_baseline = temp_in(bfile.parent, f".{bfile.stem}-", ".docx")
+        target_backup = baseline_backup = None
+        target_installed = baseline_installed = False
+        try:
+            self.doc.save(staged)
+            # Точная внутрипроцессная сверка остается первым рубежом; затем тот же
+            # файл обязан пройти публичный прибор document_guard по паре md/docx.
+            if not self._matches_approved(md):
                 raise RuntimeError(
-                    f"снимок в {bfile} не записан ({e}). Документ сохранен, но база «ДО» "
-                    f"для redline-разбора не обновлена — закройте файл в других "
-                    f"приложениях и повторите save()") from e
+                    f"собранный текст не совпадает с одобренной редакцией {md.name}")
+            if _v.sha(md) != approved_sha:
+                raise RuntimeError(f"{md.name} изменен после проверки вердикта")
+            pair_problems = _dg.check_md_vs_docx(str(md), str(staged))
+            if pair_problems:
+                print("СТОП, НЕ ВЫЛОЖЕНО: document_guard вернул код 1 — .md и .docx "
+                      "разошлись:")
+                for problem in pair_problems:
+                    print("  · " + problem)
+                raise RuntimeError("document_guard: расхождение .md/.docx")
+            if _v.sha(md) != approved_sha or _v.check(md):
+                raise RuntimeError(f"{md.name} изменен во время сборки; вердикт устарел")
+
+            shutil.copy2(staged, staged_baseline)
+            # Закрываем гонку с Word перед заменой: правку доверителя нельзя
+            # затереть, пока строился и сверялся временный файл.
+            if p.exists() and bfile.exists() and not filecmp.cmp(p, bfile, shallow=False):
+                raise RuntimeError(f"{p} изменен доверителем во время сборки")
+
+            def backup(q):
+                if not q.exists():
+                    return None
+                old = temp_in(q.parent, f".{q.stem}-", ".bak")
+                shutil.copy2(q, old)
+                return old
+
+            target_backup, baseline_backup = backup(p), backup(bfile)
+            # ponytail: два os.replace с откатом держат процессные сбои; для
+            # crash-atomic пары нужен версионный каталог и один атомарный указатель.
+            try:
+                os.replace(staged, p)
+                target_installed, staged = True, None
+                os.replace(staged_baseline, bfile)
+                baseline_installed, staged_baseline = True, None
+            except OSError as e:
+                if target_installed:
+                    os.replace(target_backup, p) if target_backup else p.unlink(missing_ok=True)
+                    target_backup = None
+                if baseline_installed:
+                    os.replace(baseline_backup, bfile) if baseline_backup else bfile.unlink(missing_ok=True)
+                    baseline_backup = None
+                raise RuntimeError(f"транзакция выкладки {p.name} не завершена: {e}") from e
+            print(f"Сохранено: {path}")
+        finally:
+            for leftover in (staged, staged_baseline, target_backup, baseline_backup):
+                if leftover is not None:
+                    leftover.unlink(missing_ok=True)
 
 
 def apply_page_numbers(doc, hide_on_first=True):
@@ -1342,6 +1428,8 @@ def _verdict_gate_checks(tmp):
     _s.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import case_paths as _cp
     import verdict as _v
+    # Ключ подписи вердикта — из env, чтобы селфтест не трогал каталог секретов (D03).
+    os.environ.setdefault("THEMIS_VERDICT_KEY", "selftest-key-do-not-use-in-prod")
 
     case = _P(tmp) / "cases" / "ivanov-ivan" / "delo-2026"
     _cp.drafts(case).mkdir(parents=True)
@@ -1359,21 +1447,44 @@ def _verdict_gate_checks(tmp):
         b.add_body("Текст документа без плейсхолдеров.")
         return b
 
+    def preflight():
+        _v._write_preflight(md, _v.sha(md), True, [{
+            "tool": "selftest", "code": 0, "output_sha256": "0" * 64,
+        }])
+
     build().save(str(target))
     no_verdict = not target.exists()
 
-    _v.record(md, "ТРЕБУЕТ ПРАВОК", 1)
+    preflight()
+    _v.record(md, "ТРЕБУЕТ ПРАВОК", 1, source="doc-reviewer")
     build().save(str(target))
     not_ready = not target.exists()
 
     md.write_text("# ИСКОВОЕ ЗАЯВЛЕНИЕ\n\nТекст документа без плейсхолдеров.\n",
                   encoding="utf-8")
-    _v.record(md, _v.READY, 2)
+    preflight()
+    _v.record(md, _v.READY, 2, source="doc-reviewer")
     build().save(str(target))
     saved = target.exists()
 
     bl = _cp.baselines(case) / "isk_v1.docx"
     snapshot_right_place = bl.is_file() and not (_cp.ready(case) / "_baselines").exists()
+
+    # Ошибка document_guard на СТАДИИ выкладки дает код 1 (RuntimeError наружу)
+    # и не меняет ни выданный файл, ни baseline.
+    import document_guard as _dg
+    before_target, before_baseline = target.read_bytes(), bl.read_bytes()
+    original_pair_check = _dg.check_md_vs_docx
+    _dg.check_md_vs_docx = lambda *_: ["искусственное расхождение пары"]
+    guard_failed = False
+    try:
+        build().save(str(target))
+    except RuntimeError as e:
+        guard_failed = "document_guard" in str(e)
+    finally:
+        _dg.check_md_vs_docx = original_pair_check
+    transaction_untouched = (target.read_bytes() == before_target
+                             and bl.read_bytes() == before_baseline)
 
     # Текст правится ПОСЛЕ одобрения — прежний вердикт не должен пускать сборку
     target.unlink()
@@ -1386,6 +1497,8 @@ def _verdict_gate_checks(tmp):
         ("сборка при вердикте ТРЕБУЕТ ПРАВОК запрещена", not_ready),
         ("сборка по одобренной редакции проходит", saved),
         ("снимок лег в .agent/drafts/_baselines, а не в GOTOVO", snapshot_right_place),
+        ("расхождение document_guard дает код 1 до выкладки", guard_failed),
+        ("отказ выкладки не меняет GOTOVO и baseline", transaction_untouched),
         ("правка .md после одобрения снова запрещает сборку", stale_blocked),
     ]
 

@@ -53,8 +53,8 @@
 1. `case-mapper` (на FULL: + читатели `pdf-reader`/`docx-reader`/`image-reader`, верификация `case-reconciler`) → `.agent/context/knowledge-map.md`.
 2. Охотники: FAST — 1 (тактик) + синтез сам. FULL — `practice-hunter-classic` / `practice-hunter-skeptic` / `practice-hunter-tactical` → `_practice/hunter_*.md` + `/askacouncil` → `practice.md`.
 3. L2/L3: `/position-council` → `.agent/context/positions.md`.
-4. `doc-drafter` → `.agent/drafts/{document}_v1.md` и `.docx`.
-5. `doc-reviewer` → правки.
+4. `doc-drafter` → файлы и имена строго по `python3 scripts/case_paths.py --document-contract cases/{client}/{case}`.
+5. `doc-reviewer` → правки в пределах лимита из того же контракта.
 6. `archivist` → пополнение `knowledge/practice_index.md`.
 7. Подача → перенос в `02_hearings/ДАТА_событие/`.
 
@@ -91,7 +91,7 @@ Reasoning — Claude-модели. Извлечение — локально, б
 
 ## Внешние сервисы
 
-- Белый список — `knowledge/allowed-services.md`. Нужного сервиса там нет → СТОП, спросить владельца, внести после согласия.
+- Белый список — `knowledge/allowed-services.md`. Нужного сервиса там нет → СТОП, спросить владельца, внести после согласия ТОЛЬКО прибором `python3 scripts/channel_grant.py --host … --reason … --owner-approved` (прямая правка блокируется сторожем; поиск sudact — константа `SUDACT_SEARCH_ALLOWED`, здесь не дублируется).
 - Доступность проверять `python3 scripts/preflight_search.py`, а не предполагать.
 - Ключи (`~/.scrapegraphai/config.json` и прочие) не выводить, не логировать, не писать в файлы. `sgai` — всегда `--json`.
 - Судебные акты верифицировать `python3 scripts/verify_act.py`; неполные реквизиты — `требует проверки`.

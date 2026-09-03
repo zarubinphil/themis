@@ -9,10 +9,16 @@ OCR-кеша, детектор потерянных таблиц, сверка �
 Режимы (можно комбинировать):
     quality_gate.py --ocr OCR_DIR          полнота страниц + таблицы (после OCR)
     quality_gate.py --doc ЧЕРНОВИК.md --against ИСТОЧНИК.md [ИСТОЧНИК2.md ...]
-    quality_gate.py --requisites FILE.requisites.json [--bik БИК]
+    quality_gate.py --requisites FILE.requisites.json [FILE2.requisites.json ...] [--bik БИК]
     quality_gate.py --case cases/К/Д       все, что применимо к делу
     quality_gate.py --rules                напечатать исполняемые правила гейта
+    quality_gate.py --json                 тот же результат как JSON
     quality_gate.py --selftest             проверка без сети
+
+Решения владельца лежат не в прозе брифа, а в
+`.agent/context/_working/quality_gate.json`. Разобранные ложные замечания — в
+`quality_gate.suppressions.jsonl`; причина обязательна. Запрет владельца подавить
+нельзя.
 
 Код возврата: 0 — чисто; 1 — есть замечания (блокирующие для приемки).
 Замечание не отменяет содержательный ревью: машина ловит числа и структуру,
@@ -22,12 +28,176 @@ from __future__ import annotations
 
 import argparse
 import glob
+import hashlib
 import json
 import os
 import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import case_paths as cp  # noqa: E402
+
+
+POLICY_NAME = "quality_gate.json"
+SUPPRESSIONS_NAME = "quality_gate.suppressions.jsonl"
+POLICY_KINDS = frozenset({"remark", "prohibition"})
+POLICY_EXPECT = frozenset({"present", "absent"})
+
+
+def policy_path(case: str) -> str:
+    return str(cp.working(case) / POLICY_NAME)
+
+
+def suppressions_path(case: str) -> str:
+    return str(cp.working(case) / SUPPRESSIONS_NAME)
+
+
+def finding(code: str, subject: str, message: str,
+            kind: str = "remark") -> dict:
+    """Стабильная машиночитаемая находка; id годится для глушителя."""
+    body = "\0".join((kind, code, subject, message)).encode("utf-8")
+    return {
+        "id": hashlib.sha256(body).hexdigest()[:16],
+        "kind": kind,
+        "code": code,
+        "subject": subject,
+        "message": message,
+    }
+
+
+def load_policy(path: str | None, required: bool = False) -> tuple[list[dict], list[dict]]:
+    """Вернуть (rules, config_findings). В режиме дела явный файл обязателен."""
+    if not path or not os.path.exists(path):
+        if not required:
+            return [], []
+        subject = os.path.basename(path) if path else POLICY_NAME
+        return [], [finding(
+            "config.policy", subject,
+            "нет явного файла решений владельца; создать JSON version=1 с массивом rules",
+            "prohibition")]
+    try:
+        with open(path, encoding="utf-8") as source:
+            data = json.load(source)
+    except (OSError, ValueError) as exc:
+        return [], [finding("config.policy", os.path.basename(path),
+                            f"машинные правила владельца не прочитаны: {exc}",
+                            "prohibition")]
+    if not isinstance(data, dict) or data.get("version") != 1 or \
+            not isinstance(data.get("rules"), list):
+        return [], [finding("config.policy", os.path.basename(path),
+                            "нужен JSON-объект version=1 с массивом rules",
+                            "prohibition")]
+
+    rules, errors, seen = [], [], set()
+    for index, rule in enumerate(data["rules"], 1):
+        subject = f"{os.path.basename(path)}:rules[{index}]"
+        if not isinstance(rule, dict):
+            errors.append(finding("config.policy", subject, "правило должно быть объектом",
+                                  "prohibition"))
+            continue
+        rule_id = rule.get("id")
+        kind = rule.get("kind")
+        expect = rule.get("expect")
+        terms = rule.get("terms")
+        reason = rule.get("reason")
+        valid_id = isinstance(rule_id, str) and bool(re.fullmatch(r"[A-Za-z0-9._-]+", rule_id))
+        valid_terms = isinstance(terms, list) and bool(terms) and all(
+            isinstance(term, str) and term.strip() for term in terms)
+        if not valid_id or rule_id in seen or kind not in POLICY_KINDS or \
+                expect not in POLICY_EXPECT or not valid_terms or \
+                not isinstance(reason, str) or not reason.strip():
+            errors.append(finding(
+                "config.policy", subject,
+                "обязательны уникальный id [A-Za-z0-9._-], kind remark|prohibition, "
+                "expect present|absent, непустые terms и reason",
+                "prohibition"))
+            continue
+        seen.add(rule_id)
+        rules.append({
+            "id": rule_id,
+            "kind": kind,
+            "expect": expect,
+            "terms": [term.strip() for term in terms],
+            "reason": reason.strip(),
+        })
+    return rules, errors
+
+
+def check_owner_rules(doc: str, rules: list[dict], subject: str | None = None) -> list[dict]:
+    """Сверить документ с явными решениями владельца, не разбирать прозу брифа."""
+    try:
+        with open(doc, encoding="utf-8", errors="replace") as source:
+            text = source.read().casefold()
+    except OSError as exc:
+        return [finding("config.document", subject or os.path.basename(doc),
+                        f"документ не прочитан: {exc}", "prohibition")]
+    out = []
+    for rule in rules:
+        # ponytail: только буквальные термины; regex добавить, когда появится правило,
+        # которое нельзя точно выразить фразой.
+        present = [term for term in rule["terms"] if term.casefold() in text]
+        bad = present if rule["expect"] == "absent" else [
+            term for term in rule["terms"] if term.casefold() not in text]
+        if not bad:
+            continue
+        action = "найдено запрещенное" if rule["expect"] == "absent" else "не найдено обязательное"
+        out.append(finding(
+            f"owner.{rule['id']}", subject or os.path.basename(doc),
+            f"{action}: {', '.join(bad)}; причина: {rule['reason']}",
+            rule["kind"]))
+    return out
+
+
+def load_suppressions(path: str | None) -> tuple[dict[str, dict], list[dict]]:
+    """JSONL-глушитель. Невалидная строка сама блокирует приемку."""
+    if not path or not os.path.exists(path):
+        return {}, []
+    found, errors = {}, []
+    try:
+        source = open(path, encoding="utf-8")
+    except OSError as exc:
+        return {}, [finding("config.suppressions", os.path.basename(path),
+                            f"файл-глушитель не прочитан: {exc}", "prohibition")]
+    with source:
+        for line_no, line in enumerate(source, 1):
+            if not line.strip():
+                continue
+            subject = f"{os.path.basename(path)}:{line_no}"
+            try:
+                item = json.loads(line)
+            except ValueError as exc:
+                errors.append(finding("config.suppressions", subject,
+                                      f"строка не JSON: {exc}", "prohibition"))
+                continue
+            fid = item.get("finding_id") if isinstance(item, dict) else None
+            reason = item.get("reason") if isinstance(item, dict) else None
+            if not isinstance(fid, str) or not re.fullmatch(r"[0-9a-f]{16}", fid) or \
+                    not isinstance(reason, str) or not reason.strip():
+                errors.append(finding("config.suppressions", subject,
+                                      "обязательны finding_id (16 hex) и непустая reason",
+                                      "prohibition"))
+                continue
+            found[fid] = {"finding_id": fid, "reason": reason.strip()}
+    return found, errors
+
+
+def apply_suppressions(findings: list[dict], suppressions: dict[str, dict]) \
+        -> tuple[list[dict], list[dict]]:
+    active, suppressed = [], []
+    for item in findings:
+        suppression = suppressions.get(item["id"])
+        if not suppression:
+            active.append(item)
+        elif item["kind"] == "prohibition":
+            active.append(item)
+            active.append(finding(
+                "config.suppressions", item["subject"],
+                f"запрет {item['code']} нельзя подавить глушителем",
+                "prohibition"))
+        else:
+            suppressed.append({**item, "suppression_reason": suppression["reason"]})
+    return active, suppressed
 
 
 # Порог доли непохожих на русские слов. Замер по 87 страницам живого OCR-кеша
@@ -209,17 +379,32 @@ def is_practice_source(path: str) -> bool:
 def check_numbers(draft: str, sources: list[str], min_digits: int = 4) -> list[str]:
     """Числа черновика обязаны быть в источниках ФАКТОВ дела, а не в практике."""
     from crosscheck_numbers import numbers_of
-    text = open(draft, encoding="utf-8", errors="ignore").read()
+    try:
+        with open(draft, encoding="utf-8", errors="ignore") as stream:
+            text = stream.read()
+    except OSError as exc:
+        return [f"черновик не прочитан: {exc}"]
     in_draft = numbers_of(text, min_digits)
     facts = [s for s in sources if not is_practice_source(s)]
     practice = [s for s in sources if is_practice_source(s)]
+    unreadable = []
     in_src = None
     for s in facts:
-        n = numbers_of(open(s, encoding="utf-8", errors="ignore").read(), min_digits)
+        try:
+            with open(s, encoding="utf-8", errors="ignore") as stream:
+                n = numbers_of(stream.read(), min_digits)
+        except OSError as exc:
+            unreadable.append(f"источник {os.path.basename(s)} не прочитан: {exc}")
+            continue
         in_src = n if in_src is None else (in_src | n)
     in_practice = None
     for s in practice:
-        n = numbers_of(open(s, encoding="utf-8", errors="ignore").read(), min_digits)
+        try:
+            with open(s, encoding="utf-8", errors="ignore") as stream:
+                n = numbers_of(stream.read(), min_digits)
+        except OSError as exc:
+            unreadable.append(f"источник {os.path.basename(s)} не прочитан: {exc}")
+            continue
         in_practice = n if in_practice is None else (in_practice | n)
     # Разность именно по НАБОРУ чисел, не по счетчикам: у Counter «-» вычитает
     # частоты, и реквизит, названный в договоре трижды, а в источнике однажды,
@@ -233,8 +418,8 @@ def check_numbers(draft: str, sources: list[str], min_digits: int = 4) -> list[s
                 if re.fullmatch(r"\d{2}\.\d{2}", t) or re.fullmatch(r"(19|20)\d{2}", t)]:
         del orphan[tok]
     if not orphan:
-        return []
-    out = []
+        return unreadable
+    out = list(unreadable)
     # Число, которого нет в фактах дела, но есть в практике, — отдельный и более
     # опасный случай: оно выглядит подтвержденным, хотя пришло из ЧУЖОГО дела.
     from_practice = sorted(t for t in orphan if in_practice and t in in_practice)
@@ -320,12 +505,34 @@ def case_paths(case: str) -> dict:
             "requisites": case_requisite_files(case)}
 
 
-def print_rules() -> int:
+def print_rules(json_mode: bool = False) -> int:
+    schema = {
+        "policy": {
+            "path": ".agent/context/_working/quality_gate.json",
+            "format": {"version": 1, "rules": [{
+                "id": "owner-rule-id",
+                "kind": "remark|prohibition",
+                "expect": "present|absent",
+                "terms": ["буквальная фраза"],
+                "reason": "решение владельца и дата",
+            }]},
+        },
+        "suppressions": {
+            "path": ".agent/context/_working/quality_gate.suppressions.jsonl",
+            "format": {"finding_id": "16 hex", "reason": "почему неприменимо"},
+            "limit": "подавляются только remark; prohibition не подавляется",
+        },
+    }
+    if json_mode:
+        print(json.dumps(schema, ensure_ascii=False, indent=2))
+        return 0
     print("quality_gate.py rules")
     print("- OCR: страницы не должны быть пустыми, смешанными по алфавитам или ломаной кириллицей")
     print("- DOC: каждое значимое число черновика должно быть в источниках дела")
     print("- REQUISITES: ИНН, БИК и расчетные счета проходят контрольные суммы")
     print("- CASE: черновики проверяются против карты, позиции, практики и рабочего контекста")
+    print("- OWNER: явные JSON-правила present/absent; проза брифа не разбирается")
+    print("- SUPPRESSIONS: JSONL finding_id + обязательная reason; запреты не глушатся")
     return 0
 
 
@@ -334,9 +541,14 @@ def main() -> int:
     ap.add_argument("--ocr", help="папка OCR-кеша (page_*.png + page_*.txt)")
     ap.add_argument("--doc", help="черновик .md для сверки чисел")
     ap.add_argument("--against", nargs="+", default=[], help="источники чисел")
-    ap.add_argument("--requisites", help="<sha>.requisites.json от роутера")
+    ap.add_argument("--requisites", nargs="+", help="<sha>.requisites.json от роутера")
     ap.add_argument("--bik", help="БИК для проверки расчетного счета")
     ap.add_argument("--case", help="папка дела — прогнать все применимое")
+    ap.add_argument("--policy", help="явный quality_gate.json (по умолчанию из дела)")
+    ap.add_argument("--suppressions", help="явный JSONL-глушитель (по умолчанию из дела)")
+    ap.add_argument("--subject", help=argparse.SUPPRESS)
+    ap.add_argument("--intake-present", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--json", action="store_true", help="машиночитаемый результат")
     ap.add_argument("--rules", action="store_true", help="напечатать правила гейта")
     ap.add_argument("--min-digits", type=int, default=4,
                     help="от скольких значащих цифр сверять числа (по умолчанию 4)")
@@ -346,30 +558,45 @@ def main() -> int:
     if args.selftest:
         return selftest()
     if args.rules:
-        return print_rules()
+        return print_rules(args.json)
 
-    report: list[tuple[str, list[str]]] = []
+    report: list[tuple[str, str, list[str]]] = []
+    docs: list[str] = []
+    paths = case_paths(args.case) if args.case else None
     if args.ocr:
-        report.append((f"OCR {args.ocr}", check_ocr(args.ocr)))
+        report.append(("ocr", f"OCR {args.ocr}", check_ocr(args.ocr)))
     if args.doc:
-        if not args.against:
+        doc_subject = args.subject or os.path.basename(args.doc)
+        sources = list(args.against)
+        if paths:
+            sources += paths["sources"]
+        sources = list(dict.fromkeys(sources))
+        if not sources:
             print("--doc требует --against (источники чисел)", file=sys.stderr)
             return 2
-        report.append((f"числа {os.path.basename(args.doc)}",
-                       check_numbers(args.doc, args.against, args.min_digits)))
+        docs.append(args.doc)
+        report.append(("doc.numbers", f"числа {doc_subject}",
+                       check_numbers(args.doc, sources, args.min_digits)))
     if args.requisites:
-        report.append((f"реквизиты {os.path.basename(args.requisites)}",
-                       check_requisites(args.requisites, args.bik)))
-    if args.case:
-        paths = case_paths(args.case)
-        if not paths["drafts"]:
-            report.append((f"дело {args.case}", ["черновиков в .agent/drafts/ нет — сверять нечего"]))
-        for d in paths["drafts"]:
+        for requisite in args.requisites:
+            report.append(("requisites", f"реквизиты {os.path.basename(requisite)}",
+                           check_requisites(requisite, args.bik)))
+    elif args.intake_present:
+        report.append(("case.requisites", "реквизиты материалов дела",
+                       ["в кеше роутера нет ни одного <sha>.requisites.json для "
+                        "материалов дела — материалы не прогнаны через "
+                        "markdown_extract.py, реквизиты НЕ проверены"]))
+    if paths:
+        if not args.doc and not paths["drafts"]:
+            report.append(("case.drafts", f"дело {args.case}",
+                           ["черновиков в .agent/drafts/ нет — сверять нечего"]))
+        for d in ([] if args.doc else paths["drafts"]):
+            docs.append(d)
             if paths["sources"]:
-                report.append((f"числа {os.path.basename(d)}",
+                report.append(("doc.numbers", f"числа {os.path.basename(d)}",
                                check_numbers(d, paths["sources"], args.min_digits)))
             else:
-                report.append((f"числа {os.path.basename(d)}",
+                report.append(("doc.numbers", f"числа {os.path.basename(d)}",
                                ["нет ни карты, ни позиции — числа сверять не с чем"]))
         # Реквизиты материалов дела. Ветка была написана, но не подключена:
         # ИНН/ОГРН/СНИЛС/БИК/счета доверителя проверяла модель на глаз либо никто.
@@ -378,9 +605,11 @@ def main() -> int:
             found: list[str] = []
             for r in reqs:
                 found += check_requisites(r, args.bik)
-            report.append((f"реквизиты материалов дела ({len(reqs)} файлов)", found))
-        else:
-            report.append((f"реквизиты дела {args.case}",
+            report.append(("case.requisites",
+                           f"реквизиты материалов дела ({len(reqs)} файлов)", found))
+        elif any(os.path.isfile(path) for path in glob.glob(
+                os.path.join(args.case, "00_intake", "**", "*"), recursive=True)):
+            report.append(("case.requisites", f"реквизиты дела {args.case}",
                            ["в кеше роутера нет ни одного <sha>.requisites.json для "
                             "материалов дела — материалы не прогнаны через "
                             "markdown_extract.py, реквизиты НЕ проверены"]))
@@ -388,17 +617,54 @@ def main() -> int:
         print("нечего проверять: задать --ocr / --doc / --requisites / --case", file=sys.stderr)
         return 2
 
-    problems = 0
-    for title, items in report:
-        if items:
-            problems += len(items)
+    raw = [finding(code, title, item) for code, title, items in report for item in items]
+    selected_policy = args.policy or (policy_path(args.case) if args.case else None)
+    rules, policy_errors = load_policy(
+        selected_policy, required=bool(args.case or args.policy))
+    for doc in docs:
+        raw += check_owner_rules(doc, rules, args.subject if doc == args.doc else None)
+    raw += policy_errors
+
+    selected_suppressions = args.suppressions or (
+        suppressions_path(args.case) if args.case else None)
+    suppressions, suppression_errors = load_suppressions(selected_suppressions)
+    raw += suppression_errors
+    active, suppressed = apply_suppressions(raw, suppressions)
+
+    if args.json:
+        print(json.dumps({
+            "ok": not active,
+            "findings": active,
+            "suppressed": suppressed,
+            "policy": selected_policy,
+            "suppressions": selected_suppressions,
+        }, ensure_ascii=False, indent=2))
+        return 1 if active else 0
+
+    active_ids = {item["id"] for item in active}
+    section_ids = set()
+    for code, title, items in report:
+        visible = []
+        for message in items:
+            item = finding(code, title, message)
+            section_ids.add(item["id"])
+            if item["id"] in active_ids:
+                visible.append(item)
+        if visible:
             print(f"\n⚠ {title}:")
-            for it in items:
-                print(f"   • {it}")
+            for item in visible:
+                print(f"   • [{item['id']}] {item['message']}")
         else:
             print(f"✓ {title}: чисто")
-    print(f"\nитого замечаний: {problems}")
-    return 1 if problems else 0
+    extras = [item for item in active if item["id"] not in section_ids]
+    if extras:
+        print("\n⚠ явные правила и конфигурация:")
+        for item in extras:
+            print(f"   • [{item['id']}] {item['message']}")
+    for item in suppressed:
+        print(f"↷ [{item['id']}] заглушено: {item['suppression_reason']}")
+    print(f"\nитого замечаний: {len(active)}; заглушено: {len(suppressed)}")
+    return 1 if active else 0
 
 
 def selftest() -> int:
@@ -445,6 +711,34 @@ def selftest() -> int:
     empty_ocr = os.path.join(tmp, "ocr")
     os.makedirs(empty_ocr)
 
+    # M06: решения владельца — JSON, замечания — стабильные id, глушитель — JSONL
+    # с обязательной причиной. Запрет владельца глушителем не снимается.
+    policy_doc = os.path.join(tmp, "policy-doc.md")
+    open(policy_doc, "w", encoding="utf-8").write("Кредит пока не оспаривается.")
+    policy = os.path.join(tmp, POLICY_NAME)
+    json.dump({"version": 1, "rules": [
+        {"id": "no-credit", "kind": "prohibition", "expect": "absent",
+         "terms": ["кредит"], "reason": "решение владельца 01.09.2026"},
+        {"id": "need-agreed", "kind": "remark", "expect": "present",
+         "terms": ["согласовано"], "reason": "нужно подтвердить позицию"},
+    ]}, open(policy, "w", encoding="utf-8"), ensure_ascii=False)
+    owner_rules, owner_config = load_policy(policy)
+    owner_findings = check_owner_rules(policy_doc, owner_rules)
+    owner_prohibition = next(x for x in owner_findings if x["kind"] == "prohibition")
+    owner_remark = next(x for x in owner_findings if x["kind"] == "remark")
+    suppress = os.path.join(tmp, SUPPRESSIONS_NAME)
+    open(suppress, "w", encoding="utf-8").write(json.dumps({
+        "finding_id": owner_remark["id"], "reason": "неприменимо к этому виду документа"
+    }, ensure_ascii=False) + "\n")
+    loaded_suppressions, suppression_config = load_suppressions(suppress)
+    active_owner, suppressed_owner = apply_suppressions(owner_findings, loaded_suppressions)
+    blocked_suppression, _ = apply_suppressions(
+        [owner_prohibition],
+        {owner_prohibition["id"]: {"reason": "попытка снять запрет"}},
+    )
+    malformed_policy = os.path.join(tmp, "bad-policy.json")
+    open(malformed_policy, "w", encoding="utf-8").write("{}")
+
     checks = [
         ("совпавшие числа замечаний не дают", clean == []),
         ("число из воздуха ловится", len(dirty) == 1 and "9999999" in dirty[0]),
@@ -466,6 +760,20 @@ def selftest() -> int:
         ("битый ИНН ловится", len(check_requisites(req_bad, None)) == 1),
         ("пустая OCR-папка — замечание", len(check_ocr(empty_ocr)) == 1),
         ("нечитаемый requisites не роняет", len(check_requisites(tmp + "/нет.json", None)) == 1),
+        ("policy JSON прочитан без прозы", len(owner_rules) == 2 and not owner_config),
+        ("owner prohibition дает машиночитаемую находку",
+         owner_prohibition["code"] == "owner.no-credit"),
+        ("remark заглушен только с причиной",
+         active_owner == [owner_prohibition] and len(suppressed_owner) == 1
+         and not suppression_config),
+        ("запрет владельца глушителем не снимается",
+         any(x["code"] == "config.suppressions" for x in blocked_suppression)
+         and owner_prohibition in blocked_suppression),
+        ("битый policy красит конфигурацию", bool(load_policy(malformed_policy)[1])),
+        ("режим дела без policy fail-closed",
+         bool(load_policy(os.path.join(tmp, "missing-policy.json"), required=True)[1])),
+        ("id находки стабилен", finding("x", "y", "z")["id"]
+         == finding("x", "y", "z")["id"]),
         # Качество распознавания страницы. Прежний гейт не проверял его вовсе:
         # единственной проверкой листа была таблица, и «бледная сетка» глушила ее.
         ("чистый русский текст проходит", page_text_bad(

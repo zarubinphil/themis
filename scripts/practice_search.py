@@ -46,6 +46,7 @@ api.sudrf.ru отдает 404, банк решений bsr.sudrf.ru не отв�
 Повторный запрос отдается из кеша мгновенно и без обращения к сайту.
 """
 import argparse
+import concurrent.futures
 import hashlib
 import html
 import json
@@ -54,13 +55,16 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.parse
+from pathlib import Path
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
 import pii_gate  # noqa: E402
+import channels  # noqa: E402  # общий счет каналов и квот прогона (.agent/context/channels.json)
 
 BASE = "https://sudact.ru"
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -359,12 +363,76 @@ def search_allowed() -> bool:
     return SUDACT_SEARCH_ALLOWED
 
 
-RC_COVERAGE_INCOMPLETE = 5  # отдельный код: «прогон состоялся, но выборка неполна»
+_CASE_OVERRIDE = ""  # выставляется main() из явного --case
+
+
+def _run_case() -> str:
+    """Дело прогона: явный --case (main()) важнее $THEMIS_CASE. Переменную в бою
+    никто не выставлял — флага не было вовсе, и мертвый канал не долетал до
+    прибора (128 опросов мертвого источника, прогон 01.09.2026)."""
+    delo = _CASE_OVERRIDE or os.environ.get("THEMIS_CASE", "")
+    if delo:
+        return delo
+    # Третий источник — указатель прогона, который ставит проводник. Он и есть
+    # единственный работающий в бою: рой ходит из корня, флага ему никто не дает.
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import channels
+        return channels.tekushchee_delo()
+    except Exception:
+        return ""
+
+
+def dead_channel_note() -> str:
+    """Свежая отметка «мертв» из общего файла состояния каналов прогона.
+
+    Прогон 01.09.2026: preflight в 16:40 знал, что источник не отвечает, — и это
+    знание умерло в выводе одного вызова; дальше рой опросил мертвый источник
+    128 раз (271 сетевой вызов, 62,6 млн токенов). Теперь отметка живет в
+    .agent/context/channels.json и до истечения TTL записи запрещает поход.
+    """
+    case = _run_case()
+    if not case:
+        return ""
+    try:
+        rec = channels.status(case, "sudact")
+    except Exception:
+        return ""
+    if rec and not rec.get("жив", True):
+        left = max(int(rec.get("годен до", 0) - time.time()), 0)
+        return (f"КАНАЛ sudact ПОМЕЧЕН МЕРТВЫМ в общем состоянии каналов прогона "
+                f"({rec.get('причина') or 'без причины'}). Не опрашивать еще {left} с — "
+                "работать по knowledge/practice_index.md либо ждать истечения записи.")
+    return ""
+
+
+def note_source_failure(reason: str) -> None:
+    """Сбой источника — в общий файл прогона, чтобы рой не опрашивал мертвый канал."""
+    case = _run_case()
+    if not case:
+        return
+    try:
+        channels.mark(case, "sudact", False, reason)
+    except Exception as e:
+        print(f"ВНИМАНИЕ: состояние канала не записано ({e})", file=sys.stderr)
+
+
+RC_COVERAGE_INCOMPLETE = 5  # неполный охват лечится нашей стороной: --per-region, снять --max-regions
+RC_COVERAGE_CAPPED = 6      # упор в предел самого источника — числом не лечится, сузить запрос
 
 
 def partition_exit_code(report: dict) -> int:
-    """Код возврата --partition. Неполный охват = ненулевой код, всегда."""
-    return RC_COVERAGE_INCOMPLETE if report.get("error") else 0
+    """Код возврата --partition. Недобор нашей стороны и упор в потолок источника —
+    РАЗНЫЕ коды: вызывающий скрипт читает код возврата, а не прозу поля «причина».
+    Прежде оба сообщали одним RC_COVERAGE_INCOMPLETE, и по коду нельзя было
+    отличить лечимое (поднять --per-region, снять --max-regions) от нелечимого
+    (сузить запрос: статья, даты, суд)."""
+    if not report.get("error"):
+        return 0
+    thin = report.get("части с неполным охватом") or []
+    if any(t.get("причина") == "упор в потолок выдачи" for t in thin):
+        return RC_COVERAGE_CAPPED
+    return RC_COVERAGE_INCOMPLETE
 
 
 def apply_risk_flag(env_value: str | None, flag: bool) -> str | None:
@@ -394,10 +462,14 @@ def search(text, section="regular", limit=20, max_wait=25.0, **kw):
         raise ValueError(f"раздел {section!r} неизвестен; доступны: {', '.join(SECTIONS)}")
     if not search_allowed():
         raise PermissionError(ROBOTS_BLOCKED_HINT)
+    dead = dead_channel_note()
+    if dead:
+        raise PermissionError(dead)
 
     start_page = int(kw.pop("page", 1) or 1)
     if limit > PAGE_SIZE:
         out, total, seen = [], "", set()
+        empty = 0  # подряд страниц без новых актов
         pages = (limit + PAGE_SIZE - 1) // PAGE_SIZE
         for i in range(pages):
             page = start_page + i
@@ -415,7 +487,10 @@ def search(text, section="regular", limit=20, max_wait=25.0, **kw):
             fresh = [r for r in got if r["url"] not in seen]
             seen.update(r["url"] for r in fresh)
             out += fresh
-            if not fresh or len(out) >= limit:
+            # Одна пустая страница — еще не конец выдачи (источник отдает
+            # страницы неравномерно). Остановка — по ДВУМ пустым подряд.
+            empty = empty + 1 if not fresh else 0
+            if empty >= 2 or len(out) >= limit:
                 break
         return out[:limit], total
     return _search_page(text, section, limit, max_wait, page=start_page, **kw)
@@ -462,6 +537,7 @@ def _search_page(text, section="regular", limit=20, max_wait=25.0, **kw):
         os.unlink(jar)
 
     if content is None:
+        note_source_failure("поиск не завершен: таймаут либо источник недоступен")
         return [], "ПОИСК НЕ ЗАВЕРШЕН (таймаут либо источник недоступен)"
     results = parse_results(content, section, limit)
     # Пустой разбор при ненулевом счетчике — это сбой опроса или смена верстки,
@@ -556,6 +632,16 @@ CAP_HINT = 500  # практический предел одной выдачи 
 # результат обязан помечаться неполным, а не молча уходить в hunter-файл.
 COVERAGE_OK_PERCENT = 80.0
 
+# Параллельность обхода регионов — объявленная константа, а не «до отказа
+# источника». Откуда число: решение владельца 02.09.2026 (задача M07) —
+# «параллельность до объявленной константы, а не до отказа источника»;
+# измеренного порога отказов у sudact нет, поэтому консервативный минимум
+# больше одного. Вежливость к источнику важнее скорости прогона: 01.09.2026
+# рой сделал 271 сетевой вызов, и мертвый источник опрашивался 128 раз.
+# ponytail: потолок числа не измерен; апгрейд — только замером отказов
+# источника и правкой этой константы, не рутиной отдельного прогона.
+MAX_PARALLEL_REGIONS = 2
+
 
 def cacheable(results, total_str) -> bool:
     """Класть ли выдачу в кеш на две недели.
@@ -591,9 +677,17 @@ def partitioned_search(text, section="regular", per_region=30, max_regions=0,
                              f"(поля формы: {', '.join(sorted(section_fields(section)))}) "
                              "— партиционирование по регионам здесь невозможно"}
     regions = sorted((_load_dicts(section).get("area") or {}))
-    if not regions:
-        return [], {"error": f"у раздела «{section}» нет справочника регионов"}
-    scanned = regions[:max_regions] if max_regions else regions
+
+    # --area с --partition — не потерянный фильтр и не дубль аргумента, а периметр:
+    # обход сужается до заданного региона, и это НЕ «пропуск остальных 84».
+    user_area = (kw.pop("area", "") or "").strip()
+    if user_area:
+        universe = scanned = [user_area]
+    else:
+        if not regions:
+            return [], {"error": f"у раздела «{section}» нет справочника регионов"}
+        universe = regions
+        scanned = regions[:max_regions] if max_regions else regions
 
     # Пользователь сам задал инстанцию — дробить по ней бессмысленно (и падало на
     # дубле аргумента).
@@ -608,46 +702,62 @@ def partitioned_search(text, section="regular", per_region=30, max_regions=0,
 
     seen, out, thin, done = set(), [], [], 0
     declared_total = 0
+    lock = threading.Lock()
 
     def take(label, **flt):
         """Один запрос: добрать новые акты, вернуть (сколько заявлено, сколько взято)."""
         got, total = search(text, section=section, limit=per_region, **flt, **kw)
-        fresh = [r for r in got if r["url"] not in seen]
-        seen.update(r["url"] for r in fresh)
-        out.extend(fresh)
+        with lock:  # обход параллелен (MAX_PARALLEL_REGIONS) — seen/out общие
+            fresh = [r for r in got if r["url"] not in seen]
+            seen.update(r["url"] for r in fresh)
+            out.extend(fresh)
         return _total_num(total), len(got)
 
-    for i, reg in enumerate(scanned, 1):
+    def visit(reg):
+        """Регион целиком: основной запрос + каскад по инстанциям при недоборе."""
         total, taken = take(reg, area=reg, instance=user_instance)
+        best = taken
+        if total > taken and cascade:
+            # Регион отдал меньше, чем заявил — дробим по инстанциям: каждая часть
+            # корпуса имеет собственный предел выдачи, и суммарно достаем больше.
+            sub_taken = 0
+            for inst in ("первая инстанция", "апелляция", "кассация"):
+                _, k = take(f"{reg}/{inst}", area=reg, instance=inst)
+                sub_taken += k
+            best = max(taken, sub_taken)
+        return reg, total, best
+
+    if MAX_PARALLEL_REGIONS > 1 and len(scanned) > 1:
+        with concurrent.futures.ThreadPoolExecutor(
+                max_workers=MAX_PARALLEL_REGIONS) as pool:
+            visited = list(pool.map(visit, scanned))  # порядок = порядок scanned
+    else:
+        visited = [visit(reg) for reg in scanned]
+
+    for i, (reg, total, best) in enumerate(visited, 1):
         declared_total += total
         done += 1
-        share = (taken / total * 100) if total else 100.0
-        log(f"  [{i}/{len(scanned)}] {reg}: заявлено {total or '—'}, взято {taken}"
+        share = (best / total * 100) if total else 100.0
+        log(f"  [{i}/{len(scanned)}] {reg}: заявлено {total or '—'}, взято {best}"
             + (f" ({share:.1f}%)" if total else ""))
-        if total <= taken or not cascade:
-            if total > taken:
-                thin.append({"часть": reg, "заявлено": total, "взято": taken})
-            continue
-        # Регион отдал меньше, чем заявил — дробим по инстанциям: каждая часть
-        # корпуса имеет собственный предел выдачи, и суммарно достаем больше.
-        sub_total = sub_taken = 0
-        for inst in ("первая инстанция", "апелляция", "кассация"):
-            t, k = take(f"{reg}/{inst}", area=reg, instance=inst)
-            sub_total += t
-            sub_taken += k
-        best_taken = max(taken, sub_taken)
-        if total > best_taken:
-            thin.append({"часть": reg, "заявлено": total, "взято": best_taken})
+        if total > best:
+            # Недобор — не одно и то же, что упор в потолок: в первом случае
+            # источник отдал меньше запрошенного (стоит сузить запрос), во
+            # втором мы уперлись в собственный/источниковый предел выдачи.
+            thin.append({"часть": reg, "заявлено": total, "взято": best,
+                         "причина": ("упор в потолок выдачи"
+                                     if best >= per_region or best >= CAP_HINT
+                                     else "недобор")})
 
     reachable = len(out)
     coverage = (reachable / declared_total * 100) if declared_total else 100.0
-    skipped = len(regions) - done
+    skipped = len(universe) - done
     report = {
         "актов": reachable,
         "заявлено источником": declared_total,
         "охват процентов": round(coverage, 2),
         "регионов обойдено": done,
-        "регионов всего": len(regions),
+        "регионов всего": len(universe),
         "регионов пропущено лимитом обхода": skipped,
         "части с неполным охватом": thin,
         "фильтры без поддержки разделом": sorted(LAST_IGNORED),
@@ -782,10 +892,25 @@ def selftest():
         one_page = list(pages_asked)
         pages_asked.clear()
         few, _ = search("иск", limit=5)
+        few_pages = list(pages_asked)
 
         _search_page = lambda text, section="regular", limit=20, max_wait=25.0, **kw: (
             [{"url": f"same-{i}"} for i in range(PAGE_SIZE)], "всего 10")
         dup, _ = search("иск", limit=30)
+
+        # Остановка — по ДВУМ пустым страницам подряд: одна пустая (стр. 2) обход
+        # не глушит, вторая подряд (стр. 4-5) глушит.
+        pages_asked.clear()
+
+        def gaps(text, section="regular", limit=20, max_wait=25.0, **kw):
+            pg = kw.get("page", 1)
+            pages_asked.append(pg)
+            if pg in (2, 4, 5):
+                return ([], "всего 50")
+            return ([{"url": f"g{pg}-{i}"} for i in range(PAGE_SIZE)], "всего 50")
+
+        _search_page = gaps
+        gapped, _ = search("иск", limit=50)
 
         checks += [
             ("адрес акта принимается",
@@ -800,8 +925,10 @@ def selftest():
             ("хвост с параметрами отбивается",
              not doc_url_ok("https://sudact.ru/regular/doc/AbC123/?x=1")),
             ("limit 25 догружает три страницы", one_page == [1, 2, 3] and len(many) == 25),
-            ("limit 5 одной страницей", len(few) == PAGE_SIZE and pages_asked == [1]),
+            ("limit 5 одной страницей", len(few) == PAGE_SIZE and few_pages == [1]),
             ("повтор той же выдачи не дублируется", len(dup) == PAGE_SIZE),
+            ("остановка по двум пустым страницам подряд, не по одной",
+             pages_asked == [1, 2, 3, 4, 5] and len(gapped) == 2 * PAGE_SIZE),
         ]
 
         # Партиционирование: упершийся регион дробится, непокрытое попадает в отчет
@@ -886,7 +1013,61 @@ def selftest():
         globals()["search"] = mag_fake
         partitioned_search("иск", section="magistrate", per_region=20)
 
+        # --partition не теряет --area и --case-doc: область сужает обход до
+        # одного региона (периметр запроса, а не пропуск остальных), номер дела
+        # доезжает до каждого подзапроса.
+        pcalls = []
+
+        def cap_fake(text, section="regular", limit=20, max_wait=25.0, **kw):
+            pcalls.append(dict(kw))
+            return ([{"url": f"a-{kw.get('area')}-{kw.get('instance')}-{i}"}
+                     for i in range(3)], "Найдено 3 документа")
+
+        globals()["search"] = cap_fake
+        _, arep = partitioned_search("иск", per_region=20, area="москва",
+                                     case_doc="2-45/2026")
+
         globals()["search"], _load_dicts = real_search, real_dicts2
+
+        # Общий файл состояния каналов: свежая отметка «мертв» закрывает источник
+        # до истечения TTL — рой не опрашивает мертвый канал 128 раз (01.09.2026).
+        _case_env = os.environ.get("THEMIS_CASE")
+        with tempfile.TemporaryDirectory() as _tmp:
+            os.environ["THEMIS_CASE"] = _tmp
+            note_source_failure("HTTP 500")
+            marked = channels.is_dead(_tmp, "sudact")
+            refused = False
+            try:
+                search("иск", limit=5)
+            except PermissionError as e:
+                refused = "МЕРТВ" in str(e)
+        if _case_env is None:
+            os.environ.pop("THEMIS_CASE", None)
+        else:
+            os.environ["THEMIS_CASE"] = _case_env
+
+        # Штатный путь узнать дело — явный --case, а не только $THEMIS_CASE: в бою
+        # переменную никто не выставлял (флага --case не было вовсе), и мертвый
+        # канал оставался невидимым для повторного опроса.
+        global _CASE_OVERRIDE
+        _override_before = _CASE_OVERRIDE
+        _env_gone = os.environ.pop("THEMIS_CASE", None)
+        with tempfile.TemporaryDirectory() as _tmp2:
+            _CASE_OVERRIDE = _tmp2
+            note_source_failure("HTTP 500 без переменной окружения")
+            marked_no_env = channels.is_dead(_tmp2, "sudact")
+            refused_no_env = False
+            try:
+                search("иск", limit=5)
+            except PermissionError as e:
+                refused_no_env = "МЕРТВ" in str(e)
+        os.environ["THEMIS_CASE"] = "не-эта-переменная"
+        _CASE_OVERRIDE = "эта-переменная"
+        override_wins = _run_case() == "эта-переменная"
+        os.environ.pop("THEMIS_CASE", None)
+        _CASE_OVERRIDE = _override_before
+        if _env_gone is not None:
+            os.environ["THEMIS_CASE"] = _env_gone
 
         checks += [
             ("обойдены все регионы справочника", rep["регионов обойдено"] == 2),
@@ -906,6 +1087,26 @@ def selftest():
             # Ветка без каскада: пользователь сам задал инстанцию. Раньше она была
             # не покрыта тестом, и мутация в ней проходила незамеченной.
             ("недобор попадает в отчет и без каскада", _no_cascade_reports()),
+            # Недобор (источник отдал меньше запрошенного) и упор в потолок
+            # (собственный/источниковый предел выдачи) называются по-разному.
+            ("недобор назван недобором, а не потолком",
+             any(t.get("причина") == "недобор" for t in rep["части с неполным охватом"])),
+            ("упор в потолок назван потолком",
+             hard["части с неполным охватом"] and all(
+                 t.get("причина") == "упор в потолок выдачи"
+                 for t in hard["части с неполным охватом"])),
+            ("--partition не теряет --area: обход сужен до заданного региона",
+             arep["регионов обойдено"] == 1 and pcalls
+             and all(c.get("area") == "москва" for c in pcalls)),
+            ("сужение регионом не считается пропуском остальных",
+             arep["регионов пропущено лимитом обхода"] == 0 and not arep.get("error")),
+            ("--partition не теряет --case-doc",
+             pcalls and all(c.get("case_doc") == "2-45/2026" for c in pcalls)),
+            ("сбой источника пишется в общий файл каналов прогона", marked),
+            ("меченый мертвым канал не опрашивается до истечения TTL", refused),
+            ("--case работает БЕЗ $THEMIS_CASE: сбой пишется в общий файл", marked_no_env),
+            ("--case работает БЕЗ $THEMIS_CASE: мертвый канал закрывает опрос", refused_no_env),
+            ("явный --case важнее $THEMIS_CASE", override_wins),
             ("пустая выдача при ненулевом счетчике не кешируется",
              not cacheable([], "Найдено 183 документа")),
             ("пустая выдача при нулевом счетчике кешируется",
@@ -941,6 +1142,13 @@ def selftest():
             ("неполный охват дает ненулевой код возврата",
              partition_exit_code(rep) != 0 and partition_exit_code(near) != 0),
             ("полный охват дает нулевой код возврата", partition_exit_code(full) == 0),
+            ("недобор дает RC_COVERAGE_INCOMPLETE, не код потолка",
+             partition_exit_code(rep) == RC_COVERAGE_INCOMPLETE
+             and partition_exit_code(near) == RC_COVERAGE_INCOMPLETE),
+            ("упор в потолок дает отдельный код, не код недобора",
+             partition_exit_code(hard) == RC_COVERAGE_CAPPED
+             and partition_exit_code(hard_nc) == RC_COVERAGE_CAPPED
+             and RC_COVERAGE_CAPPED != RC_COVERAGE_INCOMPLETE),
             ("тонкая часть ловится даже при высокой доле",
              near["охват процентов"] >= COVERAGE_OK_PERCENT
              and bool(near.get("error"))
@@ -1069,7 +1277,11 @@ def main():
                          "(автокомплита у источника нет, фильтр требует точного)")
     ap.add_argument("--i-accept-robots-risk", action="store_true",
                     help="включить поиск, запрещенный robots.txt источника (решение владельца)")
+    ap.add_argument("--case", default="", help="путь к делу — общий счет каналов и квот "
+                    "прогона (.agent/context/channels.json); иначе $THEMIS_CASE")
     args = ap.parse_args()
+    global _CASE_OVERRIDE
+    _CASE_OVERRIDE = args.case
     # Флаг риска — согласие ЗА молчание, а не поверх явного запрета. Прежняя
     # безусловная запись env="1" делала аварийный выключатель бесполезным: тот, кто
     # выставил THEMIS_SUDACT_SEARCH=0, получал поиск. Хук claude_guard.py при env=0
@@ -1116,7 +1328,8 @@ def main():
         acts, rep = partitioned_search(
             args.query, section=args.section, per_region=args.per_region,
             max_regions=args.max_regions, log=lambda m: print(m, file=sys.stderr),
-            instance=args.instance, court=args.court, law=args.law,
+            instance=args.instance, area=args.area, court=args.court, law=args.law,
+            case_doc=args.case_doc,
             date_from=args.date_from, date_to=args.date_to)
         if args.json:
             out = {"results": acts, "coverage": rep}

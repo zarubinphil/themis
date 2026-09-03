@@ -23,7 +23,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Read|Write|Edit|NotebookEdit|Bash",
+        "matcher": "Read|Write|Edit|NotebookEdit|Bash|Agent|WebFetch|WebSearch",
         "hooks": [
           {
             "type": "command",
@@ -92,8 +92,54 @@
   },
   "permissions": {
     "deny": [
-      "Read(./.entire/metadata/**)"
+      "Read(./.entire/metadata/**)",
+      "Edit(/.autoloop/etap9.json)",
+      "Edit(/.autoloop/stage5.json)",
+      "Edit(/.claude/settings.json)",
+      "Edit(/.claude/skills/humanizer-legal/scripts/scan_legal.sh)",
+      "Edit(/.claude/workflows/themis-pipeline.js)",
+      "Edit(/scripts/_obshee.py)",
+      "Edit(/scripts/case_graph.py)",
+   "Edit(/scripts/case_paths.py)",
+      "Edit(/scripts/claude_guard.py)",
+      "Edit(/scripts/context_guard.py)",
+      "Edit(/scripts/document_guard.py)",
+      "Edit(/scripts/gate.sh)",
+      "Edit(/scripts/instruction_guard.py)",
+      "Edit(/scripts/loop_gate.py)",
+      "Edit(/scripts/model_policy.py)",
+      "Edit(/scripts/money_rule.py)",
+      "Edit(/scripts/pd_guard.py)",
+      "Edit(/scripts/pii_gate.py)",
+      "Edit(/scripts/channels.py)",
+      "Edit(/scripts/preflight_search.py)",
+      "Edit(/scripts/priemka_remont.sh)",
+      "Edit(/scripts/quality_gate.py)",
+      "Edit(/scripts/stage4_spec.py)",
+      "Edit(/scripts/stage5_spec.py)",
+      "Edit(/scripts/stage65_spec.py)",
+      "Edit(/scripts/stage6_spec.py)",
+      "Edit(/scripts/stage7_spec.py)",
+      "Edit(/scripts/stage8_spec.py)",
+      "Edit(/scripts/stage9_spec.py)",
+      "Edit(/scripts/swarm_contract.py)",
+      "Edit(/scripts/table_guard.py)",
+      "Edit(/scripts/themis_status.py)",
+      "Edit(/scripts/token_ledger.py)",
+      "Edit(/scripts/verdict.py)"
     ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "autoAllowBashIfSandboxed": false,
+    "allowUnsandboxedCommands": false,
+    "filesystem": {
+      "denyWrite": [
+        "./.claude/settings.json",
+        "./scripts/claude_guard.py"
+      ]
+    }
   },
   "skillOverrides": {
     "3-statement-model": "off",

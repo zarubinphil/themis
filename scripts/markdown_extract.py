@@ -16,8 +16,23 @@ markdown_extract.py — роутер извлечения текста (экон
         Маршрут остается text-pdf, но ни одна страница не теряется.
   • Полный скан / изображение -> ROUTE=scan, OCR_REQUIRED (визуальный читатель).
 
-Извлечение всегда локальное: текст — markitdown/fitz, скан — Apple Vision OCR ($0).
+Извлечение всегда локальное: текст — markitdown/pypdfium2, скан — Apple Vision OCR ($0).
 Никаких облачных/LLM вызовов в роутере.
+
+Основной путь чтения PDF — pypdfium2. MuPDF (fitz) остается ЯВНЫМ ЗАПАСНЫМ путем
+по решению владельца 02.09.2026 («Эмью пидиф оставляем… потом решим»); круг 4
+того же дня сделал запасной путь ПОСТРАНИЧНЫМ с осторожным правилом: страница
+считается сканом, если ЛЮБОЙ движок читает ниже TEXT_MIN (min(PDFium, MuPDF) —
+надмножество старого множества сканов, ни одна страница не теряет OCR), а текст
+страницы берется у движка, который прочел больше (ни одна страница не теряет
+текст-слой). Лишний OCR допустим: Apple Vision локальный и бесплатный.
+Это БОЛЬШЕ обращений к AGPL-пакету, а не меньше: лицензионный блокер ОТЛОЖЕН,
+а не снят — PyMuPDF под AGPL-3.0, §5 включается при распространении, §13 — при
+сетевом взаимодействии; пока пакет в ядре, публичная выкладка и продажа закрыты.
+Пункт обязан всплыть в приемке очереди публикации.
+Каждый постраничный запасной путь объявляет о себе в stderr (идентификатор
+материала, страница, причина) — молчаливый фолбэк запрещен: он неотличим от
+отсутствия основного.
 
 Использование:
     markdown_extract.py FILE                 # метаданные + превью + путь к MD
@@ -106,13 +121,76 @@ def sha_of(path):
     return h.hexdigest()[:16]
 
 
-def pdf_perpage_chars(path):
-    """Длина текстового слоя ПО КАЖДОЙ странице — основа решения text/scan/mixed."""
-    import fitz
-    d = fitz.open(path)
-    per = [len(d[i].get_text().strip()) for i in range(d.page_count)]
-    d.close()
-    return per
+def _announce_mupdf(ident, page_no, pd_chars, mu_chars, reason):
+    """Единственное место, где запасной путь говорит вслух. Вынесено, чтобы
+    само сообщение было проверяемо селфтестом без редкой PDF-фикстурой.
+    ident — идентификатор материала (хеш), НЕ имя файла: stderr уходит в
+    отчеты, а имена файлов дел несут ПД доверителей."""
+    print(f"⚠ ЗАПАСНОЙ ПУТЬ MuPDF: материал {ident}, стр. {page_no}: {reason} "
+          f"(PDFium {pd_chars} симв., MuPDF {mu_chars} симв.). Маршрут объявлен "
+          f"вслух (решение владельца 02.09.2026, отложенный блокер AGPL — см. шапку).",
+          file=sys.stderr)
+
+
+def _mupdf_perpage(path):
+    """Per-page счет символов MuPDF. None — fitz не установлен или ошибка чтения.
+
+    Молчит: запасной путь говорит вслух в месте РЕШЕНИЯ (pdf_perpage_chars),
+    постранично и с причиной, а не в месте замера."""
+    try:
+        import fitz
+    except ImportError:
+        return None
+    try:
+        doc = fitz.open(path)
+        per = [len(doc[i].get_text().strip()) for i in range(len(doc))]
+        doc.close()
+        return per
+    except Exception:
+        return None
+
+
+def pdf_perpage_chars(path, ident=None):
+    """Длина текстового слоя ПО КАЖДОЙ странице — основа решения text/scan/mixed.
+
+    Возвращает (dec, mupdf_text_pages):
+      dec[i] — счет для решения «скан или текст»: минимум двух движков
+               (правило владельца 02.09.2026, круг 4: скан, если ЛЮБОЙ движок
+               ниже TEXT_MIN — надмножество старого множества сканов);
+      mupdf_text_pages — страницы, чей текст берется у MuPDF (он прочел
+               больше PDFium). pdf_mixed_to_md читает их через fitz.
+    Каждая страница, где маршрут заменен, объявляется в stderr."""
+    import pypdfium2 as pdfium
+    pdf = pdfium.PdfDocument(path)
+    pd_per = []
+    for i in range(len(pdf)):
+        tp = pdf[i].get_textpage()
+        pd_per.append(len(tp.get_text_range().strip()))
+        tp.close()
+    pdf.close()
+    mu_per = _mupdf_perpage(path)
+    if mu_per is None:
+        # fitz нет на машине или файл не открылся — решение только по PDFium.
+        # Вслух: молчаливая деградация правила минимума — тот же тихий ноль.
+        print(f"⚠ запасной движок MuPDF недоступен для {ident or sha_of(path)} — "
+              f"сторона порога решена только по PDFium", file=sys.stderr)
+        return pd_per, set()
+    ident = ident or sha_of(path)
+    n = max(len(pd_per), len(mu_per))
+    pd_pad = pd_per + [0] * (n - len(pd_per))
+    mu_pad = mu_per + [0] * (n - len(mu_per))
+    dec, mupdf_text = [], set()
+    for i in range(n):
+        a, b = pd_pad[i], mu_pad[i]
+        dec.append(min(a, b))
+        if b > a and b >= TEXT_MIN:
+            mupdf_text.add(i)
+            _announce_mupdf(ident, i + 1, a, b,
+                            "текст страницы взят у MuPDF — PDFium прочел меньше")
+        elif a >= TEXT_MIN > b:
+            _announce_mupdf(ident, i + 1, a, b,
+                            "страница уходит на OCR — MuPDF читает ниже порога")
+    return dec, mupdf_text
 
 
 def _vision(png_path):
@@ -241,19 +319,19 @@ def render_scan(path, outdir, dpi=DPI, maxp=MAXP):
     по всем ≤80 страницам — при том что проверка уже была написана в
     `render_tail.py:35-36` и просто не перенесена сюда (дефект Д11 аудита).
     """
-    import fitz
+    import pypdfium2 as pdfium
     os.makedirs(outdir, exist_ok=True)
-    d = fitz.open(path)
-    n = d.page_count
+    pdf = pdfium.PdfDocument(path)
+    n = len(pdf)
     names, skipped = [], 0
     for i in range(min(maxp, n)):
         png = os.path.join(outdir, f"page_{i + 1:03d}.png")
         if os.path.exists(os.path.splitext(png)[0] + ".txt"):
             skipped += 1
             continue
-        d[i].get_pixmap(dpi=dpi).save(png)
+        pdf[i].render(scale=dpi / 72).to_pil().save(png)
         names.append(f"page_{i + 1:03d}.png")
-    d.close()
+    pdf.close()
     if skipped:
         print(f"note: {skipped} стр. уже распознаны — пропущены", file=sys.stderr)
     return names, n
@@ -426,11 +504,19 @@ def text_layer_ok(t, doc_is_ru=True):
 def pdf_garbage_pages(path, idx):
     """Из страниц с текстовым слоем вернуть те, чей слой мусорный (до-OCR-ить).
     Если битых листов много — весь PDF прогнан через один чужой OCR, чистых
-    страниц в нем не осталось: возвращаем все."""
-    import fitz
-    d = fitz.open(path)
-    texts = {i: d[i].get_text() for i in idx}
-    d.close()
+    страниц в нем не осталось: возвращаем все.
+    ponytail: читает слой только через PDFium — для страниц, где текст взял
+    MuPDF (PDFium ослеп), слой почти пуст и метрика честно отвечает «не судить»
+    (None), а не выдумывает порчу; потолок — битый MuPDF-слой пройдет мимо,
+    путь апгрейда — читать текст у движка-победителя."""
+    import pypdfium2 as pdfium
+    pdf = pdfium.PdfDocument(path)
+    texts = {}
+    for i in idx:
+        tp = pdf[i].get_textpage()
+        texts[i] = tp.get_text_range()
+        tp.close()
+    pdf.close()
     letters = [c for t in texts.values() for c in t if c.isalpha()]
     if not letters:
         return []
@@ -444,21 +530,23 @@ def pdf_garbage_pages(path, idx):
     return list(idx) if len(bad) >= max(2, len(idx) * ALL_BAD) else bad
 
 
-def pdf_mixed_to_md(path, per, sha):
+def pdf_mixed_to_md(path, per, sha, mupdf_text_pages=()):
     """Смешанный PDF: текст где есть, Apple Vision OCR где скан. Склейка по порядку
-    страниц. OCR-страницы помечены. Возвращает (body, n_ocr_pages, truncated)."""
-    import fitz
+    страниц. OCR-страницы помечены. Возвращает (body, n_ocr_pages, truncated).
+    Текст страниц из mupdf_text_pages читается через fitz (запасной путь, уже
+    объявленный вслух в pdf_perpage_chars): там PDFium ослеп."""
+    import pypdfium2 as pdfium
     truncated = per[MAXP:] != []
     pages = list(range(min(len(per), MAXP)))
     scan_idx = [i for i in pages if per[i] < TEXT_MIN]
     odir = os.path.join(CACHE, f"{sha}_ocr")
     os.makedirs(odir, exist_ok=True)
-    d = fitz.open(path)
+    pdf = pdfium.PdfDocument(path)
     # отрисовать и OCR только скан-страницы (параллельно)
     png_paths = []
     for i in scan_idx:
         pp = os.path.join(odir, f"page_{i + 1:03d}.png")
-        d[i].get_pixmap(dpi=DPI).save(pp)
+        pdf[i].render(scale=DPI / 72).to_pil().save(pp)
         png_paths.append(pp)
     ocr_texts = dict(zip(scan_idx, _ocr_many(png_paths))) if png_paths else {}
     # сайдкары page_NNN.txt ОБЯЗАТЕЛЬНЫ и здесь: без них манифест полноты слеп,
@@ -466,15 +554,26 @@ def pdf_mixed_to_md(path, per, sha):
     for i in scan_idx:
         with open(os.path.join(odir, f"page_{i + 1:03d}.txt"), "w", encoding="utf-8") as f:
             f.write(ocr_texts.get(i, ""))
+    mu_doc = None
     parts = []
     for i in pages:
         if per[i] >= TEXT_MIN:
-            parts.append(d[i].get_text().strip())
+            if i in mupdf_text_pages:
+                if mu_doc is None:
+                    import fitz
+                    mu_doc = fitz.open(path)
+                parts.append(mu_doc[i].get_text().strip())
+            else:
+                tp = pdf[i].get_textpage()
+                parts.append(tp.get_text_range().strip())
+                tp.close()
         else:
             t = ocr_texts.get(i, "").strip()
             parts.append(f"[стр. {i + 1} — скан, Apple Vision OCR]\n{t}" if t
                          else f"[стр. {i + 1} — скан, OCR пуст: проверить визуально]")
-    d.close()
+    if mu_doc is not None:
+        mu_doc.close()
+    pdf.close()
     write_manifest(odir, len(per), text_pages=[i for i in pages if per[i] >= TEXT_MIN])
     return "\n\n".join(parts), len(scan_idx), truncated
 
@@ -697,7 +796,7 @@ def main():
                     else:
                         note += "\nApple Vision OCR пуст → облачный визуальный читатель (Буринский) точечно на спорное."
         elif e == "pdf":
-            per = pdf_perpage_chars(p)
+            per, mupdf_text_pages = pdf_perpage_chars(p, sha)
             pages = len(per)
             chars = sum(per)
             text_pages = [i for i, c in enumerate(per[:MAXP]) if c >= TEXT_MIN]
@@ -737,7 +836,7 @@ def main():
                     cache = "hit"
                     body = read_cache(md_path)
                 else:
-                    body, ocr_count, trunc = pdf_mixed_to_md(p, per, sha)
+                    body, ocr_count, trunc = pdf_mixed_to_md(p, per, sha, mupdf_text_pages)
                     body = write_cache(md_path, body)
                     note = (f"СМЕШАННЫЙ PDF: {len(text_pages)} текст-стр + {ocr_count} скан-стр "
                             f"(до-OCR-ено Apple Vision, $0). Контент полный."
@@ -845,12 +944,34 @@ def main():
         rx = re.compile(a.grep, re.IGNORECASE)
         hits = [f"{i}: {ln}" for i, ln in enumerate(body.splitlines(), 1) if rx.search(ln)]
         print(f"--- grep '{a.grep}' ({len(hits)} строк) ---")
-        print("\n".join(hits[:400]))
+        # Врезка Метиды, то же устройство, что в ветке --inline ниже: тот же фасад, тот же
+        # профиль audit, тот же вид маркера. Разведена только метка шага ("grep"), потому что
+        # тела у веток разные. Одна строка: откат - вернуть `print("\n".join(hits[:400]))`.
+        # Почему ветка вообще сжимается. Потолок 400 - это потолок ЭЛЕМЕНТОВ списка, а не
+        # символов, и потолка символов у ветки нет ни одного, тогда как у --inline он есть
+        # (--max-chars). Замер по 260 материалам дел, лежащим в кеше дома, шаблон боевой
+        # (тот, что стоит в инструкции читателей): медиана выдачи --grep 1872 байта, p90 27 213,
+        # максимум 694 243 - то есть один настоящий документ уже сегодня отдает через --grep
+        # в 3,5 раза больше, чем пропустила бы защищенная ветка --inline.
+        # Режется уже срезанный список совпадений, а не весь набор: хвост за 400-м совпадением
+        # дом терял и до врезки, а сжатие целого набора с последующим срезом разрубило бы
+        # маркер разворота и сделало текст невосстановимым.
+        # Честно о выигрыше [замер]: сегодня он НОЛЬ на всех 260 материалах, и причина не в
+        # размере. Обратимые свертки Метиды ищут повтор, а номер строки перед каждой строкой
+        # делает все строки разными: те же 216 совпадений самого крупного документа без номеров
+        # жмутся 692 727 -> 209 168 байт (69,8%), с номерами - 0,0%. Значит врезка стоит здесь
+        # страховкой, а не экономией: ниже порога профиля вход возвращается байт в байт
+        # (доктрина 4), а выдача без потолка символов больше не проходит мимо прибора.
+        print(__import__("themis_metiz").squeeze_text("\n".join(hits[:400]), p, "grep"))
         return
 
     if a.inline:
         print("---")
-        out = body[: a.max_chars]
+        # Врезка Метиды, профиль audit. Одна строка: откат - вернуть `out = body[: a.max_chars]`.
+        # Режется уже обрезанный кусок, а не целый документ, намеренно: хвост за max_chars дом
+        # терял и до врезки, о чем честно печатает ниже, а сжатие целого документа с последующей
+        # обрезкой разрубило бы маркер разворота и сделало текст невосстановимым.
+        out = __import__("themis_metiz").squeeze_text(body[: a.max_chars], p, "inline")
         print(out)
         if len(body) > a.max_chars:
             print(f"\n[...обрезано, всего {nchars} симв.; остальное в MD...]")

@@ -23,7 +23,8 @@ Use this skill when the user asks to run the migrated source command `init-pract
 Показать группы, спросить подтверждение.
 
 2. Состав — блок `## ОХОТНИКИ — РЕШЕНИЕ ФЕМИДЫ` карты; нет → по числу правовых вопросов: 1 = L1 tactical · 2-3 = L2 classic + tactical (+ skeptic при орг-оппоненте) · 4+ / кассация ВС / КАС = L3 все три.
-3. Запуск: дела по очереди, охотники дела параллельно (`practice-hunter-classic`/`-skeptic`/`-tactical`). В промпт — правовые вопросы карты ТЕКСТОМ (материал до 15 000 токенов — текстом, не путем) + путь дела.
+3. **Отметка прогона (иначе сторож заблокирует охотника).** Один раз за прогон: `python3 scripts/preflight_search.py` — запомни код. Каждому делу ДО охотников: `python3 scripts/case_paths.py --run-set cases/{клиент}/{дело} guide init-practice` и `--run-set cases/{клиент}/{дело} preflight_code <код>`. Код preflight ненулевой → охоту не запускать (сторож заблокирует); работать по `practice_index.md` либо решение владельца `--run-set … preflight_override 'причина'`.
+   Запуск: дела по очереди, охотники дела параллельно (`practice-hunter-classic`/`-skeptic`/`-tactical`). В промпт — правовые вопросы карты ТЕКСТОМ (материал до 15 000 токенов — текстом, не путем) + путь дела.
 4. Синтез: FULL → `/askacouncil {путь}` → `practice.md` с маркером; L1/FAST → Фемида синтезирует `practice.md` сама (Opus) и ставит маркер `## FAST-СИНТЕЗ ФЕМИДЫ`; охотник кладет только `tactical_*.md`. Затем `archivist` (один раз).
 5. Отчет: `✓ Готово` (маркер) / `⚠ Частично` (нужен /askacouncil) / `↷ Пропущено` / `✗ Ошибки` + причина. Далее: /position-council → /draft.
 
