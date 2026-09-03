@@ -121,7 +121,31 @@
         "published_path": "docs/assets/pantheon/workflow/07-hearing.png",
         "published_sha256": "bece217719e85e713440d52f67ed72f677caca82eb168db3f07f8e99bb3fb923"
       }
-    ]
+    ],
+    "takt": {
+      "source_path": "docs/assets/pantheon/takt-source.png",
+      "source_sha256": "f160e686f4ba8ae69fc878ac5cfa2feaec1fb306450ffe53976f729471fb4015",
+      "plate_geometry": ".github/pantheon/takt-plity.json",
+      "languages": {
+        "en": {
+          "published_path": "docs/assets/pantheon/takt-en.png",
+          "published_sha256": "f7f900d57e61e04785e621d9b6ad8b8e8df78508cc3ee1dcc1ad39e1cf537263",
+          "alt": "Themis workflow in one wide Pantheon marble scene: seven labelled steps from Intake to Hearing, linked by blue threads beside the classical column"
+        },
+        "ru": {
+          "published_path": "docs/assets/pantheon/takt-ru.png",
+          "published_sha256": "901618180784dd0404e6637bafd9a3f85149e801e64011fd322d1dea5294e2b1",
+          "alt": "Такт Фемиды одной широкой мраморной сценой Pantheon: семь подписанных шагов от Приема до Заседания, связаны голубой нитью у классической колонны"
+        },
+        "zh": {
+          "published_path": "docs/assets/pantheon/takt-zh.png",
+          "published_sha256": "e29dcf34cf095df7822bb58c8377fabf56e3d20c82298d24674f089f26675304",
+          "alt": "Pantheon 宽幅大理石场景中的忒弥斯工作流程：从接收到开庭的七个带标注步骤，由蓝色丝线串起，旁边是古典石柱"
+        }
+      },
+      "generation_receipt": ".github/pantheon/takt-generation-receipt.json",
+      "visual_judge_receipt": ".github/pantheon/takt-visual-judge-receipt.json"
+    }
   },
   "receipts": {
     "generation_path": ".github/pantheon/generation-receipt.json",

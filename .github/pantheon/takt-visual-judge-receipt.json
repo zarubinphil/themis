@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "kind": "pantheon-visual-judge",
+  "receipt_id": "pantheon-takt-judge-themiz-2026-09-03",
+  "checked_at": "2026-09-03T09:59:55Z",
+  "runtime": "claude",
+  "tool": "read_image",
+  "route_id": "claude:read_image:frontier",
+  "model": {
+    "id": "claude-opus-5",
+    "revision": "claude-opus-5[1m]",
+    "tier": "frontier"
+  },
+  "quality": "highest",
+  "verdict": "pass",
+  "human_reviewed": true,
+  "references": [
+    {
+      "role": "style-anchor",
+      "sha256": "ce524f9d22cb0092cb17aa280832e1b2ab2a77a0e01602065ec502232a3bb2d2"
+    },
+    {
+      "role": "column-reference",
+      "sha256": "9d32edd56ac55c4dd6d0425a28a2ac35035e9ab09073fc8ce0c1414b2edfb1bd"
+    }
+  ],
+  "outputs": [
+    {
+      "role": "takt-en",
+      "path": "docs/assets/pantheon/takt-en.png",
+      "sha256": "f7f900d57e61e04785e621d9b6ad8b8e8df78508cc3ee1dcc1ad39e1cf537263",
+      "checks": {
+        "column-present": 5,
+        "ivory-light": 5,
+        "marble-material": 5,
+        "deity-symbol": 5,
+        "blue-gold-semantics": 5,
+        "geometry-clean": 5,
+        "diagram-text-exact": 5,
+        "no-collision-with-copy": 5,
+        "series-coherence": 5
+      }
+    },
+    {
+      "role": "takt-ru",
+      "path": "docs/assets/pantheon/takt-ru.png",
+      "sha256": "901618180784dd0404e6637bafd9a3f85149e801e64011fd322d1dea5294e2b1",
+      "checks": {
+        "column-present": 5,
+        "ivory-light": 5,
+        "marble-material": 5,
+        "deity-symbol": 5,
+        "blue-gold-semantics": 5,
+        "geometry-clean": 5,
+        "diagram-text-exact": 5,
+        "no-collision-with-copy": 5,
+        "series-coherence": 5
+      }
+    },
+    {
+      "role": "takt-zh",
+      "path": "docs/assets/pantheon/takt-zh.png",
+      "sha256": "e29dcf34cf095df7822bb58c8377fabf56e3d20c82298d24674f089f26675304",
+      "checks": {
+        "column-present": 5,
+        "ivory-light": 5,
+        "marble-material": 5,
+        "deity-symbol": 5,
+        "blue-gold-semantics": 5,
+        "geometry-clean": 5,
+        "diagram-text-exact": 5,
+        "no-collision-with-copy": 5,
+        "series-coherence": 5
+      }
+    }
+  ],
+  "notes": "каждый кадр открыт глазами: колонна на месте, Фемида с повязкой, весами в равновесии и опущенным мечом, фон теплый ivory, голубая нить ведет поток, золото только у папки доверителя, семь подписей совпадают с visuals.stages своего языка"
+}

@@ -55,19 +55,7 @@ A case moves through stages. Each has its own agents, and no document leaves wit
 
 <!-- workflow-diagram:start -->
 
-```text
-  ┌──────────┐   ┌──────────┐   ┌──────────┐
-  │ Intake   │ ▶ │ Extract  │ ▶ │ Case map │
-  └──────────┘   └──────────┘   └──────────┘
-        ▼
-  ┌──────────┐   ┌──────────┐   ┌──────────┐
-  │ Research │ ▶ │ Council  │ ▶ │ Draft    │
-  └──────────┘   └──────────┘   └──────────┘
-        ▼
-  ┌──────────┐
-  │ Hearing  │
-  └──────────┘
-```
+<p align="center"><img src="docs/assets/pantheon/takt-en.png" alt="Themis workflow in one wide Pantheon marble scene: seven labelled steps from Intake to Hearing, linked by blue threads beside the classical column" width="100%"></p>
 
 <!-- workflow-diagram:end -->
 
