@@ -12,9 +12,9 @@
   },
   "quality": "highest",
   "generation_id": "pantheon-takt-themiz-2026-09-03",
-  "generated_at": "2026-09-03T09:59:55Z",
+  "generated_at": "2026-09-03T11:53:48Z",
   "capability_snapshot": {
-    "checked_at": "2026-09-03T09:59:55Z",
+    "checked_at": "2026-09-03T11:53:48Z",
     "routes": [
       {
         "id": "codex:image_gen:managed-frontier",
@@ -32,7 +32,7 @@
   },
   "prompt": {
     "path": ".github/pantheon/takt-prompt.txt",
-    "sha256": "2f6ce210ea1b071d3b831c44a9a1230ef99e63ed0fcc181b4bc7cd9d9f96822f"
+    "sha256": "0583e151df03042559a0f2ab38a48d19b1685b07b7ee0049dfd2d9cab9ab2f65"
   },
   "references": [
     {
@@ -42,34 +42,42 @@
     {
       "role": "column-reference",
       "sha256": "9d32edd56ac55c4dd6d0425a28a2ac35035e9ab09073fc8ce0c1414b2edfb1bd"
+    },
+    {
+      "role": "character-sheet",
+      "sha256": "3a3c7a4b0ce052e05ee5581ce083e8663e3a491b23f13fef45dae8184354ac5b"
+    },
+    {
+      "role": "prop-sheet",
+      "sha256": "933311c8799a9acfbf918a196f8e8d4dd0968f6acc5bd7f97d0330ef686323ab"
     }
   ],
   "outputs": [
     {
       "role": "takt-source",
       "path": "docs/assets/pantheon/takt-source.png",
-      "sha256": "f160e686f4ba8ae69fc878ac5cfa2feaec1fb306450ffe53976f729471fb4015"
+      "sha256": "91468e08b0589bf0b512d14ac9e358cca3ade6aa7e31538607524761359d2bfb"
     },
     {
       "role": "takt-en",
       "path": "docs/assets/pantheon/takt-en.png",
-      "sha256": "f7f900d57e61e04785e621d9b6ad8b8e8df78508cc3ee1dcc1ad39e1cf537263"
+      "sha256": "ae99ee0c5a3bd32460a90fa99bb74f6547b6f5f1145d0ee5ae06610bff119d7b"
     },
     {
       "role": "takt-ru",
       "path": "docs/assets/pantheon/takt-ru.png",
-      "sha256": "901618180784dd0404e6637bafd9a3f85149e801e64011fd322d1dea5294e2b1"
+      "sha256": "7f9ffffd4e2de503bc0b676e3fc883593e35aa791e23a86603fb89e2ede70425"
     },
     {
       "role": "takt-zh",
       "path": "docs/assets/pantheon/takt-zh.png",
-      "sha256": "e29dcf34cf095df7822bb58c8377fabf56e3d20c82298d24674f089f26675304"
+      "sha256": "fd30b27559b7cd988864e92ce9af8d95df7cbb26b32b2a19d56ecba3d3808dde"
     }
   ],
   "label_layer": {
     "note": "кадр рожден с пустыми мраморными плитами; подписи поставлены детерминированно из visuals.stages, поэтому текст совпадает с манифестом посимвольно на каждом языке",
     "geometry": ".github/pantheon/takt-plity.json",
-    "geometry_sha256": "6d0fd35dae3f01c67f3d1de7d1b6cb2326908b10884fdf1de0c211af31036ce0",
+    "geometry_sha256": "7d3279669e043ca1441c40c60e1272782125bd37897f92479de35dce62c04d9e",
     "font_en": "assets/fonts/PT_Serif-Web-Bold.ttf",
     "font_ru": "assets/fonts/PT_Serif-Web-Bold.ttf",
     "font_zh": "Songti SC",

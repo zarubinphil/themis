@@ -144,12 +144,17 @@ Never done this before? [The onboarding](docs/ONBOARDING.md) walks the whole fir
 
 ## Simple Comparison
 
-| Choice | Best when | What you get | Trade-off |
-|---|---|---|---|
-| **Themiz** | A real case with scans, deadlines, and documents | Local reading, case map, both sides of the practice, reviewed drafts | Mac for recognition, and a lawyer still decides |
-| Doing it by hand | A small case | Full control | Hours of mechanics per case |
-| A general chat assistant | A quick question about the law | Instant answers | Quotes from memory, no case file, no deadline maths |
-| A commercial legal platform | A firm with a budget | Support and integrations | Case material leaves your machine, and you pay per seat |
+| Option | What it is | Where the case file lives | Reads your scans | Practice for and against | Drafts the document | Who checks the result | Price |
+|---|---|---|---|---|---|---|---|
+| **Themiz** | Multi-agent assistant for one case | On your Mac | Yes, locally | Yes, both sides | Yes, to the case contract | A second agent, a separate role | Free for an individual lawyer |
+| Doing it by hand | A lawyer and a folder | With you | You read them yourself | As much as the week allows | Yes | You do | Your hours |
+| ConsultantPlus, Garant | Russian legal reference systems | Not for case material | No | Search across statutes and practice | Templates | You do | Subscription |
+| Sudact, the court card index | Open search of court acts | Not for case material | No | Search of acts | No | You do | Free |
+| ChatGPT, Claude as they come | A general chat assistant | In the vendor's cloud | If you attach the file | From the model's memory | Yes | You do | Subscription |
+| Harvey, CoCounsel | Legal AI for firms | In the vendor's cloud | Yes | Yes, for their own jurisdictions | Yes | Depends on the plan | Enterprise contract |
+| Doczilla, FreshDoc | Document assembly | In the vendor's cloud | No | No | Yes, from a template | You do | Subscription |
+
+Names belong to their owners. The table describes what each option is built for, not a benchmark: other products change, and this page does not promise on their behalf.
 
 ## Simple Words
 

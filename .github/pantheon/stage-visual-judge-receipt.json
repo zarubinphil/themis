@@ -2,7 +2,7 @@
   "schema_version": 1,
   "kind": "pantheon-visual-judge",
   "receipt_id": "pantheon-stage-judge-themis-2026-08-29",
-  "checked_at": "2026-08-29T20:07:37Z",
+  "checked_at": "2026-09-03T11:45:14Z",
   "runtime": "claude",
   "tool": "read_image",
   "route_id": "claude:read_image:frontier",
@@ -28,7 +28,7 @@
     {
       "role": "stage-01-intake",
       "path": "docs/assets/pantheon/workflow/01-intake.png",
-      "sha256": "149536a8f003654d4037a36314d7a2450c97baac43208dee98e6c2f765cab12c",
+      "sha256": "5120fb1f02781fc1fc95200f0512e09b451dddddb3f15dd9e6b23027afcf8899",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,
@@ -57,12 +57,13 @@
         "readme-render": 5,
         "series-coherence": 5,
         "stage-meaning": 5
-      }
+      },
+      "notes": "пересnят по своду 03.09.2026 и открыт глазами: фигура, меч и реквизит те же, что на картах свода; кисти правильные"
     },
     {
       "role": "stage-02-extract",
       "path": "docs/assets/pantheon/workflow/02-extract.png",
-      "sha256": "d91ddbfe6b1008170556e037b628b4a173ad436ecf81b8a7c873736ce2a4eae4",
+      "sha256": "034b2c8222c4457340561f15fdb129a2f41df29babe566bda30ccae164e05ed7",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,
@@ -91,12 +92,13 @@
         "readme-render": 5,
         "series-coherence": 5,
         "stage-meaning": 5
-      }
+      },
+      "notes": "пересnят по своду 03.09.2026 и открыт глазами: фигура, меч и реквизит те же, что на картах свода; кисти правильные"
     },
     {
       "role": "stage-03-case-map",
       "path": "docs/assets/pantheon/workflow/03-case-map.png",
-      "sha256": "ed5888078e1548df7391714a9c09942ae51233412393155289ea8386e23c1f46",
+      "sha256": "4f962a3ebf55c58437efaaba38bf6be10e5d1f64978fb2d242f1f8d8d3e4982e",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,
@@ -125,12 +127,13 @@
         "readme-render": 5,
         "series-coherence": 5,
         "stage-meaning": 5
-      }
+      },
+      "notes": "пересnят по своду 03.09.2026 и открыт глазами: фигура, меч и реквизит те же, что на картах свода; кисти правильные"
     },
     {
       "role": "stage-04-research",
       "path": "docs/assets/pantheon/workflow/04-research.png",
-      "sha256": "da8ab6880d0e62bb746b04d55010c8ff0e6ad9971b7111d6a7bfe6cacbb268da",
+      "sha256": "8966a092c10df9247ebff2bc952c657f87b5a8e366cd5e75ee7432bf6fbb767c",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,
@@ -159,12 +162,13 @@
         "readme-render": 5,
         "series-coherence": 5,
         "stage-meaning": 5
-      }
+      },
+      "notes": "пересnят по своду 03.09.2026 и открыт глазами: фигура, меч и реквизит те же, что на картах свода; кисти правильные"
     },
     {
       "role": "stage-05-council",
       "path": "docs/assets/pantheon/workflow/05-council.png",
-      "sha256": "3b0a8fecd6ed6ef1c36abfc936e2527ce29359f28b986ed6fd91bf8af22c75b5",
+      "sha256": "868203858c6f95ed135b85415be1e3f4408ff4585170746a7bafbe34ffa455a2",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,
@@ -193,12 +197,13 @@
         "readme-render": 5,
         "series-coherence": 5,
         "stage-meaning": 5
-      }
+      },
+      "notes": "пересnят по своду 03.09.2026 и открыт глазами: фигура, меч и реквизит те же, что на картах свода; кисти правильные"
     },
     {
       "role": "stage-06-draft",
       "path": "docs/assets/pantheon/workflow/06-draft.png",
-      "sha256": "bc7a408b7ae5547c705a12c5ae756fb5d1a3be44d799c6f43fa5b2e75a6cdd5b",
+      "sha256": "a3002bb8c2851511eb416d261d2640529168d1691075c56443adb7567ee8b1dd",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,
@@ -227,12 +232,13 @@
         "readme-render": 5,
         "series-coherence": 5,
         "stage-meaning": 5
-      }
+      },
+      "notes": "пересnят по своду 03.09.2026 и открыт глазами: фигура, меч и реквизит те же, что на картах свода; кисти правильные"
     },
     {
       "role": "stage-07-hearing",
       "path": "docs/assets/pantheon/workflow/07-hearing.png",
-      "sha256": "bece217719e85e713440d52f67ed72f677caca82eb168db3f07f8e99bb3fb923",
+      "sha256": "9e8024380c2b603bd224c312922e1e07b280b1ddcf65a35e6b4f36fd5609fc5e",
       "verdict": "pass",
       "hard_constraints": {
         "column": true,
@@ -261,7 +267,29 @@
         "readme-render": 5,
         "series-coherence": 5,
         "stage-meaning": 5
-      }
+      },
+      "notes": "пересnят по своду 03.09.2026 и открыт глазами: фигура, меч и реквизит те же, что на картах свода; кисти правильные"
+    }
+  ],
+  "corrections": [
+    {
+      "role": "stage-01-intake",
+      "at": "2026-09-03T11:07:49Z",
+      "previous_sha256": "149536a8f003654d4037a36314d7a2450c97baac43208dee98e6c2f765cab12c",
+      "note": "прежний кадр стоял «пять из пяти» по geometry-clean при сломанной кисти — вердикт был подписан без обзора глазами"
+    },
+    {
+      "roles": [
+        "stage-01-intake",
+        "stage-02-extract",
+        "stage-03-case-map",
+        "stage-04-research",
+        "stage-05-council",
+        "stage-06-draft",
+        "stage-07-hearing"
+      ],
+      "at": "2026-09-03T11:45:14Z",
+      "note": "серия приведена к своду проекта; прежние кадры расходились между собой по прическе, материалу меча и форме папки"
     }
   ]
 }

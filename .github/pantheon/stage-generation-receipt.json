@@ -12,7 +12,7 @@
   },
   "quality": "highest",
   "generation_id": "pantheon-stage-series-themis-2026-08-29",
-  "generated_at": "2026-08-29T20:07:37Z",
+  "generated_at": "2026-09-03T11:45:14Z",
   "capability_snapshot": {
     "checked_at": "2026-08-29T20:07:37Z",
     "routes": [
@@ -32,7 +32,7 @@
   },
   "prompt": {
     "path": ".github/pantheon/stage-prompt.txt",
-    "sha256": "e3fe69266041355870150c9e2ac41dc8393fb7db082218eba677dbd3a78550c3"
+    "sha256": "9d974293f0fee9e3d6196e5263f751524d8bc678711818efcff17c9f07716513"
   },
   "references": [
     {
@@ -42,6 +42,14 @@
     {
       "role": "column-reference",
       "sha256": "9d32edd56ac55c4dd6d0425a28a2ac35035e9ab09073fc8ce0c1414b2edfb1bd"
+    },
+    {
+      "role": "character-sheet",
+      "sha256": "3a3c7a4b0ce052e05ee5581ce083e8663e3a491b23f13fef45dae8184354ac5b"
+    },
+    {
+      "role": "prop-sheet",
+      "sha256": "933311c8799a9acfbf918a196f8e8d4dd0968f6acc5bd7f97d0330ef686323ab"
     }
   ],
   "candidates": [
@@ -49,7 +57,7 @@
       "id": "codex-managed-stage-series",
       "route_id": "codex:image_gen:managed-frontier",
       "generation_id": "pantheon-stage-series-themis-2026-08-29",
-      "prompt_sha256": "e3fe69266041355870150c9e2ac41dc8393fb7db082218eba677dbd3a78550c3",
+      "prompt_sha256": "9d974293f0fee9e3d6196e5263f751524d8bc678711818efcff17c9f07716513",
       "reference_sha256": [
         "ce524f9d22cb0092cb17aa280832e1b2ab2a77a0e01602065ec502232a3bb2d2",
         "9d32edd56ac55c4dd6d0425a28a2ac35035e9ab09073fc8ce0c1414b2edfb1bd"
@@ -57,41 +65,65 @@
       "outputs": [
         {
           "role": "stage-01-intake",
-          "source_sha256": "149536a8f003654d4037a36314d7a2450c97baac43208dee98e6c2f765cab12c",
-          "published_sha256": "149536a8f003654d4037a36314d7a2450c97baac43208dee98e6c2f765cab12c"
+          "source_sha256": "5120fb1f02781fc1fc95200f0512e09b451dddddb3f15dd9e6b23027afcf8899",
+          "published_sha256": "5120fb1f02781fc1fc95200f0512e09b451dddddb3f15dd9e6b23027afcf8899"
         },
         {
           "role": "stage-02-extract",
-          "source_sha256": "d91ddbfe6b1008170556e037b628b4a173ad436ecf81b8a7c873736ce2a4eae4",
-          "published_sha256": "d91ddbfe6b1008170556e037b628b4a173ad436ecf81b8a7c873736ce2a4eae4"
+          "source_sha256": "034b2c8222c4457340561f15fdb129a2f41df29babe566bda30ccae164e05ed7",
+          "published_sha256": "034b2c8222c4457340561f15fdb129a2f41df29babe566bda30ccae164e05ed7"
         },
         {
           "role": "stage-03-case-map",
-          "source_sha256": "ed5888078e1548df7391714a9c09942ae51233412393155289ea8386e23c1f46",
-          "published_sha256": "ed5888078e1548df7391714a9c09942ae51233412393155289ea8386e23c1f46"
+          "source_sha256": "4f962a3ebf55c58437efaaba38bf6be10e5d1f64978fb2d242f1f8d8d3e4982e",
+          "published_sha256": "4f962a3ebf55c58437efaaba38bf6be10e5d1f64978fb2d242f1f8d8d3e4982e"
         },
         {
           "role": "stage-04-research",
-          "source_sha256": "da8ab6880d0e62bb746b04d55010c8ff0e6ad9971b7111d6a7bfe6cacbb268da",
-          "published_sha256": "da8ab6880d0e62bb746b04d55010c8ff0e6ad9971b7111d6a7bfe6cacbb268da"
+          "source_sha256": "8966a092c10df9247ebff2bc952c657f87b5a8e366cd5e75ee7432bf6fbb767c",
+          "published_sha256": "8966a092c10df9247ebff2bc952c657f87b5a8e366cd5e75ee7432bf6fbb767c"
         },
         {
           "role": "stage-05-council",
-          "source_sha256": "3b0a8fecd6ed6ef1c36abfc936e2527ce29359f28b986ed6fd91bf8af22c75b5",
-          "published_sha256": "3b0a8fecd6ed6ef1c36abfc936e2527ce29359f28b986ed6fd91bf8af22c75b5"
+          "source_sha256": "868203858c6f95ed135b85415be1e3f4408ff4585170746a7bafbe34ffa455a2",
+          "published_sha256": "868203858c6f95ed135b85415be1e3f4408ff4585170746a7bafbe34ffa455a2"
         },
         {
           "role": "stage-06-draft",
-          "source_sha256": "bc7a408b7ae5547c705a12c5ae756fb5d1a3be44d799c6f43fa5b2e75a6cdd5b",
-          "published_sha256": "bc7a408b7ae5547c705a12c5ae756fb5d1a3be44d799c6f43fa5b2e75a6cdd5b"
+          "source_sha256": "a3002bb8c2851511eb416d261d2640529168d1691075c56443adb7567ee8b1dd",
+          "published_sha256": "a3002bb8c2851511eb416d261d2640529168d1691075c56443adb7567ee8b1dd"
         },
         {
           "role": "stage-07-hearing",
-          "source_sha256": "bece217719e85e713440d52f67ed72f677caca82eb168db3f07f8e99bb3fb923",
-          "published_sha256": "bece217719e85e713440d52f67ed72f677caca82eb168db3f07f8e99bb3fb923"
+          "source_sha256": "9e8024380c2b603bd224c312922e1e07b280b1ddcf65a35e6b4f36fd5609fc5e",
+          "published_sha256": "9e8024380c2b603bd224c312922e1e07b280b1ddcf65a35e6b4f36fd5609fc5e"
         }
       ]
     }
   ],
-  "winner_id": "codex-managed-stage-series"
+  "winner_id": "codex-managed-stage-series",
+  "reissues": [
+    {
+      "role": "stage-01-intake",
+      "at": "2026-09-03T11:07:49Z",
+      "previous_sha256": "149536a8f003654d4037a36314d7a2450c97baac43208dee98e6c2f765cab12c",
+      "sha256": "60a95df77406f00bdef3d98935dd1db2ee39ed54bd08f2ccb6da67961ac07e14",
+      "reason": "кисть на рукояти меча была сломана: пальцев больше, чем бывает, сросшиеся, хват не смыкается. Кадр к тому же расходился со своей сценой, где ладонь лежит плашмя на папке",
+      "route_id": "codex:image_gen:managed-frontier"
+    },
+    {
+      "roles": [
+        "stage-01-intake",
+        "stage-02-extract",
+        "stage-03-case-map",
+        "stage-04-research",
+        "stage-05-council",
+        "stage-06-draft",
+        "stage-07-hearing"
+      ],
+      "at": "2026-09-03T11:45:14Z",
+      "reason": "серия снята заново по своду проекта: прежние кадры делались до карты персонажа и карты реквизита, поэтому в каждом кадре менялись прическа, материал меча и форма папки доверителя",
+      "route_id": "codex:image_gen:managed-frontier"
+    }
+  ]
 }

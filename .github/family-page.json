@@ -27,27 +27,73 @@
       "compare": [
         [
           "**Themiz**",
-          "A real case with scans, deadlines, and documents",
-          "Local reading, case map, both sides of the practice, reviewed drafts",
-          "Mac for recognition, and a lawyer still decides"
+          "Multi-agent assistant for one case",
+          "On your Mac",
+          "Yes, locally",
+          "Yes, both sides",
+          "Yes, to the case contract",
+          "A second agent, a separate role",
+          "Free for an individual lawyer"
         ],
         [
           "Doing it by hand",
-          "A small case",
-          "Full control",
-          "Hours of mechanics per case"
+          "A lawyer and a folder",
+          "With you",
+          "You read them yourself",
+          "As much as the week allows",
+          "Yes",
+          "You do",
+          "Your hours"
         ],
         [
+          "ConsultantPlus, Garant",
+          "Russian legal reference systems",
+          "Not for case material",
+          "No",
+          "Search across statutes and practice",
+          "Templates",
+          "You do",
+          "Subscription"
+        ],
+        [
+          "Sudact, the court card index",
+          "Open search of court acts",
+          "Not for case material",
+          "No",
+          "Search of acts",
+          "No",
+          "You do",
+          "Free"
+        ],
+        [
+          "ChatGPT, Claude as they come",
           "A general chat assistant",
-          "A quick question about the law",
-          "Instant answers",
-          "Quotes from memory, no case file, no deadline maths"
+          "In the vendor's cloud",
+          "If you attach the file",
+          "From the model's memory",
+          "Yes",
+          "You do",
+          "Subscription"
         ],
         [
-          "A commercial legal platform",
-          "A firm with a budget",
-          "Support and integrations",
-          "Case material leaves your machine, and you pay per seat"
+          "Harvey, CoCounsel",
+          "Legal AI for firms",
+          "In the vendor's cloud",
+          "Yes",
+          "Yes, for their own jurisdictions",
+          "Yes",
+          "Depends on the plan",
+          "Enterprise contract"
+        ],
+        [
+          "Doczilla, FreshDoc",
+          "Document assembly",
+          "In the vendor's cloud",
+          "No",
+          "No",
+          "Yes, from a template",
+          "You do",
+          "Subscription"
         ]
       ],
       "glossary": [
@@ -79,7 +125,18 @@
       ],
       "docs": "Deeper: [how it really works](docs/HOW-IT-WORKS.ru.md), in Russian and without advertising, and [the full reference](docs/DETAILS.md) with the agent roster.",
       "license": "Themiz Community Licence 1.0: free for an individual lawyer, including private practice. Organisations need a commercial licence. See [LICENSE](LICENSE) and [LICENSE.ru.md](LICENSE.ru.md).",
-      "welcome": "Hello. I am a practising lawyer, and too much of my time went into mechanics: two hundred pages of scans, dates to reconcile, citations to check, one detail buried somewhere in the file.\n\nThemiz takes that work and leaves me the part that needs judgement. She does not decide anything, and neither should she."
+      "welcome": "Hello. I am a practising lawyer, and too much of my time went into mechanics: two hundred pages of scans, dates to reconcile, citations to check, one detail buried somewhere in the file.\n\nThemiz takes that work and leaves me the part that needs judgement. She does not decide anything, and neither should she.",
+      "compare_header": [
+        "Option",
+        "What it is",
+        "Where the case file lives",
+        "Reads your scans",
+        "Practice for and against",
+        "Drafts the document",
+        "Who checks the result",
+        "Price"
+      ],
+      "compare_note": "Names belong to their owners. The table describes what each option is built for, not a benchmark: other products change, and this page does not promise on their behalf."
     },
     "ru": {
       "title": "Фемида",
@@ -97,27 +154,73 @@
       "compare": [
         [
           "**Фемида**",
-          "Настоящее дело со сканами, сроками и документами",
-          "Локальное чтение, карта дела, обе стороны практики, проверенные проекты",
-          "Нужен Mac для распознавания, а решает по-прежнему юрист"
+          "Многоагентный помощник по одному делу",
+          "На вашем Mac",
+          "Да, локально",
+          "Да, обе стороны",
+          "Да, по контракту дела",
+          "Второй агент, отдельная роль",
+          "Частному юристу бесплатно"
         ],
         [
           "Делать руками",
-          "Небольшое дело",
-          "Полный контроль",
-          "Часы механики на каждое дело"
+          "Юрист и папка",
+          "У вас",
+          "Вы читаете сами",
+          "Сколько успеете за неделю",
+          "Да",
+          "Вы сами",
+          "Ваши часы"
         ],
         [
-          "Обычный чат-помощник",
-          "Быстрый вопрос по праву",
-          "Мгновенные ответы",
-          "Цитаты по памяти, без материалов дела и без расчета сроков"
+          "КонсультантПлюс, Гарант",
+          "Справочные правовые системы",
+          "Не для материалов дела",
+          "Нет",
+          "Поиск по нормам и практике",
+          "Шаблоны",
+          "Вы сами",
+          "Подписка"
         ],
         [
-          "Коммерческая legal-платформа",
-          "Фирма с бюджетом",
-          "Поддержка и интеграции",
-          "Материалы дела уходят с вашей машины, и платить надо за каждого человека"
+          "Судакт, картотека суда",
+          "Открытый поиск судебных актов",
+          "Не для материалов дела",
+          "Нет",
+          "Поиск актов",
+          "Нет",
+          "Вы сами",
+          "Бесплатно"
+        ],
+        [
+          "ChatGPT, Claude как есть",
+          "Общий чат-помощник",
+          "В облаке поставщика",
+          "Если приложите файл",
+          "По памяти модели",
+          "Да",
+          "Вы сами",
+          "Подписка"
+        ],
+        [
+          "Harvey, CoCounsel",
+          "Юридический AI для фирм",
+          "В облаке поставщика",
+          "Да",
+          "Да, по своим юрисдикциям",
+          "Да",
+          "Зависит от тарифа",
+          "Корпоративный договор"
+        ],
+        [
+          "Doczilla, FreshDoc",
+          "Конструкторы документов",
+          "В облаке поставщика",
+          "Нет",
+          "Нет",
+          "Да, по шаблону",
+          "Вы сами",
+          "Подписка"
         ]
       ],
       "glossary": [
@@ -149,7 +252,18 @@
       ],
       "docs": "Глубже: [как я работаю на самом деле](docs/HOW-IT-WORKS.ru.md) без рекламы и [полный разбор](docs/DETAILS.ru.md) с составом агентов.",
       "license": "Themiz Community Licence 1.0: частному юристу бесплатно, включая личную практику. Организации нужна коммерческая лицензия. Тексты в [LICENSE.ru.md](LICENSE.ru.md) и [LICENSE](LICENSE).",
-      "welcome": "Привет. Я практикующий юрист, и слишком много моего времени уходило на механику: двести страниц сканов, сверка дат, проверка ссылок, одна деталь, зарытая где-то в материалах.\n\nФемида забирает эту работу и оставляет мне ту часть, где нужно суждение. Она ничего не решает, и не должна."
+      "welcome": "Привет. Я практикующий юрист, и слишком много моего времени уходило на механику: двести страниц сканов, сверка дат, проверка ссылок, одна деталь, зарытая где-то в материалах.\n\nФемида забирает эту работу и оставляет мне ту часть, где нужно суждение. Она ничего не решает, и не должна.",
+      "compare_header": [
+        "Вариант",
+        "Что это",
+        "Где лежат материалы дела",
+        "Читает ваши сканы",
+        "Практика за вас и против",
+        "Готовит документ",
+        "Кто проверяет результат",
+        "Цена"
+      ],
+      "compare_note": "Названия принадлежат их владельцам. Таблица описывает назначение, а не замер: чужие продукты меняются, и обещать за них эта страница не берется."
     },
     "zh": {
       "title": "Themiz",
@@ -166,28 +280,74 @@
       "quick_result": "安装会一次一个问题地了解你的执业方向，先下你最需要的法典，最后用你自己的真实文书自检一遍。",
       "compare": [
         [
-          "**Themiz**",
-          "手上是有扫描件、期限和文书的真实案件",
-          "本地阅读、案件地图、正反两面的判例、经过审阅的草稿",
-          "识别需要 Mac，决定仍然由律师做"
+          "**忒弥斯**",
+          "针对单个案件的多智能体助手",
+          "在你的 Mac 上",
+          "是，本地识别",
+          "是，正反两面",
+          "是，按案件契约",
+          "另一个智能体，独立角色",
+          "个人律师免费"
         ],
         [
-          "全部手工",
-          "小案子",
-          "完全掌控",
-          "每个案子都要花几小时在机械活上"
+          "自己动手",
+          "一位律师和一个卷宗",
+          "在你手里",
+          "你自己读",
+          "一周能读多少算多少",
+          "是",
+          "你自己",
+          "你的工时"
         ],
         [
+          "ConsultantPlus、Garant",
+          "俄罗斯法律检索系统",
+          "不放案件材料",
+          "否",
+          "检索法条与判例",
+          "模板",
+          "你自己",
+          "订阅"
+        ],
+        [
+          "Sudact、法院案卡",
+          "公开的裁判文书检索",
+          "不放案件材料",
+          "否",
+          "检索裁判文书",
+          "否",
+          "你自己",
+          "免费"
+        ],
+        [
+          "ChatGPT、Claude 原样使用",
           "通用聊天助手",
-          "关于法律的一个快速问题",
-          "回答很快",
-          "凭记忆引用法条，没有卷宗，也不算期限"
+          "在厂商云端",
+          "上传文件才行",
+          "凭模型记忆",
+          "是",
+          "你自己",
+          "订阅"
         ],
         [
-          "商业法律科技平台",
-          "有预算的律所",
-          "有支持和集成",
-          "案件材料离开你的机器，而且按人头收费"
+          "Harvey、CoCounsel",
+          "面向律所的法律 AI",
+          "在厂商云端",
+          "是",
+          "是，限于其覆盖的法域",
+          "是",
+          "取决于套餐",
+          "企业合同"
+        ],
+        [
+          "Doczilla、FreshDoc",
+          "文书生成工具",
+          "在厂商云端",
+          "否",
+          "否",
+          "是，按模板",
+          "你自己",
+          "订阅"
         ]
       ],
       "glossary": [
@@ -219,7 +379,18 @@
       ],
       "docs": "想更深：[它到底怎么工作](docs/HOW-IT-WORKS.ru.md)（俄语，没有广告）和[完整参考](docs/DETAILS.md)（含智能体名单）。",
       "license": "Themiz Community Licence 1.0：个人律师免费使用，包括个人执业；组织需要商业许可。见 [LICENSE](LICENSE) 与 [LICENSE.ru.md](LICENSE.ru.md)。",
-      "welcome": "你好。我是执业律师，太多时间花在机械活上：两百页扫描件、核对日期、检查引用、在卷宗里找那一个细节。\n\n忒弥斯把这部分工作拿走，把需要判断的那部分留给我。她不做任何决定，也不该做。"
+      "welcome": "你好。我是执业律师，太多时间花在机械活上：两百页扫描件、核对日期、检查引用、在卷宗里找那一个细节。\n\n忒弥斯把这部分工作拿走，把需要判断的那部分留给我。她不做任何决定，也不该做。",
+      "compare_header": [
+        "方案",
+        "是什么",
+        "案件材料放在哪",
+        "读你的扫描件",
+        "正反两面的判例",
+        "起草文书",
+        "谁来复核",
+        "价格"
+      ],
+      "compare_note": "名称归各自所有者。此表说明每种方案的用途，而不是评测：别家产品会变，本页不替它们作出承诺。"
     }
   },
   "stages": {

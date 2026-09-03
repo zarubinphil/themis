@@ -1,9 +1,20 @@
 You generate a coherent series of wide Pantheon workflow scenes with your built-in image_gen tool at the highest quality. Generate them one by one, in order.
 
-Pass these references to EVERY generation:
+Pass these references to EVERY generation, in this order:
 1. $HOME/.agents/skills/public-repo-release-gate/assets/pantheon-style-anchor.png
 2. $HOME/.agents/skills/public-repo-release-gate/assets/pantheon-column.png
-3. docs/assets/pantheon/hero.png
+3. docs/assets/pantheon/bible-character.png
+4. docs/assets/pantheon/bible-props.png
+
+References 3 and 4 are the project bible and they are binding. The figure in every
+frame is the same person as on the character sheet: same face, same braided crown with
+one braid over the left shoulder, same blindfold, same chiton and mantle, gold scales
+carried level, and a sword with a WHITE MARBLE blade and muted gold fittings, always
+lowered. Every recurring object is the object from the prop sheet: the same flat gold
+client folder, the same blank sheet, the same blank marble plaque, the same blue thread
+with its arrowhead, the same frosted glass plate, the same marble seat. Do not invent a
+new hairstyle, a new sword material or a new folder shape in any frame. Hands are
+anatomically correct: exactly five fingers, one readable thumb, nothing fused.
 
 Hard constraints for every frame:
 - Same world, same figure, same camera height and lens as the hero. The classical white marble column appears in every frame.
@@ -21,7 +32,7 @@ Project: Themis, the litigation workroom. Figure: Themis in white marble with sc
 Generate these seven scenes:
 
 docs/assets/pantheon/workflow/01-intake.png
-A closed gold folder rests on a marble table beside the column, a single blank sheet half drawn out of it. Themis places her hand flat on the folder, keeping it closed to the outside world. Blue threads stop at the table edge and go no further.
+A closed gold folder rests on a marble table beside the column, a single blank sheet half drawn out of it. Themis places her open palm FLAT on the folder, fingers together, wrist relaxed and straight, keeping the folder closed to the outside world. Her lowered sword leans point-down against the table beside her, untouched: no hand grips the sword hilt anywhere in the frame. The hand on the folder is anatomically correct with exactly five fingers, natural finger lengths and one clearly readable thumb, fingers separated and not fused. Blue threads stop at the table edge and go no further.
 
 docs/assets/pantheon/workflow/02-extract.png
 Blank sheets pass one by one under a broad lens of clear glass on a marble stand; on the far side they come out as clean glass plates. The scales stand nearby, still empty. All work stays on the table.
