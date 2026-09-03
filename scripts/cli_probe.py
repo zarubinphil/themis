@@ -34,17 +34,19 @@ import re
 import shutil
 import subprocess
 import sys
+
+import sreda  # noqa: E402,F401  переходный период имен переменных
 import tempfile
 import time
 from pathlib import Path
 
-DEFAULT_CACHE = Path(os.path.expanduser("~/.cache/themis/cli_probe.json"))
+DEFAULT_CACHE = Path(os.path.expanduser("~/.cache/themiz/cli_probe.json"))
 QUOTA_TTL = 5 * 3600      # квота восстанавливается сама — запрет не может быть вечным
 OTKAZ_TTL = 15 * 60       # прочие отказы: чиниться им человеком, но не каждую секунду
 CACHE_MAX_TTL = 24 * 3600 # подложенный далекий until не держит провайдера вечно
 KEEP_ENV = ("HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TERM", "LC_CTYPE", "TMPDIR", "LC_TIME")
 SAFE_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-SECRET_RE = re.compile(r"THEMIS|TOKEN|SECRET|API_?KEY|PASSWORD|CREDENTIAL|ANTHROPIC|OPENAI",
+SECRET_RE = re.compile(r"THEMIZ|TOKEN|SECRET|API_?KEY|PASSWORD|CREDENTIAL|ANTHROPIC|OPENAI",
                        re.I)
 NO_AUTH = ("not logged", "logged out", "login required", "unauthorized", "не выполнен вход",
            '"loggedin": false', "please log in", "authentication required")
@@ -142,7 +144,7 @@ def probe(provider: str, cmd=None, workdir=None, timeout=30) -> dict:
     if not _writable(base):
         return {"outcome": "no_write", "detail": f"{base} недоступен для записи — "
                                                  "чужому CLI негде работать"}
-    with tempfile.TemporaryDirectory(prefix="themis-cli-probe-", dir=str(base)) as td:
+    with tempfile.TemporaryDirectory(prefix="themiz-cli-probe-", dir=str(base)) as td:
         work = Path(td) / "work"
         work.mkdir()
         try:
@@ -248,7 +250,8 @@ def selftest() -> int:
         assert check("spy", spy, str(work), cache=cache,
                      now=q["until"] + 2)["outcome"] == "ok"
         leaked = envdump.read_text(encoding="utf-8", errors="ignore")
-        assert "ANTHROPIC_API_KEY" not in leaked and "THEMIS_" not in leaked, \
+        assert ("ANTHROPIC_API_KEY" not in leaked and sreda.NOVYJ not in leaked
+                and sreda.PREZHNIJ not in leaked), \
             "проба наследует секреты окружения"
     print("selftest пройден: пять исходов различены, отказ по квоте протухает за 5 ч")
     return 0

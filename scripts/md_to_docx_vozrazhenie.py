@@ -15,6 +15,7 @@ import re
 import os
 import sys
 from pathlib import Path
+import sreda  # noqa: E402,F401  переходный период имен переменных
 
 # Та же строка, что в md_to_docx.py: без sys.path на корень репозитория
 # «from scripts.create_docx import …» падает с ModuleNotFoundError, и прибор
@@ -192,8 +193,8 @@ def main():
     b.add_empty()
     # Подписант не зашивается в код публичного репозитория: фамилия доверителя —
     # персональные данные. Передавать окружением при сборке конкретного документа.
-    b.add_signature(os.environ.get("THEMIS_SIGNER", "Представитель по доверенности"),
-                    os.environ.get("THEMIS_SIGN_DATE", ""))
+    b.add_signature(os.environ.get("THEMIZ_SIGNER", "Представитель по доверенности"),
+                    os.environ.get("THEMIZ_SIGN_DATE", ""))
 
     # DocBuilder.save() при отказе печатает причину и молча возвращает None, файл
     # не пишет. «Создано» после отказа = ложь: юрист идет за несуществующим

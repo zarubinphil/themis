@@ -4,7 +4,7 @@
 
 [English](README.md) · [中文](README.zh.md)
 
-[![License](https://img.shields.io/badge/license-community%201.0-blue.svg)](LICENSE) [![Stars](https://img.shields.io/github/stars/zarubinvibe/themis?style=flat&color=C9A87A)](https://github.com/zarubinvibe/themis/stargazers) [![Status](https://img.shields.io/badge/status-in%20development-brightgreen.svg)](https://github.com/zarubinvibe/themis) [![Olympuz](https://img.shields.io/badge/olympuz-family-B8D6EA.svg)](https://github.com/zarubinvibe/athena#olympuz-family)
+[![License](https://img.shields.io/badge/license-community%201.0-blue.svg)](LICENSE) [![Stars](https://img.shields.io/github/stars/zarubinvibe/themiz?style=flat&color=C9A87A)](https://github.com/zarubinvibe/themiz/stargazers) [![Status](https://img.shields.io/badge/status-in%20development-brightgreen.svg)](https://github.com/zarubinvibe/themiz) [![Olympuz](https://img.shields.io/badge/olympuz-family-B8D6EA.svg)](https://github.com/zarubinvibe/athena#olympuz-family)
 
 <p align="center"><img src="docs/assets/pantheon/hero.png" alt="Фемида из белого мрамора с весами и мечом у классической колонны, документы дела и карточки проверки агентов в дневном свете" width="100%"></p>
 
@@ -34,6 +34,8 @@
 <!-- beginner-readme:start -->
 
 ## Что это
+
+Проект переименован: Themis теперь Themiz — как и остальные имена семейства Олимпуса. Прежние ссылки на GitHub переадресуются сюда, но клону или форку нужен `git remote set-url`, чтобы поехать следом.
 
 Фемида работает рядом с юристом. Она читает материалы у вас на компьютере, собирает карту дела, ищет практику за вас и против вас, готовит документ и отдает его на проверку другому агенту. Решения остаются за вами, и это не оговорка в конце, а устройство.
 
@@ -83,7 +85,7 @@
 
 Вы кладете материалы в папку дела. Папки доверителей закрыты от публикации на уровне репозитория, поэтому материал остается локальным.
 
-<p align="center"><img src="docs/assets/pantheon/workflow/01-intake.png" alt="Этап 1 такта Themis: Передайте материалы дела, показан широкой мраморной сценой Pantheon" width="100%"></p>
+<p align="center"><img src="docs/assets/pantheon/workflow/01-intake.png" alt="Этап 1 такта Themiz: Передайте материалы дела, показан широкой мраморной сценой Pantheon" width="100%"></p>
 
 **Что получится:** одна папка на дело, где лежит все, что понадобится в работе.
 
@@ -91,7 +93,7 @@
 
 Распознавание идет локально, примерно полторы секунды на страницу. ИНН, ОГРН, номера дел и суммы вынимаются и проверяются контрольной суммой без выхода в интернет.
 
-<p align="center"><img src="docs/assets/pantheon/workflow/02-extract.png" alt="Этап 2 такта Themis: Сканы читаются на вашем Mac, показан широкой мраморной сценой Pantheon" width="100%"></p>
+<p align="center"><img src="docs/assets/pantheon/workflow/02-extract.png" alt="Этап 2 такта Themiz: Сканы читаются на вашем Mac, показан широкой мраморной сценой Pantheon" width="100%"></p>
 
 **Что получится:** читаемый текст, где ключевые реквизиты уже проверены.
 
@@ -99,7 +101,7 @@
 
 Факты переезжают из документов в единую карту: кто, когда, что требует и чем это подтверждается. Отдельный агент сверяет читателей между собой.
 
-<p align="center"><img src="docs/assets/pantheon/workflow/03-case-map.png" alt="Этап 3 такта Themis: Строится карта дела, показан широкой мраморной сценой Pantheon" width="100%"></p>
+<p align="center"><img src="docs/assets/pantheon/workflow/03-case-map.png" alt="Этап 3 такта Themiz: Строится карта дела, показан широкой мраморной сценой Pantheon" width="100%"></p>
 
 **Что получится:** одно место, куда смотреть, вместо перечитывания всего дела.
 
@@ -107,7 +109,7 @@
 
 Один агент ищет практику за вашу позицию, другой процессуальные ходы, третий намеренно ищет практику против вас. Поисковый запрос уходит обезличенным.
 
-<p align="center"><img src="docs/assets/pantheon/workflow/04-research.png" alt="Этап 4 такта Themis: Практика за вас и против вас, показан широкой мраморной сценой Pantheon" width="100%"></p>
+<p align="center"><img src="docs/assets/pantheon/workflow/04-research.png" alt="Этап 4 такта Themiz: Практика за вас и против вас, показан широкой мраморной сценой Pantheon" width="100%"></p>
 
 **Что получится:** обе стороны спора до того, как их приведет оппонент.
 
@@ -115,7 +117,7 @@
 
 Пятеро проверяющих агентов разбирают позицию с разных сторон и собирают заново. Несогласие здесь и есть смысл: слабый довод должен упасть тут, а не в заседании.
 
-<p align="center"><img src="docs/assets/pantheon/workflow/05-council.png" alt="Этап 5 такта Themis: Пятеро правоведов спорят, показан широкой мраморной сценой Pantheon" width="100%"></p>
+<p align="center"><img src="docs/assets/pantheon/workflow/05-council.png" alt="Этап 5 такта Themiz: Пятеро правоведов спорят, показан широкой мраморной сценой Pantheon" width="100%"></p>
 
 **Что получится:** позиция, у которой слабые места уже названы.
 
@@ -123,7 +125,7 @@
 
 Документ пишет один агент, а проверяет другой, который его не писал. Собрать документ раньше проверки нельзя, формат сверяется перед подачей, а сторож персональных данных проходит по каждому коммиту.
 
-<p align="center"><img src="docs/assets/pantheon/workflow/06-draft.png" alt="Этап 6 такта Themis: Один пишет, другой проверяет, показан широкой мраморной сценой Pantheon" width="100%"></p>
+<p align="center"><img src="docs/assets/pantheon/workflow/06-draft.png" alt="Этап 6 такта Themiz: Один пишет, другой проверяет, показан широкой мраморной сценой Pantheon" width="100%"></p>
 
 **Что получится:** проект, который вы правите как юрист, а не текст, который надо перепроверять построчно.
 
@@ -131,7 +133,7 @@
 
 Сроки считаются по производственному календарю со ссылкой на норму. Локальная панель показывает состояние работы. Напоминания уходят вашему собственному боту и несут только даты.
 
-<p align="center"><img src="docs/assets/pantheon/workflow/07-hearing.png" alt="Этап 7 такта Themis: Подготовка к заседанию и напоминания, показан широкой мраморной сценой Pantheon" width="100%"></p>
+<p align="center"><img src="docs/assets/pantheon/workflow/07-hearing.png" alt="Этап 7 такта Themiz: Подготовка к заседанию и напоминания, показан широкой мраморной сценой Pantheon" width="100%"></p>
 
 **Что получится:** заседание подготовлено, а ваши правки учат следующий документ.
 
@@ -140,13 +142,13 @@
 Нужен Mac для распознавания сканов, Python 3.11 или новее, Xcode Command Line Tools и Claude Code.
 
 ```bash
-git clone https://github.com/zarubinvibe/themis.git
-cd themis
+git clone https://github.com/zarubinvibe/themiz.git
+cd themiz
 claude
-# inside Claude Code run: /themis-setup
+# inside Claude Code run: /themiz-setup
 ```
 
-Хотите обычный установщик? Запустите `bash install.sh` в той же папке: он ставит зависимости после одного подтверждения, но не проводит интервью о вашей практике. Нет Git? Возьмите [ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip). Локальная панель запускается командой `python3 cockpit/app.py` на порту 8800. Первый раз? Откройте проект в Claude Code и запустите `/themis-setup`: установка пройдет разговором, по одному вопросу, и ничего не поставится без вашего «да».
+Хотите обычный установщик? Запустите `bash install.sh` в той же папке: он ставит зависимости после одного подтверждения, но не проводит интервью о вашей практике. Нет Git? Возьмите [ZIP](https://github.com/zarubinvibe/themiz/archive/refs/heads/main.zip). Локальная панель запускается командой `python3 cockpit/app.py` на порту 8800. Первый раз? Откройте проект в Claude Code и запустите `/themiz-setup`: установка пройдет разговором, по одному вопросу, и ничего не поставится без вашего «да».
 
 Делаете это впервые? [Онбординг](docs/ONBOARDING.ru.md) проводит весь первый запуск по шагам и говорит, что видно после каждой команды.
 
@@ -198,11 +200,11 @@ claude
 
 ## Звезда и вклад
 
-Пригодилось? Поставьте Фемида звезду: [https://github.com/zarubinvibe/themis](https://github.com/zarubinvibe/themis). Это секунда, а от нее зависит, найдут ли проект другие люди.
+Пригодилось? Поставьте Фемида звезду: [https://github.com/zarubinvibe/themiz](https://github.com/zarubinvibe/themiz). Это секунда, а от нее зависит, найдут ли проект другие люди.
 
 Хотите что-то поправить? Путь короткий: сделайте fork, заведите ветку, оформите commit, отправьте push и откройте Pull Request. Не отправляйте push прямо в `main`: релизный gate его отклонит.
 
-Нашли ошибку? Заведите issue на [https://github.com/zarubinvibe/themis/issues](https://github.com/zarubinvibe/themis/issues) и напишите, что запускали и что получилось.
+Нашли ошибку? Заведите issue на [https://github.com/zarubinvibe/themiz/issues](https://github.com/zarubinvibe/themiz/issues) и напишите, что запускали и что получилось.
 
 <!-- beginner-readme:end -->
 
@@ -216,11 +218,11 @@ claude
 | проект | Athena | Переносимая агентная ОС: разворачивает рабочую среду Claude и Codex на новом Mac. | [Репозиторий](https://github.com/zarubinvibe/athena) · [ZIP](https://github.com/zarubinvibe/athena/archive/refs/heads/main.zip) |
 | проект | Helioz | Конвейер работы агентов 24/7 с проверяемыми отметками готовности и ночными решениями по цели владельца. | [Репозиторий](https://github.com/zarubinvibe/helioz) · [ZIP](https://github.com/zarubinvibe/helioz/archive/refs/heads/main.zip) |
 | проект | Mnemazine | Локальная система памяти: превращает сырье в проверенные знания для повторного использования. | [Репозиторий](https://github.com/zarubinvibe/mnemazine) · [ZIP](https://github.com/zarubinvibe/mnemazine/archive/refs/heads/main.zip) |
-| проект | Themis | Многоагентный помощник по российским судебным делам с локальным OCR и советом из пяти юристов. | [Репозиторий](https://github.com/zarubinvibe/themis) · [ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip) |
+| проект | Themiz | Многоагентный помощник по российским судебным делам с локальным OCR и советом из пяти юристов. | [Репозиторий](https://github.com/zarubinvibe/themiz) · [ZIP](https://github.com/zarubinvibe/themiz/archive/refs/heads/main.zip) |
 | проект | Zeuz | Фабрика многоагентных workflow: собирает систему с правилами, гейтами, наблюдаемостью и replay. | [Репозиторий](https://github.com/zarubinvibe/zeuz) · [ZIP](https://github.com/zarubinvibe/zeuz/archive/refs/heads/main.zip) |
 | проект | Lynceuz | Собирает доказательства из открытого веба за ноль рублей и честно останавливается, когда безопасные пути кончились. | [Репозиторий](https://github.com/zarubinvibe/lynceuz) · [ZIP](https://github.com/zarubinvibe/lynceuz/archive/refs/heads/main.zip) |
 <!-- pantheon-family:end -->
 
 ## Лицензия
 
-Themis Community Licence 1.0: частному юристу бесплатно, включая личную практику. Организации нужна коммерческая лицензия. Тексты в [LICENSE.ru.md](LICENSE.ru.md) и [LICENSE](LICENSE).
+Themiz Community Licence 1.0: частному юристу бесплатно, включая личную практику. Организации нужна коммерческая лицензия. Тексты в [LICENSE.ru.md](LICENSE.ru.md) и [LICENSE](LICENSE).

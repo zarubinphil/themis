@@ -1,9 +1,9 @@
 {
   "schema_version": 3,
   "family_id": "zarubinvibe-pantheon",
-  "catalog_version": "2026-08-31",
+  "catalog_version": "2026-09-03",
   "project": {
-    "slug": "themis",
+    "slug": "themiz",
     "deity": "Themis",
     "symbol": "blindfold over the eyes, balanced scales and a lowered sword"
   },

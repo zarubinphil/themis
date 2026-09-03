@@ -26,7 +26,7 @@ export LC_ALL="$UTF8_LOCALE"
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(CDPATH='' cd -- "$SCRIPT_DIR/../../../.." && pwd)"
 if [ ! -f "$PROJECT_ROOT/scripts/create_docx.py" ]; then
-  PROJECT_ROOT="${THEMIS_PROJECT_ROOT:-$PWD}"
+  PROJECT_ROOT="${THEMIZ_PROJECT_ROOT:-$PWD}"
 fi
 HUMANIZER_BLOCKERS=""
 SCAN_RC=0

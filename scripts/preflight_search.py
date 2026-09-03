@@ -24,6 +24,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+import sreda  # noqa: E402,F401  переходный период имен переменных
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -31,10 +32,10 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
 
 
 def resolve_case(cli_case: str) -> str:
-    """Дело прогона: явный --case важнее $THEMIS_CASE. Переменную в бою никто не
+    """Дело прогона: явный --case важнее $THEMIZ_CASE. Переменную в бою никто не
     выставлял — флага не было вовсе (02.09.2026), и мертвый канал не долетал до
     preflight: источник опрашивался повторно 128 раз за прогон 01.09.2026."""
-    return cli_case or os.environ.get("THEMIS_CASE", "")
+    return cli_case or os.environ.get("THEMIZ_CASE", "")
 
 
 def _sudact_allowed() -> bool:
@@ -44,7 +45,7 @@ def _sudact_allowed() -> bool:
         from practice_search import search_allowed
         return search_allowed()
     except Exception:
-        return os.environ.get("THEMIS_SUDACT_SEARCH") == "1"
+        return os.environ.get("THEMIZ_SUDACT_SEARCH") == "1"
 
 
 def probe_url(url: str, timeout: int = 8) -> bool:
@@ -167,19 +168,19 @@ def selftest() -> int:
             else:
                 os.environ["HOME"] = _home0
 
-    _case0 = os.environ.pop("THEMIS_CASE", None)
+    _case0 = os.environ.pop("THEMIZ_CASE", None)
     try:
-        checks.append(("--case работает без $THEMIS_CASE",
+        checks.append(("--case работает без $THEMIZ_CASE",
                        resolve_case("cases/klient/delo") == "cases/klient/delo"))
         checks.append(("без --case и без переменной — дело не опознано",
                        resolve_case("") == ""))
-        os.environ["THEMIS_CASE"] = "env-delo"
-        checks.append(("явный --case важнее $THEMIS_CASE", resolve_case("flag-delo") == "flag-delo"))
-        checks.append(("без --case используется $THEMIS_CASE", resolve_case("") == "env-delo"))
+        os.environ["THEMIZ_CASE"] = "env-delo"
+        checks.append(("явный --case важнее $THEMIZ_CASE", resolve_case("flag-delo") == "flag-delo"))
+        checks.append(("без --case используется $THEMIZ_CASE", resolve_case("") == "env-delo"))
     finally:
-        os.environ.pop("THEMIS_CASE", None)
+        os.environ.pop("THEMIZ_CASE", None)
         if _case0 is not None:
-            os.environ["THEMIS_CASE"] = _case0
+            os.environ["THEMIZ_CASE"] = _case0
     bad = [n for n, ok in checks if not ok]
     for n, ok in checks:
         print(f"  {'✓' if ok else '✗'} {n}")
@@ -195,7 +196,7 @@ def main() -> int:
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--selftest", action="store_true", help="проверка без сети")
     ap.add_argument("--case", default="", help="путь к делу — общий счет каналов и квот; "
-                    "иначе $THEMIS_CASE")
+                    "иначе $THEMIZ_CASE")
     a = ap.parse_args()
 
     if a.selftest:
@@ -222,12 +223,12 @@ def main() -> int:
                      "verify_act.py сработает" if ok else "верификация через фолбэк"))
 
     # Решение по sudact живет в practice_search.py (SUDACT_SEARCH_ALLOWED +
-    # THEMIS_SUDACT_SEARCH). Preflight его читает, а не дублирует условие:
+    # THEMIZ_SUDACT_SEARCH). Preflight его читает, а не дублирует условие:
     # своя копия условия врала «закрыт» при работающем поиске.
     sudact_on = _sudact_allowed()
     if not sudact_on:
         rows.append(("Поиск практики sudact.ru", False,
-                     "выключен явно (THEMIS_SUDACT_SEARCH=0)",
+                     "выключен явно (THEMIZ_SUDACT_SEARCH=0)",
                      "искать в knowledge/practice_index.md; акт по URL — --doc"))
     else:
         # Мертвый канал из общего файла прогона не опрашивается повторно до
@@ -278,8 +279,8 @@ def main() -> int:
             ws_used = None
     if ws_used is None:
         rows.append(("WebSearch (квота сессии)", None,
-                     "дело не опознано ($THEMIS_CASE/--case) — общий счет недоступен",
-                     "передать дело: --case ДЕЛО либо $THEMIS_CASE"))
+                     "дело не опознано ($THEMIZ_CASE/--case) — общий счет недоступен",
+                     "передать дело: --case ДЕЛО либо $THEMIZ_CASE"))
     else:
         ws_ok = not ws_cap or ws_used < ws_cap
         rows.append(("WebSearch (квота сессии)", ws_ok,

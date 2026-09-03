@@ -82,7 +82,7 @@ class Panel:
     """Настоящая панель, поднятая настоящим uvicorn. Опрашивается по сети."""
 
     def __init__(self, **env):
-        self.env = {**os.environ, "THEMIS_INBOX": tempfile.mkdtemp(), **env}
+        self.env = {**os.environ, "THEMIZ_INBOX": tempfile.mkdtemp(), **env}
         self.port = _free_port()
         self.proc = None
 
@@ -109,7 +109,7 @@ class Panel:
 
     def ask(self, method, path, token=None, **kw):
         import httpx
-        headers = {"X-Themis-Token": token} if token else {}
+        headers = {"X-Themiz-Token": token} if token else {}
         return httpx.request(method, self.base + path, headers=headers, timeout=20, **kw)
 
     def __exit__(self, *a):
@@ -123,10 +123,10 @@ class Panel:
 
 # ── 1. Аутентификация изменяющих маршрутов ──────────────────────────────────
 AUTH_CONTRACT = """  cockpit/app.py — аутентификация
-    Секрет берется из окружения THEMIS_PANEL_TOKEN (значение — в $HOME/.secrets, не в git).
+    Секрет берется из окружения THEMIZ_PANEL_TOKEN (значение — в $HOME/.secrets, не в git).
     Секрет задан → КАЖДЫЙ изменяющий маршрут (/api/task, /api/run, /api/new-case,
     /api/learn-redline, /api/open, /api/upload) требует его в заголовке
-    X-Themis-Token либо в cookie того же имени:
+    X-Themiz-Token либо в cookie того же имени:
       без токена   → 401
       чужой токен  → 401
       верный токен → маршрут работает как прежде (401 не возвращается)
@@ -145,7 +145,7 @@ def check_auth():
     except ImportError:
         return [("cockpit/app.py", "для приемки нужен httpx (стоит в окружении панели)")]
     fails = []
-    with Panel(THEMIS_PANEL_TOKEN=TOKEN) as p:
+    with Panel(THEMIZ_PANEL_TOKEN=TOKEN) as p:
         if not p.alive():
             out = (p.proc.stdout.read() if p.proc.stdout else "")[-400:]
             return [("cockpit/app.py", f"панель не поднялась с токеном: {out}")]
@@ -164,7 +164,7 @@ def check_auth():
                     fails.append(("auth", f"{method} {path} с ВЕРНЫМ токеном отбит {r.status_code} — "
                                           "юрист не сможет работать"))
         r = p.ask("GET", "/login", params={"token": TOKEN})
-        if r.status_code >= 400 or "themis" not in str(r.cookies).lower() + str(r.headers).lower():
+        if r.status_code >= 400 or "themiz" not in str(r.cookies).lower() + str(r.headers).lower():
             fails.append(("auth", f"/login?token=… не поставил cookie: {r.status_code} "
                                   f"{dict(r.headers).get('set-cookie', '—')}"))
         r = p.ask("GET", "/")
@@ -175,9 +175,9 @@ def check_auth():
 
 # ── 2. Без секрета — только петля ───────────────────────────────────────────
 BIND_CONTRACT = """  cockpit/app.py — fail-closed по интерфейсу
-    Панель без заданного THEMIS_PANEL_TOKEN не имеет чем отличить владельца от чужого,
+    Панель без заданного THEMIZ_PANEL_TOKEN не имеет чем отличить владельца от чужого,
     поэтому НЕ СОГЛАШАЕТСЯ слушать не-петлевой интерфейс: запуск с --host 0.0.0.0
-    (или THEMIS_PANEL_HOST=0.0.0.0) завершается ненулевым кодом с внятной причиной
+    (или THEMIZ_PANEL_HOST=0.0.0.0) завершается ненулевым кодом с внятной причиной
     еще до приема первого запроса. С токеном тот же запуск разрешен.
     Умолчание остается прежним: 127.0.0.1:8800, локальная работа без токена."""
 
@@ -187,9 +187,9 @@ def check_bind():
     if not app.is_file():
         return [("cockpit/app.py", "панели нет. Контракт:\n" + BIND_CONTRACT)]
     fails = []
-    env = {**os.environ, "THEMIS_INBOX": tempfile.mkdtemp(), "THEMIS_PANEL_HOST": "0.0.0.0",
-           "THEMIS_PANEL_PORT": str(_free_port())}
-    env.pop("THEMIS_PANEL_TOKEN", None)
+    env = {**os.environ, "THEMIZ_INBOX": tempfile.mkdtemp(), "THEMIZ_PANEL_HOST": "0.0.0.0",
+           "THEMIZ_PANEL_PORT": str(_free_port())}
+    env.pop("THEMIZ_PANEL_TOKEN", None)
     proc = subprocess.Popen([sys.executable, "app.py"], cwd=str(ROOT / "cockpit"), env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     try:
@@ -205,7 +205,7 @@ def check_bind():
                               "выставленная наружу без пароля"))
     elif "токен" not in text.lower() and "секрет" not in text.lower():
         fails.append(("bind", f"отказ не назвал причину: {text.strip()[-200:]}"))
-    with Panel(THEMIS_PANEL_TOKEN=TOKEN) as pan:
+    with Panel(THEMIZ_PANEL_TOKEN=TOKEN) as pan:
         if not pan.alive():
             fails.append(("bind", "с токеном панель не поднимается — запрет шире, чем нужно"))
     return fails
@@ -213,7 +213,7 @@ def check_bind():
 
 # ── 3. Ограничение частоты ──────────────────────────────────────────────────
 RATE_CONTRACT = """  cockpit/app.py — ограничение частоты
-    Порог задается THEMIS_RATE_LIMIT (запросов в минуту на клиента, по умолчанию 60).
+    Порог задается THEMIZ_RATE_LIMIT (запросов в минуту на клиента, по умолчанию 60).
     Перебор изменяющих запросов сверх порога → 429 и отказ БЕЗ выполнения работы.
     Порог из окружения обязателен: иначе приемка вынуждена гонять сотни запросов."""
 
@@ -223,7 +223,7 @@ def check_rate():
     if not app.is_file():
         return [("cockpit/app.py", "панели нет. Контракт:\n" + RATE_CONTRACT)]
     fails = []
-    with Panel(THEMIS_PANEL_TOKEN=TOKEN, THEMIS_RATE_LIMIT="3") as p:
+    with Panel(THEMIZ_PANEL_TOKEN=TOKEN, THEMIZ_RATE_LIMIT="3") as p:
         if not p.alive():
             return [("rate", "панель не поднялась")]
         codes = [p.ask("POST", "/api/open", token=TOKEN, json={"path": "/tmp/net.docx"}).status_code
@@ -235,12 +235,12 @@ def check_rate():
     # Подделка адреса. Заголовок X-Forwarded-For ставит кто угодно, а панель за
     # обратным прокси видит его как правду. Меняя фальшивый адрес на каждом запросе,
     # клиент получает НОВОЕ ведро лимита — то есть лимита нет.
-    with Panel(THEMIS_PANEL_TOKEN=TOKEN, THEMIS_RATE_LIMIT="3") as p:
+    with Panel(THEMIZ_PANEL_TOKEN=TOKEN, THEMIZ_RATE_LIMIT="3") as p:
         if not p.alive():
             return fails + [("rate", "панель не поднялась")]
         import httpx
         codes = [httpx.post(p.base + "/api/open", timeout=15,
-                            headers={"X-Themis-Token": TOKEN, "X-Forwarded-For": f"10.0.0.{i}"},
+                            headers={"X-Themiz-Token": TOKEN, "X-Forwarded-For": f"10.0.0.{i}"},
                             json={"path": "/tmp/net.docx"}).status_code for i in range(6)]
         if 429 not in codes:
             fails.append(("rate", f"смена фальшивого адреса обошла лимит: коды {codes}"))
@@ -250,7 +250,7 @@ def check_rate():
 # ── 4. Аудит доступа ────────────────────────────────────────────────────────
 AUDIT_CONTRACT = """  cockpit/app.py — аудит доступа
     Каждое обращение к изменяющему маршруту пишется строкой в файл из
-    THEMIS_ACCESS_LOG (по умолчанию — рядом с audit.log проекта): время, метод,
+    THEMIZ_ACCESS_LOG (по умолчанию — рядом с audit.log проекта): время, метод,
     маршрут, адрес клиента, исход (ok/401/429).
     В аудите НЕТ секрета и НЕТ содержимого запроса: журнал доступа читают чаще,
     чем дела, и он не должен становиться вторым местом хранения тайны."""
@@ -263,7 +263,7 @@ def check_audit():
     fails = []
     with tempfile.TemporaryDirectory() as td:
         log = Path(td) / "access.log"
-        with Panel(THEMIS_PANEL_TOKEN=TOKEN, THEMIS_ACCESS_LOG=str(log)) as p:
+        with Panel(THEMIZ_PANEL_TOKEN=TOKEN, THEMIZ_ACCESS_LOG=str(log)) as p:
             if not p.alive():
                 return [("audit", "панель не поднялась")]
             p.ask("POST", "/api/open", json={"path": "/tmp/net.docx"})                    # 401
@@ -283,12 +283,12 @@ def check_audit():
     # как факт, врет ровно тогда, когда его читают: при разборе чужого доступа.
     with tempfile.TemporaryDirectory() as td:
         log = Path(td) / "access.log"
-        with Panel(THEMIS_PANEL_TOKEN=TOKEN, THEMIS_ACCESS_LOG=str(log)) as p:
+        with Panel(THEMIZ_PANEL_TOKEN=TOKEN, THEMIZ_ACCESS_LOG=str(log)) as p:
             if not p.alive():
                 return fails + [("audit", "панель не поднялась")]
             import httpx
             httpx.post(p.base + "/api/open", timeout=15,
-                       headers={"X-Themis-Token": TOKEN, "X-Forwarded-For": "203.0.113.7"},
+                       headers={"X-Themiz-Token": TOKEN, "X-Forwarded-For": "203.0.113.7"},
                        json={"path": "/tmp/net.docx"})
         text = log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
         line = [l for l in text.splitlines() if "/api/open" in l]
@@ -351,12 +351,12 @@ def check_sync():
                               (binary, "delo/b.txt", "бинарник под видом текста"),
                               (link, "delo/l.md", "симлинк"),
                               (good, "../beglec.md", "путь вне очереди (..)"),
-                              (good, "/etc/themis.md", "абсолютный путь")):
+                              (good, "/etc/themiz.md", "абсолютный путь")):
             code, out, err = accept(src, rel)
             if code == 0:
                 fails.append(("sync_receiver.py", f"ПРИНЯТ {why} — обязан быть отвергнут"))
         strays = [p for p in td.rglob("*") if p.is_file() and "queue" not in p.parts
-                  and p.name in ("beglec.md", "themis.md")]
+                  and p.name in ("beglec.md", "themiz.md")]
         if strays or (q.parent / "beglec.md").exists():
             fails.append(("sync_receiver.py", f"запись вне очереди состоялась: {strays}"))
         left = sorted(p.relative_to(q).as_posix() for p in q.rglob("*") if p.is_file())
@@ -368,7 +368,7 @@ def check_sync():
 # ── 6. Дисциплина секрета и протокол сервера ────────────────────────────────
 SECRET_CONTRACT = """  Секрет и протокол сервера
     Ни один отслеживаемый git файл не ПРИСВАИВАЕТ значение переменной секрета
-    (`THEMIS_PANEL_TOKEN=…`): в коде живет только имя переменной, значение —
+    (`THEMIZ_PANEL_TOKEN=…`): в коде живет только имя переменной, значение —
     в $HOME/.secrets. Читать сам файл секретов приемка не имеет права, поэтому
     проверяется форма, а не совпадение со значением.
     Журнал доступа (access.log) закрыт .gitignore: в нем адреса и время обращений,
@@ -391,7 +391,7 @@ def check_secret_and_protocol():
     # Присваивание значения переменной секрета в отслеживаемом файле — утечка.
     # Само ИМЯ переменной встречается в коде и в документации законно.
     r = subprocess.run(["git", "grep", "-I", "-n", "-E",
-                        r"THEMIS_PANEL_TOKEN\s*=\s*[\"\'A-Za-z0-9]", "--",
+                        r"THEMIZ_PANEL_TOKEN\s*=\s*[\"\'A-Za-z0-9]", "--",
                         ".", ":(exclude)scripts/stage6_spec.py"],
                        cwd=str(ROOT), capture_output=True, text=True)
     hits = [l for l in r.stdout.splitlines()

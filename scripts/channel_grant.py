@@ -52,7 +52,7 @@ HEADER = (f"{SECTION}\n\n"
 TRUTH_ELSEWHERE = {
     ("sudact.ru", "поиск"): {
         "why": "решение по ПОИСКУ на sudact.ru — константа SUDACT_SEARCH_ALLOWED "
-               "в scripts/practice_search.py (выключатель THEMIS_SUDACT_SEARCH). "
+               "в scripts/practice_search.py (выключатель THEMIZ_SUDACT_SEARCH). "
                "Здесь его не дублировать",
         "cross": "ПОИСК по этому хосту живет константой SUDACT_SEARCH_ALLOWED "
                  "в scripts/practice_search.py и этой записью НЕ управляется",

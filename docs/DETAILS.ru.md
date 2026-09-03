@@ -23,12 +23,12 @@
 ## Быстрый старт
 
 ```bash
-git clone https://github.com/zarubinvibe/themis.git
-cd themis
+git clone https://github.com/zarubinvibe/themiz.git
+cd themiz
 claude
 ```
 
-В Claude Code запусти `/themis-setup`. Скилл задаст вопросы по одному, проверит
+В Claude Code запусти `/themiz-setup`. Скилл задаст вопросы по одному, проверит
 окружение и попросит разрешение перед установкой. Технический путь без интервью:
 `bash install.sh`.
 

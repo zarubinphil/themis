@@ -207,7 +207,7 @@ HERMETIC_CONTRACT = """  scripts/foreign_cli.py — вызов чужого CLI 
          `pii_gate --residual`, и грязный текст НЕ УХОДИТ (код 1);
       2. рабочий каталог — временный, и в нем ТОЛЬКО обезличенный файл: ни дела,
          ни репозитория, ни соседних материалов;
-      3. окружение вычищено: наших секретов и переменных THEMIS_* там нет, PATH
+      3. окружение вычищено: наших секретов и переменных THEMIZ_* там нет, PATH
          фиксирован, stdin закрыт (человеческий гейт не утекает в чужой процесс);
       4. успех по трем сигналам: код 0, ответ непуст, в ответе нет маркеров отказа;
       5. журнал отправок без исходного текста — провайдер, время, длина, отпечаток.
@@ -247,7 +247,7 @@ exit 0
         vopros.write_text(S_PD, encoding="utf-8")
         otvet = td / "otvet.txt"
         log = td / "otpravki.log"
-        env = {**NO_NET, "THEMIS_PANEL_TOKEN": "sekret-paneli-ne-dolzhen-utech",
+        env = {**NO_NET, "THEMIZ_PANEL_TOKEN": "sekret-paneli-ne-dolzhen-utech",
                "DADATA_API_KEY": "kluch-dadata-ne-dolzhen-utech"}
         code, out, err = run(po_roli(td, vidok, vopros, out=otvet, log=log),
                              timeout=180, env=env)
@@ -266,14 +266,14 @@ exit 0
                                             "чужой CLI видит лишнее"))
         cwd = (stroki.get("CWD") or "")
         # Проверяем принадлежность КОРНЮ ПРОЕКТА, а не вхождение слова: временный
-        # каталог прибора законно называется themis-foreign-…, и поиск подстроки
+        # каталог прибора законно называется themiz-foreign-…, и поиск подстроки
         # краснел на честном имени.
         if cwd and (str(ROOT) in os.path.realpath(cwd)):
             fails.append(("foreign_cli.py", f"рабочий каталог внутри проекта: {cwd}"))
 
         env_keys = (stroki.get("ENV") or "").split(",")
         for k in env_keys:
-            if k.startswith("THEMIS_") or "TOKEN" in k or "API_KEY" in k or "SECRET" in k:
+            if k.startswith("THEMIZ_") or "TOKEN" in k or "API_KEY" in k or "SECRET" in k:
                 fails.append(("foreign_cli.py", f"наш секрет утек в окружение чужого CLI: {k}"))
                 break
         if not any(k == "PATH" for k in env_keys):

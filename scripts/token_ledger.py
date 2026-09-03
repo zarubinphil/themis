@@ -118,7 +118,7 @@ MAIN_SIGNALS = [
     (r"quality_gate|document_guard|table_guard|verify_inn|verify_act|crosscheck_numbers|"
      r"sroki|02_hearings/", "5 проверка"),
     (r"_index\.md|_clients\.md|_client\.md|registry_check|redline", "6 архив"),
-    (r"themis_status|token_ledger|retro\.py|setup_doctor|pd_guard|claude_guard|preflight_search|"
+    (r"themiz_status|token_ledger|retro\.py|setup_doctor|pd_guard|claude_guard|preflight_search|"
      r"update_legal_corpus|lessons-log|_logs/|scripts/|\.claude/", "система"),
 ]
 

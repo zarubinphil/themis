@@ -2,18 +2,18 @@
 
 这份引导假设你是律师而不是工程师，也从来没有在终端里装过东西。每一步都写清楚要做什么，以及之后应该看到什么。
 
-最短的路是对话式的：在 Claude Code 里打开项目并运行 `/themis-setup`。忒弥斯会自我介绍，一次问一个关于你执业方向的问题，说明为什么问，没有你的同意不装任何东西。下面是同一条路，靠双脚走。
+最短的路是对话式的：在 Claude Code 里打开项目并运行 `/themiz-setup`。忒弥斯会自我介绍，一次问一个关于你执业方向的问题，说明为什么问，没有你的同意不装任何东西。下面是同一条路，靠双脚走。
 
 你需要一台 Mac 来本地识别扫描件，还需要 Python 3.11 以上、Xcode 命令行工具和 Claude Code。
 
 1. **把项目拿下来。**
 
    ```bash
-   git clone https://github.com/zarubinvibe/themis.git
-   cd themis
+   git clone https://github.com/zarubinvibe/themiz.git
+   cd themiz
    ```
 
-   你会看到 `themis` 目录，终端提示符进入其中。
+   你会看到 `themiz` 目录，终端提示符进入其中。
 
 2. **在这个目录里打开 Claude Code。**
 
@@ -23,7 +23,7 @@
 
    你会看到智能体在项目里启动。
 
-3. **运行带引导的安装。** 输入 `/themis-setup`。
+3. **运行带引导的安装。** 输入 `/themiz-setup`。
 
    你会看到忒弥斯先自我介绍，然后问你的执业情况：常办什么案子、所在地区、常去哪些法院、材料放在哪里、有没有电子签名、要不要 Telegram 提醒。一次一个问题，每个都说明原因并给出回答示例。
 
@@ -55,12 +55,12 @@
 
 ## 以后怎么更新
 
-以后有了新版本，不用重新克隆：在 Claude Code 里打开项目并运行 `/themis-update`。它先告诉你有什么变化，只做快进式更新，绝不碰你的案卷目录，更新之后重新跑检查。
+以后有了新版本，不用重新克隆：在 Claude Code 里打开项目并运行 `/themiz-update`。它先告诉你有什么变化，只做快进式更新，绝不碰你的案卷目录，更新之后重新跑检查。
 
 ## 如果这份引导帮到了你
 
-如果忒弥斯把机械活从你的桌上拿走了，请点亮星标：[https://github.com/zarubinvibe/themis](https://github.com/zarubinvibe/themis)。这只要一秒，却决定别的律师能不能找到它。
+如果忒弥斯把机械活从你的桌上拿走了，请点亮星标：[https://github.com/zarubinvibe/themiz](https://github.com/zarubinvibe/themiz)。这只要一秒，却决定别的律师能不能找到它。
 
 你已经在真实案件上跑过一遍，所以你正是能改进它的人。路径很短：先 fork 仓库，建一个分支 branch，提交 commit，推送 push，然后开一个 Pull Request。请不要直接向 `main` 推送，发布闸门会拒绝。
 
-发现某一步写错了？到 [https://github.com/zarubinvibe/themis/issues](https://github.com/zarubinvibe/themis/issues) 开一个 issue，并用虚构数据描述。真实的当事人材料永远不要附在公开 issue 里。
+发现某一步写错了？到 [https://github.com/zarubinvibe/themiz/issues](https://github.com/zarubinvibe/themiz/issues) 开一个 issue，并用虚构数据描述。真实的当事人材料永远不要附在公开 issue 里。

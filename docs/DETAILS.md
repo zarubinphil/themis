@@ -2,9 +2,9 @@
 
 <div align="center">
 
-<img src="../docs/assets/pantheon/emblem.png" alt="Themis Pantheon emblem" width="220"/>
+<img src="../docs/assets/pantheon/emblem.png" alt="Themiz Pantheon emblem" width="220"/>
 
-# Фемида · Themis
+# Фемида · Themiz
 
 **Я веду судебные дела вместе с юристом. Не вместо него.**
 **I work cases alongside a lawyer. Not instead of one.**
@@ -13,7 +13,7 @@
 
 </div>
 
-![Themis Pantheon hero: Themis with scales, sword, legal documents, agent review cards and the shared marble column](../docs/assets/pantheon/hero.png)
+![Themiz Pantheon hero: Themiz with scales, sword, legal documents, agent review cards and the shared marble column](../docs/assets/pantheon/hero.png)
 
 ---
 
@@ -152,12 +152,12 @@ Word и Excel беру текст напрямую, без распознава�
 Tools и [Claude Code](https://claude.com/claude-code).
 
 ```bash
-git clone https://github.com/zarubinvibe/themis.git
-cd themis
+git clone https://github.com/zarubinvibe/themiz.git
+cd themiz
 claude
 ```
 
-В открывшемся Claude Code запусти `/themis-setup`. Я задам вопросы по одному,
+В открывшемся Claude Code запусти `/themiz-setup`. Я задам вопросы по одному,
 проверю окружение и перед установкой попрошу разрешение.
 
 Опытный пользователь может запустить технический установщик напрямую:
@@ -230,7 +230,7 @@ workflow.
 
 ### Who I am
 
-Hello. I am Themis.
+Hello. I am Themiz.
 
 I was built by Filipp Zarubin, a practising lawyer, for a fairly dull reason:
 too much of a good lawyer's time goes not into the law and not into thinking,
@@ -333,12 +333,12 @@ You need a **Mac** (for scan recognition), Python 3.11+, Xcode Command Line Tool
 and [Claude Code](https://claude.com/claude-code).
 
 ```bash
-git clone https://github.com/zarubinvibe/themis.git
-cd themis
+git clone https://github.com/zarubinvibe/themiz.git
+cd themiz
 claude
 ```
 
-Inside Claude Code, run `/themis-setup`. It asks about your practice one question
+Inside Claude Code, run `/themiz-setup`. It asks about your practice one question
 at a time, checks the environment, and asks before installing anything.
 
 Experienced users can run `bash install.sh` directly. That installs dependencies
@@ -361,7 +361,7 @@ that. No bot, no problem — I work the same without it.
 
 ### Status, roadmap and limits
 
-Themis is under active development and expects a lawyer to supervise every case.
+Themiz is under active development and expects a lawyer to supervise every case.
 The main workflow runs in Claude Code. Text PDFs, DOCX, and XLSX work on macOS,
 Windows, and Linux, but local scan OCR depends on Apple Vision and is available only
 on macOS. Case law search depends on an external source and sometimes fails. A red

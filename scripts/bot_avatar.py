@@ -149,7 +149,7 @@ def main() -> int:
     cases = (Path(__file__).resolve().parent.parent / "cases").resolve()
     if cases in put.resolve().parents:
         print("ОТКАЗ: под cases/ растр не пишется — там живут материалы дел. "
-              "Аватар кладется в ~/.themis/ либо любой каталог вне дел.", file=sys.stderr)
+              "Аватар кладется в ~/.themiz/ либо любой каталог вне дел.", file=sys.stderr)
         return 1
     put.parent.mkdir(parents=True, exist_ok=True)
     put.write_bytes(narisovat(a.size))

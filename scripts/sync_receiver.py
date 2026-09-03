@@ -124,7 +124,7 @@ def selftest() -> int:
         assert accept(q, fake, "delo/fake.txt") == 1, "бинарник принят"
         assert accept(q, link, "delo/link.md") == 1, "симлинк принят"
         assert accept(q, good, "../beglec.md") == 1, "выход из очереди принят"
-        assert accept(q, good, "/etc/themis.md") == 1, "абсолютный путь принят"
+        assert accept(q, good, "/etc/themiz.md") == 1, "абсолютный путь принят"
         assert not (td / "beglec.md").exists(), "запись состоялась вне очереди"
         left = sorted(p.relative_to(q).as_posix() for p in q.rglob("*") if p.is_file())
         assert left == ["delo/karta.md"], f"в очереди лишнее: {left}"

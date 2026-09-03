@@ -1,4 +1,4 @@
-# How Themis actually works
+# How Themiz actually works
 
 This is the engine room, not the showroom. Every claim below was checked by running
 it on a real machine on 21 August 2026, and the command sits next to the claim so
@@ -11,7 +11,7 @@ One practical note before we start: the tools speak Russian. The command output
 quoted throughout this document is translated so it reads, but what appears in your
 terminal is the Russian original. Flag names and file paths are shown verbatim.
 
-A note on jurisdiction: Themis is built for Russian civil litigation. A few local
+A note on jurisdiction: Themiz is built for Russian civil litigation. A few local
 terms show up below, and I explain them where they appear rather than leaving them
 transliterated.
 
@@ -63,7 +63,7 @@ Where you currently stand is answered by one command rather than by reading half
 dozen files:
 
 ```bash
-python3 scripts/themis_status.py cases/<client>/<case> --brief
+python3 scripts/themiz_status.py cases/<client>/<case> --brief
 ```
 
 It prints the case details, the next hearing, how much material is in, the state of
@@ -469,10 +469,10 @@ is dates, counts and the word "done". Everything else is held back by an outboun
 guard, and that is testable:
 
 ```
-$ python3 scripts/themis_bot.py --check-out message.txt     # "Hearing 25.09.2026 at 10:00, document ready"
+$ python3 scripts/themiz_bot.py --check-out message.txt     # "Hearing 25.09.2026 at 10:00, document ready"
 clean — the bot will send this
 
-$ python3 scripts/themis_bot.py --check-out other.txt       # with a name, a case number and a sum
+$ python3 scripts/themiz_bot.py --check-out other.txt       # with a name, a case number and a sum
 will not go out: PD (CASE), PD (NAME), PD (NAME?), sum (350 000 rub.)
 ```
 
@@ -495,5 +495,5 @@ check watches exactly that.
 - [README](../README.md) — the short version, and how to install.
 - [`scripts/setup_doctor.py`](../scripts/setup_doctor.py) — an honest answer to
   "what is broken on my machine".
-- [`scripts/themis_status.py`](../scripts/themis_status.py) — where am I in this case.
+- [`scripts/themiz_status.py`](../scripts/themiz_status.py) — where am I in this case.
 - [Русская версия](HOW-IT-WORKS.ru.md).

@@ -5,7 +5,7 @@ cases/*/
 !cases/ivanov-ivan/**
 !cases/_templates/
 # ВАЖНО: _index.md/_clients.md/_relationships.md/_logs/ содержат реальные ПД
-# клиентов — НЕ публикуются (live-реестры боевого themis, gitignored).
+# клиентов — НЕ публикуются (live-реестры боевого themiz, gitignored).
 # (cases/*/ матчит только папки → _logs/ уже покрыт; файлы под cases/ нужно явно)
 cases/_index.md
 cases/_clients.md

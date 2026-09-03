@@ -31,6 +31,7 @@ import os
 import re
 import sys
 import time
+import sreda  # noqa: E402,F401  переходный период имен переменных
 
 try:
     import context_guard  # правила экономии контекста, см. его модуль
@@ -57,7 +58,7 @@ PROJECT_CASES = os.path.join(PROJECT_ROOT, "cases")
 def _cases_roots() -> list:
     """Корни cases/, которые сторож признает своими. Обычно один — {корень}/cases.
     Но сторож может жить в git-worktree: тогда cases/ ОСНОВНОГО дерева — те же
-    материалы дел, и абсолютный путь к ним (`$HOME/…/themis/cases/{дело}`) обязан
+    материалы дел, и абсолютный путь к ним (`$HOME/…/themiz/cases/{дело}`) обязан
     судиться так же, как локальный. Иначе сторож-в-worktree слеп к родительскому
     cases, и $HOME-цель уходит мимо.
 
@@ -198,7 +199,7 @@ def _under_dir(abspath: str, root: str) -> bool:
     """abspath лежит внутри root (или равен ему). ОБА конца через realpath: на macOS
     /var — симлинк на /private/var, /tmp — на /private/tmp, и наивное сравнение строк
     молча делает гейт пустышкой с кодом 0 (урок стоил конвейеру прогона). Регистр не
-    важен — APFS/HFS+ его не различают, `/THEMIS/` и `/themis/` — тот же каталог.
+    важен — APFS/HFS+ его не различают, `/THEMIZ/` и `/themiz/` — тот же каталог.
     Разошедшиеся диски → commonpath кидает ValueError → значит, не внутри."""
     if not abspath:
         return False
@@ -329,7 +330,7 @@ def _safe_intake_adds(cmd: str, base: str) -> set:
 # Маркер, названный в отрицании, — не маркер. Поиск вхождением по всему файлу
 # засчитывал строку «в practice.md нет маркера «## FAST-СИНТЕЗ ФЕМИДЫ»» как
 # пройденный шаг: хук пропускал запись, которую обязан блокировать. Та же дыра
-# найдена и закрыта в scripts/themis_status.py (дело 04.08.2026). Проверка
+# найдена и закрыта в scripts/themiz_status.py (дело 04.08.2026). Проверка
 # построчная — все маркеры конвейера однострочные.
 _NEGATED_MARKER_RE = re.compile(r"\b(?:без|нет|не)\s+маркера", re.I)
 _FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
@@ -342,7 +343,7 @@ def _has_marker(path, pattern: str, anchored: bool = True) -> bool:
     ## КАРТА ГОТОВА ✓ отсутствует», готовой не считается (проба 20.08.2026).
     anchored=True (шаговые маркеры-заголовки) — паттерн в НАЧАЛЕ строки; иначе
     строка «Маркер ## КАРТА ГОТОВА ✓ отсутствует» прошла бы вхождением. Логика
-    единая с themis_status.has_marker: разошедшиеся копии одного гейта проект уже
+    единая с themiz_status.has_marker: разошедшиеся копии одного гейта проект уже
     проходил (humanizer-гейт)."""
     try:
         with open(path, encoding="utf-8") as f:
@@ -399,14 +400,14 @@ def _workflow_gate(p: str) -> None:
         block(
             "БЛОК ПРОТОКОЛА: practice.md пишется только после Шага 1 — "
             "в knowledge-map.md нет маркера «## КАРТА ГОТОВА ✓». Запустить case-mapper. "
-            "Статус: python3 scripts/themis_status.py " + case_root
+            "Статус: python3 scripts/themiz_status.py " + case_root
         )
     if tail_cf == ".agent/context/positions.md" and not _has_marker(pr, PRACTICE_MARKER):
         block(
             "БЛОК ПРОТОКОЛА: positions.md пишется только после Шага 2 — "
             "в practice.md нет ни «## СОВЕТ ЗАВЕРШЕН», ни «## FAST-СИНТЕЗ ФЕМИДЫ». "
             "Запустить охоту/совет либо поставить честный FAST-маркер. "
-            "Статус: python3 scripts/themis_status.py " + case_root
+            "Статус: python3 scripts/themiz_status.py " + case_root
         )
     # Документ дела не ложится мимо сборщика и вердикта Кони. Кухня (.agent/drafts) и
     # слой человека (GOTOVO) сторожились с переезда на два слоя (19.08.2026); круг 5
@@ -458,7 +459,7 @@ def _workflow_gate(p: str) -> None:
                 f"БЛОК ПРОТОКОЛА: документ в {where} пишется только после Шагов 1-2 — "
                 "нет маркера карты и/или практики. Судебные документы вне конвейера "
                 "запрещены (сборка только через DocBuilder, вердикт — Кони). "
-                "Статус: python3 scripts/themis_status.py " + case_root
+                "Статус: python3 scripts/themiz_status.py " + case_root
             )
 
 
@@ -472,11 +473,11 @@ _ANCHOR_GATES = (
     "scripts/quality_gate.py", "scripts/pd_guard.py", "scripts/pii_gate.py",
     "scripts/loop_gate.py", "scripts/instruction_guard.py", "scripts/table_guard.py",
     "scripts/gate.sh", "scripts/case_paths.py", "scripts/swarm_contract.py",
-    "scripts/model_policy.py", "scripts/themis_status.py",
+    "scripts/model_policy.py", "scripts/themiz_status.py",
     "scripts/stage4_spec.py", "scripts/stage5_spec.py", "scripts/stage65_spec.py",
     "scripts/stage6_spec.py", "scripts/stage7_spec.py", "scripts/stage8_spec.py",
     "scripts/stage9_spec.py", "scripts/priemka_remont.sh",
-    ".claude/settings.json", ".claude/workflows/themis-pipeline.js",
+    ".claude/settings.json", ".claude/workflows/themiz-pipeline.js",
     ".claude/skills/humanizer-legal/scripts/scan_legal.sh",
 )
 _ANCHOR_NOT_GATES = (
@@ -611,7 +612,7 @@ def _harness_files(root: str = PROJECT_ROOT) -> set:
     # 5.5. Якорный перечень не только сверяет набор, но и ПОПОЛНЯЕТ его - и делает
     # это ДО хопа импорта, иначе модуль, который ворота импортируют, вердикта не
     # получит. Признаки выше опираются на файлы, которых в другом дереве может не
-    # быть: без .autoloop/*.json из слоя выпадал themis_status.py - ворота ПО ДЕКРЕТУ -
+    # быть: без .autoloop/*.json из слоя выпадал themiz_status.py - ворота ПО ДЕКРЕТУ -
     # а по хопу импорта следом уходил case_graph.py. Публичная вырезка получала от
     # этого settings.json, запирающий приборы, которые в ее дереве воротами уже не
     # считались, и селфтест сторожа краснел у нового пользователя (изолированный
@@ -1158,7 +1159,7 @@ def _drafts_lock_gate(p: str) -> None:
     освободить). Протухший лок (>45 мин) не блокирует, а предупреждает.
 
     В .owner пишется токен владельца, а процесс держателя несет тот же токен в
-    THEMIS_DRAFTS_OWNER. Без совпадения токена запись считается чужой."""
+    THEMIZ_DRAFTS_OWNER. Без совпадения токена запись считается чужой."""
     rel = _case_rel(p)
     if rel is None or len(rel) < 3:
         return
@@ -1182,7 +1183,7 @@ def _drafts_lock_gate(p: str) -> None:
         who = " ".join(open(owner, encoding="utf-8").read().split()) or "(имя не указано)"
     except OSError:
         who = "(лок не прочитан)"
-    token = os.environ.get("THEMIS_DRAFTS_OWNER", "").strip()
+    token = os.environ.get("THEMIZ_DRAFTS_OWNER", "").strip()
     if token and re.search(rf"(?:^|\s)token={re.escape(token)}(?:\s|$)", who):
         return
     try:
@@ -1958,7 +1959,7 @@ BIG_READ_BYTES = 48 * 1024
 def _sudact_allowed() -> bool:
     """Решение по sudact живет в одном месте — practice_search.py. Хук его читает,
     а не дублирует: два гейта с собственными копиями решения неизбежно разъедутся."""
-    env = os.environ.get("THEMIS_SUDACT_SEARCH")
+    env = os.environ.get("THEMIZ_SUDACT_SEARCH")
     if env is not None:
         return env == "1"
     try:
@@ -2009,8 +2010,8 @@ def _practice_search_used(session_start: float) -> bool:
     НЕ старше старта текущей сессии. «Есть хоть один json» само по себе НЕ в счет: на
     рабочей машине там тысячи вчерашних попаданий (замер: 2787, свежие от 17.08.2026), и
     признак был бы истинным ВСЕГДА, а блок WebSearch не срабатывал бы никогда (дефект R05,
-    второй круг). Override THEMIS_PRACTICE_SEARCHED — для детерминированного селфтеста."""
-    env = os.environ.get("THEMIS_PRACTICE_SEARCHED")
+    второй круг). Override THEMIZ_PRACTICE_SEARCHED — для детерминированного селфтеста."""
+    env = os.environ.get("THEMIZ_PRACTICE_SEARCHED")
     if env is not None:
         return env == "1"
     cache = os.path.join(PROJECT_ROOT, ".cache", "practice")
@@ -2257,8 +2258,8 @@ def _agent_gate(ti: dict, payload: dict) -> None:
     # прогон 01.09 запрет \xabвторой раз не звать\xbb нарушил САМ оркестратор дважды
     # (23,19 долл.). Спавн doc-drafter-ом этот хук не видит (субагентный контекст);
     # значит любой doc-reviewer, что виден здесь, — прямой из главного потока.
-    # Escape для харнесса, поднимающего субагентные спавны в этот хук: THEMIS_DOC_REVIEWER_OK.
-    if name == "doc-reviewer" and not os.environ.get("THEMIS_DOC_REVIEWER_OK"):
+    # Escape для харнесса, поднимающего субагентные спавны в этот хук: THEMIZ_DOC_REVIEWER_OK.
+    if name == "doc-reviewer" and not os.environ.get("THEMIZ_DOC_REVIEWER_OK"):
         block(
             "БЛОК ПРОТОКОЛА: doc-reviewer из главного потока запрещен. Проверку Кони "
             "запускает сам doc-drafter (его Шаг 9), владелец ревью — один. Второй "
@@ -2284,8 +2285,8 @@ def _agent_gate(ti: dict, payload: dict) -> None:
     if not st.get("guide"):
         block(
             "БЛОК ПРОВОДНИКА: ключевой агент дела (" + name + ") спавнится напрямую, "
-            "минуя проводник themis-pipeline. Прогон дела идет только им: "
-            'Workflow({ name: "themis-pipeline", args: "' + case + '" }) — он держит '
+            "минуя проводник themiz-pipeline. Прогон дела идет только им: "
+            'Workflow({ name: "themiz-pipeline", args: "' + case + '" }) — он держит '
             "порядок фаз 0→5 и сам стампует прогон. Прямой спавн мимо проводника — "
             "корень №1 разбора 01.09.2026 (0 вызовов проводника, 27 прямых спавнов)."
         )
@@ -2320,7 +2321,7 @@ def _agent_gate(ti: dict, payload: dict) -> None:
                 block(
                     "БЛОК ПРОТОКОЛА: doc-drafter до готовых карты и практики (Шаги 1-2). "
                     "Нет маркера карты и/или практики. Пройти конвейер по порядку. "
-                    "Статус: python3 scripts/themis_status.py " + case
+                    "Статус: python3 scripts/themiz_status.py " + case
                 )
 
     # Все гейты пройдены — спавн состоится, берем слот ПОСЛЕДНИМ: заблокированный
@@ -2436,7 +2437,7 @@ def main() -> None:
                 "(роутер выдаст кеш-путь, срезы и requisites.json). "
                 "Read напрямую для .docx/.pdf/.xlsx/.pptx/.rtf/.odt/.epub запрещен."
             )
-        # Порог бюджета обходили регистром (/THEMIS/), симлинком (ссылка вне проекта на
+        # Порог бюджета обходили регистром (/THEMIZ/), симлинком (ссылка вне проекта на
         # файл внутри) и `~` (getsize не раскрывает тильду → размер 0). Резолвим цель
         # ДО замера: expanduser + realpath снимают все три; регистр держит re.I.
         rcwd = as_str(d.get("cwd")) or os.getcwd()
@@ -2618,7 +2619,7 @@ def main() -> None:
                 "БЛОК: /doc_ajax/ запрещен robots.txt sudact.ru для всех роботов. "
                 "Известный акт открывается по обычному URL: "
                 "python3 scripts/practice_search.py --doc URL. Поиск включает владелец "
-                "(THEMIS_SUDACT_SEARCH=1) с записью в knowledge/allowed-services.md."
+                "(THEMIZ_SUDACT_SEARCH=1) с записью в knowledge/allowed-services.md."
             )
 
     # Работа вне корня проекта — прецедент 25.07.2026: сессия шла мимо cases/,
@@ -2634,7 +2635,7 @@ def main() -> None:
 def _delo_progona(d) -> str:
     """Дело прогона для ОБЩЕГО счета квоты: сначала каталог, потом переменная.
 
-    Вывод из пути важнее $THEMIS_CASE: переменную в бою никто не выставлял
+    Вывод из пути важнее $THEMIZ_CASE: переменную в бою никто не выставлял
     (M07, замер 02.09.2026), и общий счет молча падал бы в пустоту. Тихий ноль
     в счетчике неотличим от отсутствия расхода.
     """
@@ -2644,7 +2645,7 @@ def _delo_progona(d) -> str:
         chasti = cwd[len(koren):].split(os.sep)
         if len(chasti) >= 2 and chasti[0] and chasti[1]:
             return os.path.join(PROJECT_ROOT, "cases", chasti[0], chasti[1])
-    peremennaya = os.environ.get("THEMIS_CASE", "")
+    peremennaya = os.environ.get("THEMIZ_CASE", "")
     if peremennaya:
         return peremennaya
     # Третий источник и единственный, который работает в бою: рой и проводник
@@ -2956,11 +2957,11 @@ def selftest() -> int:
     import tempfile
 
     me = [sys.executable, __file__]
-    # Селфтест ГЕРМЕТИЧЕН: имя каталога ПОСТОРОННЕЕ (mkdtemp без «themis»). Раньше tmp
-    # звался «…/themis», и гейт большого Read проходил по литералу «/themis/» в пути —
+    # Селфтест ГЕРМЕТИЧЕН: имя каталога ПОСТОРОННЕЕ (mkdtemp без «themiz»). Раньше tmp
+    # звался «…/themiz», и гейт большого Read проходил по литералу «/themiz/» в пути —
     # фикстура сама создавала признак, который проверяла, и не видела переименования
     # папки (дефект R05). Теперь гейт судит по PROJECT_ROOT, поэтому его фикстуры
-    # обязаны жить ВНУТРИ настоящего корня проекта — под случайным именем, не «themis».
+    # обязаны жить ВНУТРИ настоящего корня проекта — под случайным именем, не «themiz».
     tmp = tempfile.mkdtemp()          # посторонее имя — гейты 00_intake/cases судят по литералу/якорю
     proj_tmp = tempfile.mkdtemp(dir=PROJECT_ROOT)  # внутри корня, имя случайное — для гейта большого Read
     # Уборка снимается СРАЗУ и на atexit, а не только строкой в конце функции:
@@ -3243,7 +3244,7 @@ def selftest() -> int:
         # Тот же якорь на ЧУЖОМ дереве. Публичная вырезка не везет .autoloop/*.json и
         # часть .claude/, и признаки, опирающиеся на эти файлы, там молчат. Проверка
         # выше в родном доме зеленая всегда - она не увидела бы, что у нового
-        # пользователя из слоя выпали themis_status, case_graph, token_ledger и
+        # пользователя из слоя выпали themiz_status, case_graph, token_ledger и
         # preflight_search, а settings.json продолжил их запирать (03.09.2026).
         ("якорь держит слой и в дереве без необязательных конфигов",
          _anchor_holds_bare_tree(), []),
@@ -3697,15 +3698,15 @@ def selftest() -> int:
         ("WebSearch правового запроса без practice_search — блок",
          run({"tool_name": "WebSearch", "tool_input": {
              "query": "неустойка по договору практика ВС РФ"}},
-             env={"THEMIS_PRACTICE_SEARCHED": "0"}), 2),
+             env={"THEMIZ_PRACTICE_SEARCHED": "0"}), 2),
         ("WebSearch правового запроса ПОСЛЕ practice_search — пропуск",
          run({"tool_name": "WebSearch", "tool_input": {
              "query": "неустойка по договору практика ВС РФ"}},
-             env={"THEMIS_PRACTICE_SEARCHED": "1"}), 0),
+             env={"THEMIZ_PRACTICE_SEARCHED": "1"}), 0),
         ("WebSearch бытового запроса — пропуск (не правовой)",
          run({"tool_name": "WebSearch", "tool_input": {
              "query": "погода в казани на завтра"}},
-             env={"THEMIS_PRACTICE_SEARCHED": "0"}), 0),
+             env={"THEMIZ_PRACTICE_SEARCHED": "0"}), 0),
     ]
 
     # ── Анти-регресс R05: НИ ОДИН литерал имени каталога не вернулся в логику поиска корня ──
@@ -3730,7 +3731,7 @@ def selftest() -> int:
     # Проверяем на НАСТОЯЩЕМ {корень}/.cache/practice, а не во временном каталоге: пустой
     # tmp дал бы зеленый на неисправном стороже (фикстура по эту сторону порога). Старт-в-
     # будущем не должен видеть вчерашний кеш; старт-в-эпохе — обязан видеть любой mtime>0.
-    _saved_ps = os.environ.pop("THEMIS_PRACTICE_SEARCHED", None)
+    _saved_ps = os.environ.pop("THEMIZ_PRACTICE_SEARCHED", None)
     try:
         _ps_dir = os.path.join(PROJECT_ROOT, ".cache", "practice")
         _has_cache = os.path.isdir(_ps_dir) and any(
@@ -3739,7 +3740,7 @@ def selftest() -> int:
         epoch_sees = _practice_search_used(0.0)              # старт в эпохе → существующий кеш в счет
     finally:
         if _saved_ps is not None:
-            os.environ["THEMIS_PRACTICE_SEARCHED"] = _saved_ps
+            os.environ["THEMIZ_PRACTICE_SEARCHED"] = _saved_ps
     cases.append(("живой кеш: старт-в-будущем не засчитывает вчерашний practice_search",
                   future_blind, False))
     if _has_cache:   # без кеша обе стороны False — проверять «видит» нечего
@@ -3764,15 +3765,15 @@ def selftest() -> int:
     lock_owner = lock_drafts + "/.owner"
     saved_roots = _CASES_ROOTS
     _CASES_ROOTS = list(_CASES_ROOTS) + [os.path.join(tmp, "cases")]
-    old_token = os.environ.get("THEMIS_DRAFTS_OWNER")
+    old_token = os.environ.get("THEMIZ_DRAFTS_OWNER")
     try:
         free = _lock_probe(lock_target)                      # нет .owner — пускает
         with open(lock_owner, "w", encoding="utf-8") as f:
             f.write("Мейер · 25.08.2026 14:00 token=abc123")
         locked = _lock_probe(lock_target)                    # есть .owner — блок
-        os.environ["THEMIS_DRAFTS_OWNER"] = "abc123"
+        os.environ["THEMIZ_DRAFTS_OWNER"] = "abc123"
         same_owner = _lock_probe(lock_target)                # свой токен — пускает
-        os.environ["THEMIS_DRAFTS_OWNER"] = "other"
+        os.environ["THEMIZ_DRAFTS_OWNER"] = "other"
         other_owner = _lock_probe(lock_target)               # чужой токен — блок
         own_ok = _lock_probe(lock_owner)                     # сам .owner писать можно
         old = time.time() - 3600
@@ -3781,9 +3782,9 @@ def selftest() -> int:
     finally:
         _CASES_ROOTS = saved_roots
         if old_token is None:
-            os.environ.pop("THEMIS_DRAFTS_OWNER", None)
+            os.environ.pop("THEMIZ_DRAFTS_OWNER", None)
         else:
-            os.environ["THEMIS_DRAFTS_OWNER"] = old_token
+            os.environ["THEMIZ_DRAFTS_OWNER"] = old_token
     cases += [
         ("нет .owner — запись черновиков проходит", free, 0),
         ("свежий .owner — чужая запись черновиков заблокирована", locked, 2),
@@ -3808,8 +3809,8 @@ def selftest() -> int:
     # последовательно, «предыдущий агент завершился» — иначе 7 проходящих проб
     # уперлись бы в потолок, который проверяется отдельно (ниже, ag_keep).
     live_tmp = os.path.join(tmp, "swarm_live.json")
-    saved_live = os.environ.get("THEMIS_SWARM_LIVE")
-    os.environ["THEMIS_SWARM_LIVE"] = live_tmp
+    saved_live = os.environ.get("THEMIZ_SWARM_LIVE")
+    os.environ["THEMIZ_SWARM_LIVE"] = live_tmp
 
     def ag(name, prompt=None):
         try:
@@ -3831,12 +3832,12 @@ def selftest() -> int:
                            "prompt": "фоновая задача вне дела"},
         }, _CASES_ROOTS)
 
-    saved_dr = os.environ.pop("THEMIS_DOC_REVIEWER_OK", None)
+    saved_dr = os.environ.pop("THEMIZ_DOC_REVIEWER_OK", None)
     try:
         no_guide = ag("case-mapper")                       # нет проводника → блок
         nonkey = ag("archivist")                           # неключевой → пуск
         unknown = ag("case-mapper", "сделай что-нибудь")   # дело не опознано → fail-open
-        _cp.run_write(ag_case, guide="themis-pipeline")
+        _cp.run_write(ag_case, guide="themiz-pipeline")
         guided_mapper = ag("case-mapper")                  # проводник есть → пуск
         hunter_nomap = ag("practice-hunter-tactical")      # карты нет → блок
         _cp.knowledge_map(ag_case).write_text("## КАРТА ГОТОВА ✓\n", encoding="utf-8")
@@ -3849,7 +3850,7 @@ def selftest() -> int:
         _cp.practice(ag_case).write_text("## FAST-СИНТЕЗ ФЕМИДЫ\n", encoding="utf-8")
         drafter_ok = ag("doc-drafter")                     # карта+практика → пуск
         reviewer_main = ag("doc-reviewer")                 # из главного потока → блок
-        os.environ["THEMIS_DOC_REVIEWER_OK"] = "1"
+        os.environ["THEMIZ_DOC_REVIEWER_OK"] = "1"
         reviewer_ok = ag("doc-reviewer")                   # escape из doc-drafter → пуск
         # Потолок числа живых — принуждение, а не печать формулы: реестр полон →
         # спавн отбит; слот освобожден → проходит. Проба боевой проводкой через
@@ -3869,13 +3870,13 @@ def selftest() -> int:
     finally:
         _CASES_ROOTS = saved_ag_roots
         if saved_dr is None:
-            os.environ.pop("THEMIS_DOC_REVIEWER_OK", None)
+            os.environ.pop("THEMIZ_DOC_REVIEWER_OK", None)
         else:
-            os.environ["THEMIS_DOC_REVIEWER_OK"] = saved_dr
+            os.environ["THEMIZ_DOC_REVIEWER_OK"] = saved_dr
         if saved_live is None:
-            os.environ.pop("THEMIS_SWARM_LIVE", None)
+            os.environ.pop("THEMIZ_SWARM_LIVE", None)
         else:
-            os.environ["THEMIS_SWARM_LIVE"] = saved_live
+            os.environ["THEMIZ_SWARM_LIVE"] = saved_live
     cases += [
         ("agent: ключевой агент без проводника заблокирован", no_guide, 2),
         ("agent: неключевой агент проходит", nonkey, 0),

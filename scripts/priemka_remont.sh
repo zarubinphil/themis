@@ -11,7 +11,8 @@
 # видна в diff маркера helioz-gate.
 set -u
 cd "$(dirname "$0")/.." || exit 2
-CASE_DIR="${THEMIS_CASE:-$(ls -d cases/*/*/ 2>/dev/null | head -1)}"
+. scripts/sreda.sh
+CASE_DIR="${THEMIZ_CASE:-$(ls -d cases/*/*/ 2>/dev/null | head -1)}"
 FAILS=0
 STEND=""
 
@@ -42,11 +43,11 @@ expect() {  # expect <код|не0> <описание> -- команда…
 
 run_1() {
   sect 1 "Проводник существует и держит порядок фаз"
-  expect 0 "проводник синтаксически жив" -- node --check .claude/workflows/themis-pipeline.js
-  expect 0 "проводник тоньше 260 строк" -- test "$(wc -l < .claude/workflows/themis-pipeline.js)" -lt 260
-  expect 0 "проводник зовет существующие приборы" -- bash -c 'grep -q "themis_status.py" .claude/workflows/themis-pipeline.js && grep -q "verdict.py" .claude/workflows/themis-pipeline.js && grep -q "document_guard.py" .claude/workflows/themis-pipeline.js && grep -q "quality_gate.py" .claude/workflows/themis-pipeline.js'
-  expect 0 "проводник без TODO/placeholder" -- bash -c '! grep -qi "TODO\\|заглушка\\|placeholder" .claude/workflows/themis-pipeline.js'
-  expect 0 "рецензия ровно из трех линз" -- bash -c 'test "$(grep -c "label: '\''lens:" .claude/workflows/themis-pipeline.js)" -eq 3'
+  expect 0 "проводник синтаксически жив" -- node --check .claude/workflows/themiz-pipeline.js
+  expect 0 "проводник тоньше 260 строк" -- test "$(wc -l < .claude/workflows/themiz-pipeline.js)" -lt 260
+  expect 0 "проводник зовет существующие приборы" -- bash -c 'grep -q "themiz_status.py" .claude/workflows/themiz-pipeline.js && grep -q "verdict.py" .claude/workflows/themiz-pipeline.js && grep -q "document_guard.py" .claude/workflows/themiz-pipeline.js && grep -q "quality_gate.py" .claude/workflows/themiz-pipeline.js'
+  expect 0 "проводник без TODO/placeholder" -- bash -c '! grep -qi "TODO\\|заглушка\\|placeholder" .claude/workflows/themiz-pipeline.js'
+  expect 0 "рецензия ровно из трех линз" -- bash -c 'test "$(grep -c "label: '\''lens:" .claude/workflows/themiz-pipeline.js)" -eq 3'
 }
 
 verdict_stend() {  # общий стенд для 2-4: первый раунд записан честно
@@ -103,7 +104,7 @@ run_8() {
   if [ -z "$CASE_DIR" ]; then echo "   ✗ дела на диске нет — проверить статус не на чем"; FAILS=$((FAILS+1)); return; fi
   local status_log
   status_log="$(mktemp)"
-  python3 scripts/themis_status.py "$CASE_DIR" >"$status_log" 2>&1
+  python3 scripts/themiz_status.py "$CASE_DIR" >"$status_log" 2>&1
   code=$?
   if { [ "$code" -eq 0 ] || [ "$code" -eq 2 ] || [ "$code" -eq 3 ]; } &&
      grep -q "активные агенты" "$status_log" &&

@@ -15,8 +15,8 @@ Fail-closed. Локального движка нет — прибор отка�
     --engines                                    какие движки видны на этой машине
     --selftest                                   без сети
 
-Движок берется в таком порядке: переменная THEMIS_STT_CMD → `voice.stt_cmd` из конфига
-(scripts/themis_config.py) → платформенное умолчание. На macOS это SMLTLK (Neural Engine,
+Движок берется в таком порядке: переменная THEMIZ_STT_CMD → `voice.stt_cmd` из конфига
+(scripts/themiz_config.py) → платформенное умолчание. На macOS это SMLTLK (Neural Engine,
 штатный компонент Фемиды), на сервере — whisper. Своя команда получает ОДИН аргумент —
 путь к файлу — и печатает текст в stdout.
 
@@ -37,6 +37,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+import sreda  # noqa: E402,F401  переходный период имен переменных
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 # Умолчания по платформам. Первый найденный в PATH и выигрывает.
@@ -53,8 +54,8 @@ def _config_cmd() -> str:
     """Команда из конфига установки. Конфига нет — это норма, а не ошибка."""
     try:
         sys.path.insert(0, str(SCRIPTS_DIR))
-        import themis_config
-        return str((themis_config.load(themis_config.DEFAULT_PATH).get("voice") or {})
+        import themiz_config
+        return str((themiz_config.load(themiz_config.DEFAULT_PATH).get("voice") or {})
                    .get("stt_cmd") or "")
     except Exception:                                          # noqa: BLE001
         return ""
@@ -76,7 +77,7 @@ def _ispolnyaemyy(cmd: str) -> str:
 def engines() -> list:
     """Что видно на этой машине: свой, из конфига, платформенные."""
     out = []
-    for istochnik, cmd in (("THEMIS_STT_CMD", os.environ.get("THEMIS_STT_CMD", "")),
+    for istochnik, cmd in (("THEMIZ_STT_CMD", os.environ.get("THEMIZ_STT_CMD", "")),
                            ("конфиг voice.stt_cmd", _config_cmd())):
         if cmd:
             out.append({"source": istochnik, "cmd": cmd, "path": _ispolnyaemyy(cmd)})
@@ -124,7 +125,7 @@ def transcribe(src: str, language: str = "ru") -> dict:
             "ОТКАЗ: локального движка расшифровки на этой машине нет "
             f"(искали: {vidno}). Звук с материалами дела за пределы машины не уходит, "
             "поэтому замены нет: поставить SMLTLK (macOS) или whisper (сервер) — "
-            "`bash install.sh --with-smltlk`, — либо назвать свою команду в THEMIS_STT_CMD.")
+            "`bash install.sh --with-smltlk`, — либо назвать свою команду в THEMIZ_STT_CMD.")
     if not _whisper_model_est(e["path"]):
         raise SystemExit(
             "ОТКАЗ: whisper найден, а модель на диске отсутствует — первый запуск полез бы "
@@ -134,7 +135,7 @@ def transcribe(src: str, language: str = "ru") -> dict:
     imya = Path(e["path"]).name.lower()
     # Вывод движка — во временный каталог, не рядом со звуком: материалы дела
     # не обрастают побочными файлами (и не попадают под запрет растра в cases/).
-    with tempfile.TemporaryDirectory(prefix="themis-stt-") as td:
+    with tempfile.TemporaryDirectory(prefix="themiz-stt-") as td:
         if imya.startswith("whisper") and "cli" not in imya and "cpp" not in imya:
             argv = [e["path"], str(put), "--language", language, "--output_format", "txt",
                     "--output_dir", td, "--fp16", "False"]
@@ -173,7 +174,7 @@ def selftest() -> int:
 
         saved = dict(os.environ)
         try:
-            os.environ["THEMIS_STT_CMD"] = str(dvizhok)
+            os.environ["THEMIZ_STT_CMD"] = str(dvizhok)
             do = sorted(p.name for p in td.iterdir())
             d = transcribe(str(zvuk))
             assert "проба" in d["text"], f"расшифровка потеряна: {d}"
@@ -182,7 +183,7 @@ def selftest() -> int:
             assert do == posle, f"движок насорил рядом со звуком: {set(posle) - set(do)}"
 
             # Движка нет — отказ, а не тихий уход в облако.
-            os.environ["THEMIS_STT_CMD"] = str(td / "net-takogo")
+            os.environ["THEMIZ_STT_CMD"] = str(td / "net-takogo")
             os.environ["PATH"] = str(td)
             try:
                 transcribe(str(zvuk))
@@ -194,8 +195,8 @@ def selftest() -> int:
                     assert oblako not in msg, f"отказ предлагает облако: {oblako}"
 
             # Секреты в окружение движка не попадают.
-            os.environ["THEMIS_PANEL_TOKEN"] = "ne-dolzhen-uyti"
-            assert "THEMIS_PANEL_TOKEN" not in _sreda(), "секрет ушел бы движку в окружение"
+            os.environ["THEMIZ_PANEL_TOKEN"] = "ne-dolzhen-uyti"
+            assert "THEMIZ_PANEL_TOKEN" not in _sreda(), "секрет ушел бы движку в окружение"
         finally:
             os.environ.clear()
             os.environ.update(saved)

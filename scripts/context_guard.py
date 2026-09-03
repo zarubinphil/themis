@@ -11,7 +11,7 @@
 1. ПОТОЛОК КОНТЕКСТА. Контекст текущего запроса выше потолка → работать этой сессией
    нельзя: каждый следующий вызов оплачивает весь накопленный вес заново. Пропускаются
    только действия РАЗГРУЗКИ: запись/чтение handoff.md, запуск приборов замера, спавн
-   субагента (у него контекст свой). Выключатель на крайний случай: THEMIS_CTX_LIMIT=0.
+   субагента (у него контекст свой). Выключатель на крайний случай: THEMIZ_CTX_LIMIT=0.
 2. ПОВТОРНОЕ ЧТЕНИЕ. Тот же файл тем же срезом, файл на диске не менялся → блок:
    он уже в контексте, второй раз платится зря. Другой срез (offset/limit) и файл,
    изменившийся после первого чтения, проходят — это не повтор.
@@ -31,10 +31,11 @@ import os
 import re
 import sys
 import tempfile
+import sreda  # noqa: E402,F401  переходный период имен переменных
 
 # Потолок контекста ОДНОГО запроса. 200 000 — порог, после которого фазу пора
 # закрывать: замер 02.09.2026 показал 104 запроса из 189 с контекстом свыше 300 000.
-CTX_LIMIT = int(os.environ.get("THEMIS_CTX_LIMIT", "200000"))
+CTX_LIMIT = int(os.environ.get("THEMIZ_CTX_LIMIT", "200000"))
 
 # Потолок веса файла инструкций. 16 КБ ≈ 4 000 токенов на каждый запрос сессии.
 INSTRUCTION_MAX_BYTES = 16 * 1024
@@ -45,13 +46,13 @@ INSTRUCTION_FILES = ("CLAUDE.md", "AGENTS.md")
 # замера и состояния, самопроверки. Блокируется то, что тащит новый вес: чтение,
 # произвольный Bash, сеть.
 UNLOAD_PATH = re.compile(r"handoff\.md$", re.I)
-UNLOAD_CMD = re.compile(r"context_ledger|token_ledger|themis_status|retro\.py|--selftest")
+UNLOAD_CMD = re.compile(r"context_ledger|token_ledger|themiz_status|retro\.py|--selftest")
 UNLOAD_TOOLS = ("Agent", "Write", "Edit", "NotebookEdit")
 
 # Осознанный обход ОДНОГО вызова: префикс прямо в команде. Слово-пропуск в середине
 # строки (первым таким был `git `) молча превращается в лазейку, через которую
 # проходит вся работа; здесь обход виден и в команде, и в журнале сессии.
-BREAK_GLASS = "THEMIS_CTX_OK=1"
+BREAK_GLASS = "THEMIZ_CTX_OK=1"
 
 # Хвост транскрипта, которого хватает, чтобы найти последнюю реплику с usage.
 TAIL_BYTES = 512 * 1024
@@ -86,7 +87,7 @@ def ctx_current(transcript: str) -> int:
 
 
 def _state_path(session_id: str) -> str:
-    d = os.path.join(tempfile.gettempdir(), "themis-context")
+    d = os.path.join(tempfile.gettempdir(), "themiz-context")
     os.makedirs(d, exist_ok=True)
     safe = re.sub(r"[^A-Za-z0-9_-]", "-", session_id or "no-session")
     return os.path.join(d, f"{safe}.json")
@@ -188,7 +189,7 @@ def check(payload: dict) -> str | None:
                           "Замер: python3 scripts/context_ledger.py. Запись, спавн агента "
                           "и приборы замера проходят; чтение и произвольный Bash — нет. "
                           f"Разовый осознанный обход — префикс {BREAK_GLASS} в команде; "
-                          "снять потолок совсем — THEMIS_CTX_LIMIT=0.")
+                          "снять потолок совсем — THEMIZ_CTX_LIMIT=0.")
 
     # 2. Повторное чтение того же среза неизмененного файла.
     if tool == "Read" and ti.get("file_path"):
@@ -273,7 +274,7 @@ def selftest() -> int:
             ("прибор замера проходит", measure is None),
             ("осознанный обход префиксом проходит", glass is None),
             ("слово-пропуск в середине команды лазейкой не работает", sneaky is not None),
-            ("THEMIS_CTX_LIMIT=0 снимает потолок", off is None),
+            ("THEMIZ_CTX_LIMIT=0 снимает потолок", off is None),
             ("CLAUDE.md сверх байтового потолка блокируется", big is not None),
             ("CLAUDE.md в пределах потолка проходит", small is None),
             ("рост через Edit считается по байтам", grow is not None),

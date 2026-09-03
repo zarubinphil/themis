@@ -377,7 +377,7 @@ def worktree_merge(name, root=ROOT):
     code, out, _ = run(["git", "status", "--porcelain"], cwd=wt, timeout=60)
     if code == 0 and out.strip():
         run(["git", "add", "-A"], cwd=wt, timeout=120)
-        cc, _, _ = run(["git", "-c", "user.email=autoloop@themis", "-c", f"user.name={name}",
+        cc, _, _ = run(["git", "-c", "user.email=autoloop@themiz", "-c", f"user.name={name}",
                         "commit", "-qm", f"итерация роли {name}: автокоммит координатора "
                         f"(роль оставила правки незакоммиченными)"], cwd=wt, timeout=300)
         if cc != 0:

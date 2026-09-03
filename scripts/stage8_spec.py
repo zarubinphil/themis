@@ -97,10 +97,10 @@ def stub(path: Path, body: str) -> str:
 
 def config(path: Path, **over) -> str:
     """Конфиг установки. Секрет сюда не пишется никогда — только ИМЯ переменной."""
-    cfg = {"bot": {"enabled": True, "token_env": "THEMIS_TELEGRAM_BOT_TOKEN",
-                   "chat_id_env": "THEMIS_TELEGRAM_CHAT_ID"},
-           "server": {"enabled": True, "url": "https://themis.vnutri.local",
-                      "token_env": "THEMIS_PANEL_TOKEN"}}
+    cfg = {"bot": {"enabled": True, "token_env": "THEMIZ_TELEGRAM_BOT_TOKEN",
+                   "chat_id_env": "THEMIZ_TELEGRAM_CHAT_ID"},
+           "server": {"enabled": True, "url": "https://themiz.vnutri.local",
+                      "token_env": "THEMIZ_PANEL_TOKEN"}}
     for k, v in over.items():
         cfg.setdefault(k, {})
         cfg[k] = {**cfg.get(k, {}), **v} if isinstance(v, dict) else v
@@ -110,10 +110,10 @@ def config(path: Path, **over) -> str:
 
 def bot_env(cfg_path, audit, extra=None):
     e = {**NO_NET,
-         "THEMIS_CONFIG": str(cfg_path),
-         "THEMIS_TELEGRAM_BOT_TOKEN": FAKE_TOKEN,
-         "THEMIS_TELEGRAM_CHAT_ID": OWNER_CHAT,
-         "THEMIS_BOT_AUDIT": str(audit)}
+         "THEMIZ_CONFIG": str(cfg_path),
+         "THEMIZ_TELEGRAM_BOT_TOKEN": FAKE_TOKEN,
+         "THEMIZ_TELEGRAM_CHAT_ID": OWNER_CHAT,
+         "THEMIZ_BOT_AUDIT": str(audit)}
     e.update(extra or {})
     return e
 
@@ -277,7 +277,7 @@ def http_code(url, headers=None, timeout=10):
 
 
 # ── 1. Секрет ───────────────────────────────────────────────────────────────
-SECRET_CONTRACT = """  scripts/themis_bot.py — бот-пульт. Секрет живет ТОЛЬКО в окружении.
+SECRET_CONTRACT = """  scripts/themiz_bot.py — бот-пульт. Секрет живет ТОЛЬКО в окружении.
     --check [--config Ф]      готов ли бот к запуску: 0 — да, 1 — нет с причиной.
                               Печатает состояние (конфиг, есть ли секрет, задан ли chat_id)
                               и НЕ печатает значение секрета ни при каком исходе.
@@ -291,50 +291,50 @@ SECRET_CONTRACT = """  scripts/themis_bot.py — бот-пульт. Секрет
 
 
 def check_secret():
-    if not exists("themis_bot.py"):
-        return [("themis_bot.py", "прибора нет. Контракт:\n" + SECRET_CONTRACT)]
+    if not exists("themiz_bot.py"):
+        return [("themiz_bot.py", "прибора нет. Контракт:\n" + SECRET_CONTRACT)]
     fails = []
-    code, out, err = run([tool("themis_bot.py"), "--selftest"])
+    code, out, err = run([tool("themiz_bot.py"), "--selftest"])
     if code != 0:
-        fails.append(("themis_bot.py", f"--selftest вернул {code}: {(out + err).strip()[-300:]}"))
+        fails.append(("themiz_bot.py", f"--selftest вернул {code}: {(out + err).strip()[-300:]}"))
 
     # Токен аргументом — отказ. Аргументы видны в ps любому пользователю машины.
-    code, out, err = run([tool("themis_bot.py"), "--check", "--token", FAKE_TOKEN])
+    code, out, err = run([tool("themiz_bot.py"), "--check", "--token", FAKE_TOKEN])
     if code == 0:
-        fails.append(("themis_bot.py", "секрет принят аргументом --token: argv виден в ps"))
+        fails.append(("themiz_bot.py", "секрет принят аргументом --token: argv виден в ps"))
 
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
         cfg = Path(config(td / "config.json"))
         audit = td / "audit.log"
         env = bot_env(cfg, audit)
-        code, out, err = run([tool("themis_bot.py"), "--check"], env=env)
+        code, out, err = run([tool("themiz_bot.py"), "--check"], env=env)
         if code != 0:
-            fails.append(("themis_bot.py", f"--check при заданном секрете вернул {code}: "
+            fails.append(("themiz_bot.py", f"--check при заданном секрете вернул {code}: "
                                            f"{(out + err).strip()[:200]}"))
         # Чат владельца не номером: бот честно сравнивает строки, ни одна не совпадет,
         # и владелец видит «бот сломался» вместо внятной причины.
-        krivoy = {**env, "THEMIS_TELEGRAM_CHAT_ID": "мой чат"}
-        code, out, err = run([tool("themis_bot.py"), "--check"], env=krivoy)
+        krivoy = {**env, "THEMIZ_TELEGRAM_CHAT_ID": "мой чат"}
+        code, out, err = run([tool("themiz_bot.py"), "--check"], env=krivoy)
         if code == 0:
-            fails.append(("themis_bot.py", "чат владельца «мой чат» принят как готовность"))
+            fails.append(("themiz_bot.py", "чат владельца «мой чат» принят как готовность"))
         if FAKE_TOKEN in out + err:
-            fails.append(("themis_bot.py", "--check напечатал ЗНАЧЕНИЕ секрета"))
+            fails.append(("themiz_bot.py", "--check напечатал ЗНАЧЕНИЕ секрета"))
 
         # Неверный секрет: подставной Telegram отвечает 401. Жалоба не цитирует токен.
         with FakeTelegram([upd(1, OWNER_CHAT, "/status")]) as tg:
-            bad = {**env, "THEMIS_TELEGRAM_BOT_TOKEN": FAKE_TOKEN + "-nevernyy"}
-            code, out, err = run([tool("themis_bot.py"), "--once", "--api-base", tg.base],
+            bad = {**env, "THEMIZ_TELEGRAM_BOT_TOKEN": FAKE_TOKEN + "-nevernyy"}
+            code, out, err = run([tool("themiz_bot.py"), "--once", "--api-base", tg.base],
                                  env=bad, timeout=120)
             if code == 0:
-                fails.append(("themis_bot.py", "Telegram ответил 401, а бот вернул код 0"))
+                fails.append(("themiz_bot.py", "Telegram ответил 401, а бот вернул код 0"))
             if FAKE_TOKEN in out + err:
-                fails.append(("themis_bot.py", "жалоба на отказ доступа несет значение секрета"))
+                fails.append(("themiz_bot.py", "жалоба на отказ доступа несет значение секрета"))
 
         with FakeTelegram([upd(2, OWNER_CHAT, "/status")]) as tg:
-            run([tool("themis_bot.py"), "--once", "--api-base", tg.base], env=env, timeout=120)
+            run([tool("themiz_bot.py"), "--once", "--api-base", tg.base], env=env, timeout=120)
         if audit.exists() and FAKE_TOKEN in audit.read_text(encoding="utf-8", errors="replace"):
-            fails.append(("themis_bot.py", "значение секрета попало в журнал аудита"))
+            fails.append(("themiz_bot.py", "значение секрета попало в журнал аудита"))
 
     # Отслеживаемые файлы: формы токена Telegram там нет вовсе.
     p = subprocess.run(["git", "grep", "-nIE", TOKEN_SHAPE.pattern.replace(r"\b", ""), "--", "."],
@@ -347,12 +347,12 @@ def check_secret():
 
 
 # ── 2. Доступ ───────────────────────────────────────────────────────────────
-ACCESS_CONTRACT = """  scripts/themis_bot.py — whitelist единственного chat_id.
+ACCESS_CONTRACT = """  scripts/themiz_bot.py — whitelist единственного chat_id.
     --once --api-base URL [--config Ф]   один проход long polling: забрать обновления,
                               ответить, выйти. Код 0 — проход состоялся.
     Разрешенный chat_id берется из окружения по имени bot.chat_id_env.
     · сообщение с чужого chat_id НЕ получает ответа (ни одного sendMessage на этот чат)
-      и попадает в журнал аудита (THEMIS_BOT_AUDIT) отдельной строкой со словом «чужой»;
+      и попадает в журнал аудита (THEMIZ_BOT_AUDIT) отдельной строкой со словом «чужой»;
     · chat_id, названный в ТЕКСТЕ сообщения, — заявление, а не факт: адрес чата берется
       только из message.chat.id, который проставил Telegram;
     · отправитель обязан совпадать с владельцем так же, как чат: в личном чате
@@ -368,8 +368,8 @@ ACCESS_CONTRACT = """  scripts/themis_bot.py — whitelist единственн�
 
 
 def check_access():
-    if not exists("themis_bot.py"):
-        return [("themis_bot.py", "прибора нет. Контракт:\n" + ACCESS_CONTRACT)]
+    if not exists("themiz_bot.py"):
+        return [("themiz_bot.py", "прибора нет. Контракт:\n" + ACCESS_CONTRACT)]
     fails = []
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
@@ -397,47 +397,47 @@ def check_access():
                    {"update_id": 18, "message": {"chat": {"id": None}, "text": "/status"}},
                    {}]
         with FakeTelegram(updates) as tg:
-            code, out, err = run([tool("themis_bot.py"), "--once", "--api-base", tg.base],
+            code, out, err = run([tool("themiz_bot.py"), "--once", "--api-base", tg.base],
                                  env=env, timeout=120)
             if code != 0:
-                fails.append(("themis_bot.py", f"--once вернул {code}: {(out + err).strip()[:250]}"))
+                fails.append(("themiz_bot.py", f"--once вернул {code}: {(out + err).strip()[:250]}"))
             if "Traceback" in err:
-                fails.append(("themis_bot.py", "кривое обновление уронило проход трассировкой — "
+                fails.append(("themiz_bot.py", "кривое обновление уронило проход трассировкой — "
                                                "в непрерывном опросе это смерть канала"))
             chuzhim = [s for s in tg.sent if s["chat_id"] == CHUZHOY_CHAT]
             if chuzhim:
-                fails.append(("themis_bot.py", f"чужой chat_id получил ответ ({len(chuzhim)} шт.)"))
+                fails.append(("themiz_bot.py", f"чужой chat_id получил ответ ({len(chuzhim)} шт.)"))
             bez_zashchity = [s for s in tg.sent
                              if not (s.get("telo") or {}).get("disable_web_page_preview")]
             if bez_zashchity:
-                fails.append(("themis_bot.py", "сообщение ушло с включенным превью ссылки — "
+                fails.append(("themiz_bot.py", "сообщение ушло с включенным превью ссылки — "
                                                "обходчик Telegram пойдет по нашему адресу сам"))
             svoi = [s for s in tg.sent if s["chat_id"] == OWNER_CHAT]
             if not svoi:
-                fails.append(("themis_bot.py", "владелец не получил ответа на свою команду"))
+                fails.append(("themiz_bot.py", "владелец не получил ответа на свою команду"))
             if len(svoi) > 1:
-                fails.append(("themis_bot.py", f"на чат владельца ушло {len(svoi)} сообщений: "
+                fails.append(("themiz_bot.py", f"на чат владельца ушло {len(svoi)} сообщений: "
                                                "чужой отправитель в этом чате получил ответ"))
             if not any("getUpdates" in p for p in tg.paths):
-                fails.append(("themis_bot.py", "getUpdates не вызывался — это не long polling"))
+                fails.append(("themiz_bot.py", "getUpdates не вызывался — это не long polling"))
             if any("setWebhook" in p for p in tg.paths):
-                fails.append(("themis_bot.py", "бот зовет setWebhook — сервер откроет входящий порт"))
+                fails.append(("themiz_bot.py", "бот зовет setWebhook — сервер откроет входящий порт"))
         if not audit.exists():
-            fails.append(("themis_bot.py", f"журнала аудита нет ({audit.name})"))
+            fails.append(("themiz_bot.py", f"журнала аудита нет ({audit.name})"))
         else:
             zhurnal = audit.read_text(encoding="utf-8", errors="replace")
             if "чуж" not in zhurnal.lower():
-                fails.append(("themis_bot.py", "чужое сообщение не попало в аудит"))
+                fails.append(("themiz_bot.py", "чужое сообщение не попало в аудит"))
             if CHUZHOY_CHAT not in zhurnal:
-                fails.append(("themis_bot.py", "аудит не называет чужой chat_id — след бесполезен"))
+                fails.append(("themiz_bot.py", "аудит не называет чужой chat_id — след бесполезен"))
             if "секрет дела" in zhurnal:
-                fails.append(("themis_bot.py", "аудит записал ТЕКСТ чужого сообщения — "
+                fails.append(("themiz_bot.py", "аудит записал ТЕКСТ чужого сообщения — "
                                                "журнал стал вторым местом хранения чужого"))
     return fails
 
 
 # ── 3. Речь: корпус исходящих и сторож на выходе ────────────────────────────
-RECH_CONTRACT = """  scripts/themis_bot.py — что бот вообще умеет сказать.
+RECH_CONTRACT = """  scripts/themiz_bot.py — что бот вообще умеет сказать.
     --templates --json        {"fixture": {"pd": {...}, "safe": {...}},
                                "templates": [{"name","text"}, ...]}
                               Каждый шаблон отрендерен НА ХУДШИХ данных: в fixture.pd лежат
@@ -484,12 +484,12 @@ UTECHKI = ["Иванова Мария Петровна подала иск.",
 
 
 def check_rech():
-    if not exists("themis_bot.py"):
-        return [("themis_bot.py", "прибора нет. Контракт:\n" + RECH_CONTRACT)]
+    if not exists("themiz_bot.py"):
+        return [("themiz_bot.py", "прибора нет. Контракт:\n" + RECH_CONTRACT)]
     fails = []
-    code, out, err = run([tool("themis_bot.py"), "--templates", "--json"])
+    code, out, err = run([tool("themiz_bot.py"), "--templates", "--json"])
     if code != 0:
-        return fails + [("themis_bot.py", f"--templates --json вернул {code}: "
+        return fails + [("themiz_bot.py", f"--templates --json вернул {code}: "
                                           f"{(out + err).strip()[:250]}")]
     try:
         d = json.loads(out)
@@ -497,45 +497,45 @@ def check_rech():
         safe = d["fixture"]["safe"]
         shablony = {t["name"]: t["text"] for t in d["templates"]}
     except (ValueError, KeyError, TypeError) as e:
-        return fails + [("themis_bot.py", f"--templates --json не разобран ({e}): {out[:200]}")]
+        return fails + [("themiz_bot.py", f"--templates --json не разобран ({e}): {out[:200]}")]
 
     for name in ("start", "hearing", "deadline", "doc_ready", "voice_ok", "error"):
         if name not in shablony:
-            fails.append(("themis_bot.py", f"нет обязательного шаблона «{name}»"))
+            fails.append(("themiz_bot.py", f"нет обязательного шаблона «{name}»"))
     if len(pd) < 4:
-        fails.append(("themis_bot.py", f"fixture.pd из {len(pd)} значений — худший случай "
+        fails.append(("themiz_bot.py", f"fixture.pd из {len(pd)} значений — худший случай "
                                        "обязан нести ФИО, номер дела, ИНН, сумму и адрес"))
     ves = "\n".join(shablony.values())
     for klyuch, znach in pd.items():
         if znach and str(znach) in ves:
-            fails.append(("themis_bot.py", f"значение fixture.pd «{klyuch}» ушло бы в Telegram"))
+            fails.append(("themiz_bot.py", f"значение fixture.pd «{klyuch}» ушло бы в Telegram"))
     # Объявление «это безопасно» проверяется, а не принимается на веру.
     with tempfile.TemporaryDirectory() as td_safe:
         f = Path(td_safe) / "safe.txt"
         f.write_text("\n".join(str(v) for v in safe.values()), encoding="utf-8")
         code_s, out_s, err_s = run([tool("pii_gate.py"), "--residual", str(f)])
         if code_s != 0:
-            fails.append(("themis_bot.py", "в fixture.safe объявлено безопасным то, что "
+            fails.append(("themiz_bot.py", "в fixture.safe объявлено безопасным то, что "
                                            f"pii_gate считает ПД: {(out_s + err_s)[:150]}"))
     for klyuch, znach in safe.items():
         if DENGI.search(str(znach)) or NOMER_DELA.search(str(znach)):
-            fails.append(("themis_bot.py", f"fixture.safe «{klyuch}» объявлено безопасным, "
+            fails.append(("themiz_bot.py", f"fixture.safe «{klyuch}» объявлено безопасным, "
                                            "а это сумма либо номер дела"))
     if DENGI.search(ves):
-        fails.append(("themis_bot.py", f"в исходящем тексте сумма денег: "
+        fails.append(("themiz_bot.py", f"в исходящем тексте сумма денег: "
                                        f"{DENGI.search(ves).group(0)!r}"))
     if NOMER_DELA.search(ves):
-        fails.append(("themis_bot.py", f"в исходящем тексте номер дела: "
+        fails.append(("themiz_bot.py", f"в исходящем тексте номер дела: "
                                        f"{NOMER_DELA.search(ves).group(0)!r}"))
     plohoe = [t for t in shablony.values()
               if re.search(r"\b(?:1|21|31)\s+(?:дня|дней)\b", t)
               or re.search(r"\b(?:5|6|7|8|9|11|12|13|14)\s+(?:день|дня)\b", t)]
     if plohoe:
-        fails.append(("themis_bot.py", f"число не согласовано со словом: {plohoe[0][:70]!r}"))
+        fails.append(("themiz_bot.py", f"число не согласовано со словом: {plohoe[0][:70]!r}"))
 
     start = shablony.get("start", "")
     if "telegram" not in start.lower() or "ссыл" not in start.lower():
-        fails.append(("themis_bot.py", "первое сообщение не объясняет границу тайны: "
+        fails.append(("themiz_bot.py", "первое сообщение не объясняет границу тайны: "
                                        "обязано назвать Telegram и ссылку на документ"))
 
     with tempfile.TemporaryDirectory() as td:
@@ -544,32 +544,32 @@ def check_rech():
         korpus.write_text(ves, encoding="utf-8")
         code, out, err = run([tool("pii_gate.py"), "--residual", str(korpus)])
         if code != 0:
-            fails.append(("themis_bot.py", f"корпус шаблонов не прошел pii_gate --residual: "
+            fails.append(("themiz_bot.py", f"корпус шаблонов не прошел pii_gate --residual: "
                                            f"{(out + err).strip()[:200]}"))
         # Ось «ложная тревога»: сторож, кричащий на обиходе, будет выключен в первый день.
         for i, text in enumerate(OBIKHOD + list(shablony.values())):
             f = td / f"obikhod_{i}.txt"
             f.write_text(text, encoding="utf-8")
-            code, out, err = run([tool("themis_bot.py"), "--check-out", str(f)])
+            code, out, err = run([tool("themiz_bot.py"), "--check-out", str(f)])
             if code != 0:
-                fails.append(("themis_bot.py", f"ложная тревога на обиходе: {text[:60]!r}"))
+                fails.append(("themiz_bot.py", f"ложная тревога на обиходе: {text[:60]!r}"))
         # Ось «пропуск»: настоящая утечка обязана быть остановлена.
         for i, text in enumerate(UTECHKI):
             f = td / f"utechka_{i}.txt"
             f.write_text(text, encoding="utf-8")
-            code, out, err = run([tool("themis_bot.py"), "--check-out", str(f)])
+            code, out, err = run([tool("themiz_bot.py"), "--check-out", str(f)])
             if code == 0:
-                fails.append(("themis_bot.py", f"сторож пропустил бы наружу: {text[:60]!r}"))
+                fails.append(("themiz_bot.py", f"сторож пропустил бы наружу: {text[:60]!r}"))
 
         # Живой проход: владелец пишет боту текст с ПД. Эхо запрещено.
         cfg = Path(config(td / "config.json"))
         env = bot_env(cfg, td / "audit.log")
         with FakeTelegram([upd(20, OWNER_CHAT, "найди Иванову Марию Петровну, ИНН 771234567890")]) as tg:
-            run([tool("themis_bot.py"), "--once", "--api-base", tg.base], env=env, timeout=120)
+            run([tool("themiz_bot.py"), "--once", "--api-base", tg.base], env=env, timeout=120)
             ushlo = "\n".join(s["text"] for s in tg.sent)
             for sled in ("Иванов", "Марию", "771234567890"):
                 if sled in ushlo:
-                    fails.append(("themis_bot.py", f"бот вернул в Telegram эхо с ПД: {sled!r}"))
+                    fails.append(("themiz_bot.py", f"бот вернул в Telegram эхо с ПД: {sled!r}"))
     return fails
 
 
@@ -578,14 +578,14 @@ GOLOS_CONTRACT = """  scripts/voice_local.py — расшифровка голо
     --transcribe ФАЙЛ [--json]   печатает {"text","engine","local":true} и код 0.
                               Движок выбирается по платформе (на Маке — SMLTLK/Neural
                               Engine, на сервере — whisper); подставить свой можно
-                              переменной THEMIS_STT_CMD (команда получает путь к файлу).
+                              переменной THEMIZ_STT_CMD (команда получает путь к файлу).
     · при расшифровке НОЛЬ исходящих сетевых обращений — проверяется счетчиком,
       поставленным прокси-сервером на весь трафик процесса;
     · локального движка нет → код 1 и честный отказ; молчаливого ухода в облачную
       расшифровку не бывает, и отказ не предлагает облако как замену;
     · звук не копируется никуда за пределы своего каталога;
     --selftest дает 0 без сети.
-  scripts/themis_bot.py --once — голосовое от владельца расшифровывается этим прибором,
+  scripts/themiz_bot.py --once — голосовое от владельца расшифровывается этим прибором,
     а ответ в Telegram НЕ ЦИТИРУЕТ расшифровку: сказанное вслух остается на машине."""
 
 
@@ -605,7 +605,7 @@ def check_golos():
         dvizhok = stub(td / "stt.sh", f'echo "{rasp}"\n')
 
         with SchetchikProxy() as pr:
-            env = {**os.environ, "THEMIS_STT_CMD": dvizhok,
+            env = {**os.environ, "THEMIZ_STT_CMD": dvizhok,
                    "HTTPS_PROXY": f"http://127.0.0.1:{pr.port}",
                    "HTTP_PROXY": f"http://127.0.0.1:{pr.port}",
                    "ALL_PROXY": f"http://127.0.0.1:{pr.port}",
@@ -634,7 +634,7 @@ def check_golos():
                 fails.append(("voice_local.py", f"звук скопирован рядом: {sorted(lishnee)}"))
 
         # Движка нет — отказ, а не тихий уход в облако.
-        pusto = {**NO_NET, "THEMIS_STT_CMD": str(td / "net-takogo-dvizhka"), "PATH": str(td)}
+        pusto = {**NO_NET, "THEMIZ_STT_CMD": str(td / "net-takogo-dvizhka"), "PATH": str(td)}
         code, out, err = run([tool("voice_local.py"), "--transcribe", str(zvuk)], env=pusto)
         if code == 0:
             fails.append(("voice_local.py", "без локального движка вернул успех — "
@@ -644,18 +644,18 @@ def check_golos():
             if oblako in prilozheno:
                 fails.append(("voice_local.py", f"отказ предлагает облако как замену: {oblako!r}"))
 
-        if exists("themis_bot.py"):
+        if exists("themiz_bot.py"):
             cfg = Path(config(td / "config.json"))
-            env = bot_env(cfg, td / "audit.log", {"THEMIS_STT_CMD": dvizhok})
+            env = bot_env(cfg, td / "audit.log", {"THEMIZ_STT_CMD": dvizhok})
             with FakeTelegram([upd(30, OWNER_CHAT, voice=True)]) as tg:
-                code, out, err = run([tool("themis_bot.py"), "--once", "--api-base", tg.base],
+                code, out, err = run([tool("themiz_bot.py"), "--once", "--api-base", tg.base],
                                      env=env, timeout=180)
                 ushlo = "\n".join(s["text"] for s in tg.sent)
                 if not tg.sent:
-                    fails.append(("themis_bot.py", "на голосовое бот не ответил вовсе"))
+                    fails.append(("themiz_bot.py", "на голосовое бот не ответил вовсе"))
                 for slovo in rasp.split()[:3]:
                     if slovo in ushlo:
-                        fails.append(("themis_bot.py", f"ответ цитирует расшифровку ({slovo!r}) — "
+                        fails.append(("themiz_bot.py", f"ответ цитирует расшифровку ({slovo!r}) — "
                                                        "сказанное вслух ушло в Telegram"))
                         break
     return fails
@@ -664,46 +664,46 @@ def check_golos():
 # ── 5. Пустой конфиг ────────────────────────────────────────────────────────
 VYKL_CONTRACT = """  Пустой конфиг = бота нет, система работает.
     Конфига нет либо bot.enabled=false:
-      · `themis_bot.py --check` → код 1 с внятной причиной;
-      · `themis_bot.py --once --api-base URL` → код 1 и НИ ОДНОГО обращения к Telegram
+      · `themiz_bot.py --check` → код 1 с внятной причиной;
+      · `themiz_bot.py --once --api-base URL` → код 1 и НИ ОДНОГО обращения к Telegram
         (выключенный бот не стучится даже разок);
-      · `themis_status.py <дело> --brief` продолжает работать — система от бота не зависит."""
+      · `themiz_status.py <дело> --brief` продолжает работать — система от бота не зависит."""
 
 
 def check_vykl():
-    if not exists("themis_bot.py"):
-        return [("themis_bot.py", "прибора нет. Контракт:\n" + VYKL_CONTRACT)]
+    if not exists("themiz_bot.py"):
+        return [("themiz_bot.py", "прибора нет. Контракт:\n" + VYKL_CONTRACT)]
     fails = []
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
         for imya, cfg in (("конфига нет", td / "netu.json"),
                           ("бот выключен", Path(config(td / "off.json", bot={
-                              "enabled": False, "token_env": "THEMIS_TELEGRAM_BOT_TOKEN",
-                              "chat_id_env": "THEMIS_TELEGRAM_CHAT_ID"})))):
+                              "enabled": False, "token_env": "THEMIZ_TELEGRAM_BOT_TOKEN",
+                              "chat_id_env": "THEMIZ_TELEGRAM_CHAT_ID"})))):
             env = bot_env(cfg, td / "audit.log")
-            code, out, err = run([tool("themis_bot.py"), "--check"], env=env)
+            code, out, err = run([tool("themiz_bot.py"), "--check"], env=env)
             if code == 0:
-                fails.append(("themis_bot.py", f"{imya}: --check объявил бота готовым"))
+                fails.append(("themiz_bot.py", f"{imya}: --check объявил бота готовым"))
             with FakeTelegram([upd(40, OWNER_CHAT, "/status")]) as tg:
-                code, out, err = run([tool("themis_bot.py"), "--once", "--api-base", tg.base],
+                code, out, err = run([tool("themiz_bot.py"), "--once", "--api-base", tg.base],
                                      env=env, timeout=120)
                 if code == 0:
-                    fails.append(("themis_bot.py", f"{imya}: --once вернул успех"))
+                    fails.append(("themiz_bot.py", f"{imya}: --once вернул успех"))
                 if tg.paths:
-                    fails.append(("themis_bot.py", f"{imya}: выключенный бот стучался в Telegram "
+                    fails.append(("themiz_bot.py", f"{imya}: выключенный бот стучался в Telegram "
                                                    f"({tg.paths[:2]})"))
     smoke = os.path.join("cases", "ivanov-ivan", "razdel-imushchestva-2026")
     if (ROOT / smoke).is_dir():
-        code, out, err = run([tool("themis_status.py"), smoke, "--brief"])
+        code, out, err = run([tool("themiz_status.py"), smoke, "--brief"])
         if code != 0:
-            fails.append(("themis_status.py", f"без бота система не работает: код {code}"))
+            fails.append(("themiz_status.py", f"без бота система не работает: код {code}"))
     return fails
 
 
 # ── 6. Ссылка ───────────────────────────────────────────────────────────────
 SSYLKA_CONTRACT = """  Документ забирается по ссылке ВНУТРЬ приватной сети, не через Telegram.
-    scripts/themis_bot.py --doc-link ПУТЬ_ОТ_КОРНЯ   печатает одну ссылку.
-    scripts/themis_bot.py --miniapp-link             ссылка на мини-приложение.
+    scripts/themiz_bot.py --doc-link ПУТЬ_ОТ_КОРНЯ   печатает одну ссылку.
+    scripts/themiz_bot.py --miniapp-link             ссылка на мини-приложение.
     · ссылка начинается с адреса из конфига (server.url) — не с публичного файлохранилища;
     · ссылка НЕ несет в себе токен панели: отправить токен в Telegram значит его разгласить;
       авторизация происходит на стороне панели;
@@ -719,59 +719,59 @@ SSYLKA_CONTRACT = """  Документ забирается по ссылке �
 
 
 def check_ssylka():
-    if not exists("themis_bot.py"):
-        return [("themis_bot.py", "прибора нет. Контракт:\n" + SSYLKA_CONTRACT)]
+    if not exists("themiz_bot.py"):
+        return [("themiz_bot.py", "прибора нет. Контракт:\n" + SSYLKA_CONTRACT)]
     fails = []
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
         links = td / "doc-links.json"
         cfg = Path(config(td / "config.json"))
-        env = bot_env(cfg, td / "audit.log", {"THEMIS_DOC_LINKS": str(links),
-                                              "THEMIS_PANEL_TOKEN": "panel-proba-token"})
+        env = bot_env(cfg, td / "audit.log", {"THEMIZ_DOC_LINKS": str(links),
+                                              "THEMIZ_PANEL_TOKEN": "panel-proba-token"})
         put = "cases/ivanov-ivan/razdel-imushchestva-2026/.agent/drafts/vozrazheniya.docx"
-        code, out, err = run([tool("themis_bot.py"), "--doc-link", put], env=env)
+        code, out, err = run([tool("themiz_bot.py"), "--doc-link", put], env=env)
         if code != 0:
-            return fails + [("themis_bot.py", f"--doc-link вернул {code}: {(out + err)[:250]}")]
+            return fails + [("themiz_bot.py", f"--doc-link вернул {code}: {(out + err)[:250]}")]
         ssylka = out.strip().splitlines()[-1].strip() if out.strip() else ""
-        if not ssylka.startswith("https://themis.vnutri.local"):
-            fails.append(("themis_bot.py", f"ссылка ведет не на адрес из конфига: {ssylka[:80]!r}"))
+        if not ssylka.startswith("https://themiz.vnutri.local"):
+            fails.append(("themiz_bot.py", f"ссылка ведет не на адрес из конфига: {ssylka[:80]!r}"))
         if "token=" in ssylka or "panel-proba-token" in ssylka:
-            fails.append(("themis_bot.py", "ссылка несет токен панели — отправить его в Telegram "
+            fails.append(("themiz_bot.py", "ссылка несет токен панели — отправить его в Telegram "
                                            "значит разгласить"))
         for sled in ("ivanov", "razdel-imushchestva", "vozrazheniya"):
             if sled in ssylka.lower():
-                fails.append(("themis_bot.py", f"ссылка называет дело или документ: {sled!r}"))
+                fails.append(("themiz_bot.py", f"ссылка называет дело или документ: {sled!r}"))
         f = td / "ssylka.txt"
         f.write_text(ssylka, encoding="utf-8")
         code, out, err = run([tool("pii_gate.py"), "--residual", str(f)])
         if code != 0:
-            fails.append(("themis_bot.py", "сама ссылка не прошла pii_gate --residual"))
+            fails.append(("themiz_bot.py", "сама ссылка не прошла pii_gate --residual"))
 
         for naruzhu in ("/etc/passwd", "../../../etc/passwd", "knowledge/lessons-log.md"):
-            code_n, out_n, err_n = run([tool("themis_bot.py"), "--doc-link", naruzhu], env=env)
+            code_n, out_n, err_n = run([tool("themiz_bot.py"), "--doc-link", naruzhu], env=env)
             if code_n == 0:
-                fails.append(("themis_bot.py", f"выдана ссылка вне дел: {naruzhu}"))
+                fails.append(("themiz_bot.py", f"выдана ссылка вне дел: {naruzhu}"))
 
         # Подмененная карта: идентификатор указывает наружу — панель обязана отказать.
         karta = json.loads(links.read_text(encoding="utf-8")) if links.exists() else {}
         karta.setdefault("links", {})["aaaabbbbccccdddd"] = "../../../../etc/passwd"
         links.write_text(json.dumps(karta, ensure_ascii=False), encoding="utf-8")
 
-        code, out, err = run([tool("themis_bot.py"), "--miniapp-link"], env=env)
+        code, out, err = run([tool("themiz_bot.py"), "--miniapp-link"], env=env)
         mini = out.strip().splitlines()[-1].strip() if code == 0 and out.strip() else ""
-        if not mini.startswith("https://themis.vnutri.local"):
-            fails.append(("themis_bot.py", f"--miniapp-link дал {mini[:80]!r}"))
+        if not mini.startswith("https://themiz.vnutri.local"):
+            fails.append(("themiz_bot.py", f"--miniapp-link дал {mini[:80]!r}"))
         if "token=" in mini:
-            fails.append(("themis_bot.py", "ссылка на мини-приложение несет токен"))
+            fails.append(("themiz_bot.py", "ссылка на мини-приложение несет токен"))
 
         # Панель: тот же адрес снаружи не открывается.
         if not (COCKPIT / "app.py").is_file():
             return fails + [("cockpit/app.py", "панели нет — некуда вести ссылке")]
         port = free_port()
         panel_token = "panel-proba-token"
-        penv = {**os.environ, "THEMIS_PANEL_TOKEN": panel_token, "THEMIS_PANEL_HOST": "127.0.0.1",
-                "THEMIS_PANEL_PORT": str(port), "THEMIS_ACCESS_LOG": str(td / "access.log"),
-                "THEMIS_DOC_LINKS": str(links)}
+        penv = {**os.environ, "THEMIZ_PANEL_TOKEN": panel_token, "THEMIZ_PANEL_HOST": "127.0.0.1",
+                "THEMIZ_PANEL_PORT": str(port), "THEMIZ_ACCESS_LOG": str(td / "access.log"),
+                "THEMIZ_DOC_LINKS": str(links)}
         proc = subprocess.Popen([sys.executable, str(COCKPIT / "app.py")], cwd=str(ROOT),
                                 env=penv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True)
@@ -781,18 +781,18 @@ def check_ssylka():
             for imya, url in (("документ", ssylka), ("мини-приложение", mini)):
                 if not url:
                     continue
-                mestnyy = url.replace("https://themis.vnutri.local", f"http://127.0.0.1:{port}")
+                mestnyy = url.replace("https://themiz.vnutri.local", f"http://127.0.0.1:{port}")
                 code_bez, _ = http_code(mestnyy)
                 if code_bez != 401:
                     fails.append(("cockpit/app.py", f"{imya}: без токена панель ответила "
                                                     f"{code_bez}, а обязана 401"))
-                code_s, telo = http_code(mestnyy, {"x-themis-token": panel_token})
+                code_s, telo = http_code(mestnyy, {"x-themiz-token": panel_token})
                 if code_s == 401:
                     fails.append(("cockpit/app.py", f"{imya}: с верным токеном тоже 401"))
                 if imya == "мини-приложение" and code_s == 200 and "<" not in telo:
                     fails.append(("cockpit/app.py", "мини-приложение отдало не страницу"))
             code_p, telo_p = http_code(f"http://127.0.0.1:{port}/api/doc?id=aaaabbbbccccdddd",
-                                       {"x-themis-token": panel_token})
+                                       {"x-themiz-token": panel_token})
             if code_p != 404:
                 fails.append(("cockpit/app.py", f"подмененная карта ссылок открыла файл вне дел "
                                                 f"(ответ {code_p})"))
@@ -807,7 +807,7 @@ def check_ssylka():
 
 # ── 7. Одно сообщение на событие ────────────────────────────────────────────
 TISHINA_CONTRACT = """  Одно сообщение на одно событие; сказать нечего — бот молчит.
-    scripts/themis_bot.py --notify-file ФАЙЛ --api-base URL
+    scripts/themiz_bot.py --notify-file ФАЙЛ --api-base URL
       · файл пуст (или в нем только пробелы) → НИ ОДНОГО sendMessage, код 0:
         молчание — тоже ответ;
       · файл с событием → РОВНО ОДНО сообщение, а не лента статусов;
@@ -825,8 +825,8 @@ TISHINA_CONTRACT = """  Одно сообщение на одно событие
 
 
 def check_tishina():
-    if not exists("themis_bot.py"):
-        return [("themis_bot.py", "прибора нет. Контракт:\n" + TISHINA_CONTRACT)]
+    if not exists("themiz_bot.py"):
+        return [("themiz_bot.py", "прибора нет. Контракт:\n" + TISHINA_CONTRACT)]
     fails = []
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
@@ -836,83 +836,83 @@ def check_tishina():
         pusto = td / "pusto.txt"
         pusto.write_text("   \n\n", encoding="utf-8")
         with FakeTelegram([]) as tg:
-            code, out, err = run([tool("themis_bot.py"), "--notify-file", str(pusto),
+            code, out, err = run([tool("themiz_bot.py"), "--notify-file", str(pusto),
                                   "--api-base", tg.base], env=env, timeout=120)
             if code != 0:
-                fails.append(("themis_bot.py", f"пустое уведомление дало код {code}"))
+                fails.append(("themiz_bot.py", f"пустое уведомление дало код {code}"))
             if tg.sent:
-                fails.append(("themis_bot.py", f"сказать нечего, а бот написал {len(tg.sent)} раз"))
+                fails.append(("themiz_bot.py", f"сказать нечего, а бот написал {len(tg.sent)} раз"))
 
         sobytie = td / "sobytie.txt"
         sobytie.write_text("Заседание завтра в 10:00, документы собраны.\n", encoding="utf-8")
         with FakeTelegram([]) as tg:
-            code, out, err = run([tool("themis_bot.py"), "--notify-file", str(sobytie),
+            code, out, err = run([tool("themiz_bot.py"), "--notify-file", str(sobytie),
                                   "--api-base", tg.base], env=env, timeout=120)
             if code != 0:
-                fails.append(("themis_bot.py", f"уведомление о событии дало код {code}: "
+                fails.append(("themiz_bot.py", f"уведомление о событии дало код {code}: "
                                                f"{(out + err)[:200]}"))
             if len(tg.sent) != 1:
-                fails.append(("themis_bot.py", f"на одно событие ушло {len(tg.sent)} сообщений"))
+                fails.append(("themiz_bot.py", f"на одно событие ушло {len(tg.sent)} сообщений"))
 
         dlinno = td / "dlinno.txt"
         dlinno.write_text("Заседание завтра, документы собраны. " * 200, encoding="utf-8")
         with FakeTelegram([]) as tg:
-            code, out, err = run([tool("themis_bot.py"), "--notify-file", str(dlinno),
+            code, out, err = run([tool("themiz_bot.py"), "--notify-file", str(dlinno),
                                   "--api-base", tg.base], env=env, timeout=120)
             if code == 0:
-                fails.append(("themis_bot.py", "уведомление длиннее предела Telegram принято"))
+                fails.append(("themiz_bot.py", "уведомление длиннее предела Telegram принято"))
             if tg.sent:
-                fails.append(("themis_bot.py", f"длинное уведомление ушло "
+                fails.append(("themiz_bot.py", f"длинное уведомление ушло "
                                                f"({len(tg.sent)} сообщений)"))
 
         # У каждого события — свой производитель, и ровно одно сообщение.
         doc = "cases/ivanov-ivan/razdel-imushchestva-2026/.agent/drafts/proba.docx"
         links = td / "doc-links.json"
-        env_ss = {**env, "THEMIS_DOC_LINKS": str(links)}
+        env_ss = {**env, "THEMIZ_DOC_LINKS": str(links)}
         for imya, argv in (("документ готов", ["--notify-doc", doc]),
                            ("срок", ["--notify-deadline", "25.08.2026"]),
                            ("заседание", ["--notify-hearing", "21.08.2026", "--at", "10:00",
                                           "--doc", doc])):
             with FakeTelegram([]) as tg:
-                code, out, err = run([tool("themis_bot.py"), *argv, "--api-base", tg.base],
+                code, out, err = run([tool("themiz_bot.py"), *argv, "--api-base", tg.base],
                                      env=env_ss, timeout=120)
                 if code != 0 or len(tg.sent) != 1:
-                    fails.append(("themis_bot.py", f"«{imya}»: код {code}, сообщений "
+                    fails.append(("themiz_bot.py", f"«{imya}»: код {code}, сообщений "
                                                    f"{len(tg.sent)} — ожидалось одно"))
                     continue
                 text = tg.sent[0]["text"]
                 for sled in ("ivanov", "razdel", "proba.docx"):
                     if sled in text:
-                        fails.append(("themis_bot.py", f"«{imya}» называет дело: {sled}"))
+                        fails.append(("themiz_bot.py", f"«{imya}» называет дело: {sled}"))
                 f = td / f"out_{len(fails)}.txt"
                 f.write_text(text, encoding="utf-8")
-                code_c, _, err_c = run([tool("themis_bot.py"), "--check-out", str(f)])
+                code_c, _, err_c = run([tool("themiz_bot.py"), "--check-out", str(f)])
                 if code_c != 0:
-                    fails.append(("themis_bot.py", f"«{imya}» не проходит своего сторожа: "
+                    fails.append(("themiz_bot.py", f"«{imya}» не проходит своего сторожа: "
                                                    f"{err_c.strip()[:120]}"))
         # Кривой аргумент — отказ без отправки и без трассировки.
         for imya, argv in (("дата не тем форматом", ["--notify-deadline", "2026-08-25"]),
                            ("заседание без документа", ["--notify-hearing", "21.08.2026"]),
                            ("документ вне дел", ["--notify-doc", "/etc/passwd"])):
             with FakeTelegram([]) as tg:
-                code, out, err = run([tool("themis_bot.py"), *argv, "--api-base", tg.base],
+                code, out, err = run([tool("themiz_bot.py"), *argv, "--api-base", tg.base],
                                      env=env_ss, timeout=120)
                 if code == 0 or tg.sent:
-                    fails.append(("themis_bot.py", f"«{imya}»: принято (код {code}, "
+                    fails.append(("themiz_bot.py", f"«{imya}»: принято (код {code}, "
                                                    f"сообщений {len(tg.sent)})"))
                 if "Traceback" in err:
-                    fails.append(("themis_bot.py", f"«{imya}»: отказ трассировкой"))
+                    fails.append(("themiz_bot.py", f"«{imya}»: отказ трассировкой"))
 
         s_pd = td / "s_pd.txt"
         s_pd.write_text("Иванова Мария Петровна ждет документ по делу № А65-12345/2026.\n",
                         encoding="utf-8")
         with FakeTelegram([]) as tg:
-            code, out, err = run([tool("themis_bot.py"), "--notify-file", str(s_pd),
+            code, out, err = run([tool("themiz_bot.py"), "--notify-file", str(s_pd),
                                   "--api-base", tg.base], env=env, timeout=120)
             if code == 0:
-                fails.append(("themis_bot.py", "уведомление с ПД принято к отправке"))
+                fails.append(("themiz_bot.py", "уведомление с ПД принято к отправке"))
             if tg.sent:
-                fails.append(("themis_bot.py", f"уведомление с ПД все же ушло: "
+                fails.append(("themiz_bot.py", f"уведомление с ПД все же ушло: "
                                                f"{tg.sent[0]['text'][:60]!r}"))
     return fails
 
@@ -961,7 +961,7 @@ def check_avatar():
     return fails
 
 
-SERVE_CONTRACT = """  scripts/themis_bot.py --serve [--cycles N] --api-base URL — то, что владелец
+SERVE_CONTRACT = """  scripts/themiz_bot.py --serve [--cycles N] --api-base URL — то, что владелец
     запускает на весь день. `--once` показывает механизм, работает бот здесь.
     · долгий опрос: соединение держим сами, входящий порт не открывается;
     · ОДИН опрашивающий на машину: второй экземпляр отказывается стартовать
@@ -972,8 +972,8 @@ SERVE_CONTRACT = """  scripts/themis_bot.py --serve [--cycles N] --api-base URL 
 
 
 def check_serve():
-    if not exists("themis_bot.py"):
-        return [("themis_bot.py", "прибора нет. Контракт:\n" + SERVE_CONTRACT)]
+    if not exists("themiz_bot.py"):
+        return [("themiz_bot.py", "прибора нет. Контракт:\n" + SERVE_CONTRACT)]
     fails = []
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
@@ -981,33 +981,33 @@ def check_serve():
         audit = td / "audit.log"
         env = bot_env(cfg, audit)
         with FakeTelegram([upd(70, OWNER_CHAT, "/status")]) as tg:
-            code, out, err = run([tool("themis_bot.py"), "--serve", "--cycles", "1",
+            code, out, err = run([tool("themiz_bot.py"), "--serve", "--cycles", "1",
                                   "--api-base", tg.base], env=env, timeout=180)
             if code != 0:
-                fails.append(("themis_bot.py", f"--serve --cycles 1 вернул {code}: "
+                fails.append(("themiz_bot.py", f"--serve --cycles 1 вернул {code}: "
                                                f"{(out + err).strip()[:250]}"))
             if not tg.sent:
-                fails.append(("themis_bot.py", "в режиме опроса владелец не получил ответа"))
+                fails.append(("themiz_bot.py", "в режиме опроса владелец не получил ответа"))
         zamok = audit.parent / "bot.lock"
         if zamok.exists():
-            fails.append(("themis_bot.py", "замок остался после выхода — бот больше не стартует"))
+            fails.append(("themiz_bot.py", "замок остался после выхода — бот больше не стартует"))
 
         # Второй экземпляр при живом первом обязан отказаться.
         zamok.write_text(str(os.getpid()), encoding="utf-8")
         with FakeTelegram([upd(71, OWNER_CHAT, "/status")]) as tg:
-            code, out, err = run([tool("themis_bot.py"), "--serve", "--cycles", "1",
+            code, out, err = run([tool("themiz_bot.py"), "--serve", "--cycles", "1",
                                   "--api-base", tg.base], env=env, timeout=120)
             if code == 0:
-                fails.append(("themis_bot.py", "второй опрашивающий стартовал при живом первом"))
+                fails.append(("themiz_bot.py", "второй опрашивающий стартовал при живом первом"))
             if tg.sent:
-                fails.append(("themis_bot.py", "второй опрашивающий успел ответить"))
+                fails.append(("themiz_bot.py", "второй опрашивающий успел ответить"))
         # Замок от мертвого процесса машину навсегда не запирает.
         zamok.write_text("999999", encoding="utf-8")
         with FakeTelegram([upd(72, OWNER_CHAT, "/status")]) as tg:
-            code, out, err = run([tool("themis_bot.py"), "--serve", "--cycles", "1",
+            code, out, err = run([tool("themiz_bot.py"), "--serve", "--cycles", "1",
                                   "--api-base", tg.base], env=env, timeout=180)
             if code != 0:
-                fails.append(("themis_bot.py", "замок от умершего процесса запер бота навсегда"))
+                fails.append(("themiz_bot.py", "замок от умершего процесса запер бота навсегда"))
     return fails
 
 

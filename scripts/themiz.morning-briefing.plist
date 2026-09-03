@@ -5,23 +5,23 @@
 <!--
   Утренняя сводка (scripts/morning-briefing.sh): ближайшие заседания + inbox,
   уведомление macOS и — при настроенном секрете — напоминание в Telegram
-  (scripts/themis_bot.py --notify-hearings). Каждый день в 9:00.
+  (scripts/themiz_bot.py --notify-hearings). Каждый день в 9:00.
 
-  __THEMIS_HOME__ — не готовый путь: launchd не разворачивает ~ и переменные
+  __THEMIZ_HOME__ — не готовый путь: launchd не разворачивает ~ и переменные
   окружения в ProgramArguments и WorkingDirectory, поэтому путь обязан быть
   абсолютным — но абсолютным ДЛЯ ЭТОЙ машины, а не для машины автора.
   Подстановка — при установке (делает install.sh, можно и руками).
 
   Установка (один раз, из корня проекта):
-    sed "s|__THEMIS_HOME__|$PWD|g" scripts/themis.morning-briefing.plist \
-      > ~/Library/LaunchAgents/themis.morning-briefing.plist
-    launchctl load ~/Library/LaunchAgents/themis.morning-briefing.plist
+    sed "s|__THEMIZ_HOME__|$PWD|g" scripts/themiz.morning-briefing.plist \
+      > ~/Library/LaunchAgents/themiz.morning-briefing.plist
+    launchctl load ~/Library/LaunchAgents/themiz.morning-briefing.plist
 
   Остановка:
-    launchctl unload ~/Library/LaunchAgents/themis.morning-briefing.plist
+    launchctl unload ~/Library/LaunchAgents/themiz.morning-briefing.plist
 
   Статус:
-    launchctl list | grep themis.morning-briefing
+    launchctl list | grep themiz.morning-briefing
 
   Ручной прогон (без ожидания 9:00):
     bash scripts/morning-briefing.sh
@@ -30,12 +30,12 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>themis.morning-briefing</string>
+    <string>themiz.morning-briefing</string>
 
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>__THEMIS_HOME__/scripts/morning-briefing.sh</string>
+        <string>__THEMIZ_HOME__/scripts/morning-briefing.sh</string>
     </array>
 
     <!-- каждый день в 9:00 -->
@@ -48,13 +48,13 @@
     </dict>
 
     <key>WorkingDirectory</key>
-    <string>__THEMIS_HOME__</string>
+    <string>__THEMIZ_HOME__</string>
 
     <key>StandardOutPath</key>
-    <string>__THEMIS_HOME__/audit.log</string>
+    <string>__THEMIZ_HOME__/audit.log</string>
 
     <key>StandardErrorPath</key>
-    <string>__THEMIS_HOME__/audit.log</string>
+    <string>__THEMIZ_HOME__/audit.log</string>
 
     <key>RunAtLoad</key>
     <false/>

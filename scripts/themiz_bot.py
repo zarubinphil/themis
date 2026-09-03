@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""themis_bot.py — бот Фемиды: пульт в кармане, а не витрина дела.
+"""themiz_bot.py — бот Фемиды: пульт в кармане, а не витрина дела.
 
 Граница тайны, она же граница дизайна. Все, что ушло в Telegram, разглашено Telegram:
 это чужой сервер, и адвокатская тайна (ст. 8 ФЗ № 63-ФЗ) на нем не действует. Отсюда
@@ -8,8 +8,8 @@
 владельца узнает панель по своему токену. Это же бот объясняет владельцу первым
 сообщением, а не прячет в документации.
 
-Секрет. Токен живет в `$HOME/.secrets/themis-telegram.env` (переменная
-`THEMIS_TELEGRAM_BOT_TOKEN`), имя переменной берется из конфига. В коде, в git и в
+Секрет. Токен живет в `$HOME/.secrets/themiz-telegram.env` (переменная
+`THEMIZ_TELEGRAM_BOT_TOKEN`), имя переменной берется из конфига. В коде, в git и в
 примерах — только ИМЯ. Аргументом командной строки секрет не принимается вовсе:
 argv видно любому процессу машины через `ps`.
 
@@ -46,6 +46,7 @@ import urllib.error
 import urllib.request
 from hashlib import sha256
 from pathlib import Path
+import sreda  # noqa: E402,F401  переходный период имен переменных
 
 SCRIPTS = Path(__file__).resolve().parent
 ROOT = SCRIPTS.parent
@@ -56,7 +57,7 @@ TAYMAUT = 40
 
 sys.path.insert(0, str(SCRIPTS))
 import pii_gate            # noqa: E402  — сторож ПД один на всю систему, не своя регулярка
-import themis_config       # noqa: E402
+import themiz_config       # noqa: E402
 
 # Деньги в тексте. Валютная метка обязательна: без нее под правило попали бы даты,
 # счетчики дел и время заседания — сторож, кричащий на обиходе, будет выключен.
@@ -110,12 +111,12 @@ def _skl(n: int, odin: str, dva: str, mnogo: str) -> str:
 
 # ── Настройки и секрет ──────────────────────────────────────────────────────
 def cfg(path: str | None = None) -> dict:
-    p = Path(path) if path else themis_config.DEFAULT_PATH
-    return themis_config.load(p)
+    p = Path(path) if path else themiz_config.DEFAULT_PATH
+    return themiz_config.load(p)
 
 
 def _konfig_est(path: str | None = None) -> bool:
-    p = Path(path) if path else themis_config.DEFAULT_PATH
+    p = Path(path) if path else themiz_config.DEFAULT_PATH
     return p.exists()
 
 
@@ -140,13 +141,13 @@ def gotovnost(c: dict, path: str | None = None) -> list:
     beda = []
     if not c["bot"].get("enabled"):
         beda.append("бот выключен в конфиге (bot.enabled=false)" if _konfig_est(path)
-                    else f"конфига нет ({Path(path) if path else themis_config.DEFAULT_PATH}) — "
+                    else f"конфига нет ({Path(path) if path else themiz_config.DEFAULT_PATH}) — "
                          "бот выключен, система работает без него")
     if not c["bot"].get("token_env"):
         beda.append("не названа переменная с токеном (bot.token_env)")
     elif not token(c):
         beda.append(f"переменная {c['bot']['token_env']} пуста — положить токен в "
-                    "$HOME/.secrets/themis-telegram.env и передать в окружение запуска")
+                    "$HOME/.secrets/themiz-telegram.env и передать в окружение запуска")
     svoy = owner(c)
     if not svoy:
         beda.append(f"не задан чат владельца (переменная {c['bot'].get('chat_id_env')}) — "
@@ -167,7 +168,7 @@ _SEKRET: dict = {"tok": ""}
 
 
 def audit_path() -> Path:
-    return Path(os.environ.get("THEMIS_BOT_AUDIT") or (Path.home() / ".themis" / "bot-audit.log"))
+    return Path(os.environ.get("THEMIZ_BOT_AUDIT") or (Path.home() / ".themiz" / "bot-audit.log"))
 
 
 def audit(sobytie: str, chat: str = "", detal: str = "") -> None:
@@ -228,7 +229,7 @@ SAFE = {
     "vremya": "10:00",
     "dney": 3,
     "del_v_rabote": 12,
-    "ssylka": "https://themis.vnutri.local/api/doc?id=qwkzhbmxrtaevlnc",
+    "ssylka": "https://themiz.vnutri.local/api/doc?id=qwkzhbmxrtaevlnc",
 }
 FIXTURE = {**PD, **SAFE}
 
@@ -271,8 +272,8 @@ def shablony(d: dict) -> dict:
 
 # ── Ссылки внутрь приватной сети ────────────────────────────────────────────
 def links_path() -> Path:
-    return Path(os.environ.get("THEMIS_DOC_LINKS")
-                or (Path.home() / ".themis" / "doc-links.json"))
+    return Path(os.environ.get("THEMIZ_DOC_LINKS")
+                or (Path.home() / ".themiz" / "doc-links.json"))
 
 
 def _links() -> dict:
@@ -366,7 +367,7 @@ def tg(c: dict, api_base: str, metod: str, telo: dict | None = None, taymaut: in
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
             raise Otkaz(f"Telegram не принял токен ({e.code}). Проверить значение "
-                        f"{c['bot'].get('token_env')} в $HOME/.secrets/themis-telegram.env — "
+                        f"{c['bot'].get('token_env')} в $HOME/.secrets/themiz-telegram.env — "
                         "здесь его не печатаю.")
         raise Otkaz(f"Telegram ответил {e.code} на {metod}")
     except urllib.error.URLError as e:
@@ -443,8 +444,8 @@ def status_text() -> str:
 
 # ── Голос ───────────────────────────────────────────────────────────────────
 def queue_path() -> Path:
-    return Path(os.environ.get("THEMIS_BOT_QUEUE")
-                or (Path.home() / ".themis" / "voice-queue.jsonl"))
+    return Path(os.environ.get("THEMIZ_BOT_QUEUE")
+                or (Path.home() / ".themiz" / "voice-queue.jsonl"))
 
 
 def golos(c: dict, api_base: str, file_id: str) -> str:
@@ -456,7 +457,7 @@ def golos(c: dict, api_base: str, file_id: str) -> str:
     if not put:
         raise Otkaz("Telegram не отдал путь к голосовому")
     t = token(c)
-    with tempfile.TemporaryDirectory(prefix="themis-golos-") as td:
+    with tempfile.TemporaryDirectory(prefix="themiz-golos-") as td:
         zvuk = Path(td) / Path(put).name
         req = urllib.request.Request(f"{api_base.rstrip('/')}/file/bot{t}/{put}")
         try:
@@ -859,8 +860,8 @@ def selftest() -> int:
         td = Path(td)
         saved = dict(os.environ)
         try:
-            os.environ["THEMIS_DOC_LINKS"] = str(td / "links.json")
-            os.environ["THEMIS_BOT_AUDIT"] = str(td / "audit.log")
+            os.environ["THEMIZ_DOC_LINKS"] = str(td / "links.json")
+            os.environ["THEMIZ_BOT_AUDIT"] = str(td / "audit.log")
             c = {"bot": {"enabled": True, "token_env": "PROBA_TOK", "chat_id_env": "PROBA_CHAT"},
                  "server": {"enabled": True, "url": "https://vnutri.local"}}
             put = "cases/petrov-petr/spor-2026/.agent/drafts/isk.docx"

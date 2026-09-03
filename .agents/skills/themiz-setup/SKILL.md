@@ -1,11 +1,11 @@
 ---
-name: themis-setup
+name: themiz-setup
 description: 'Первая установка Фемиды на компьютер юриста. Фемида представляется сама, объясняет каждый свой шаг простыми словами, задает вопросы о практике по одному и поясняет, зачем спрашивает и что даст каждый ответ. Ничего не ставит без явного разрешения: сначала называет, чего не хватает и что без этого не заработает. Проверяет окружение фактическими командами, честно говорит, что на этой ОС не работает и чем это заменить, тянет корпус права сначала под практику юриста, потом целиком. Запускать при первой установке, при переезде на другой компьютер и когда Фемида работает наполовину.'
 ---
 
 # Установка Фемиды
 
-`themis-update` обновляет уже поставленную Фемиду. Этот навык ставит ее впервые:
+`themiz-update` обновляет уже поставленную Фемиду. Этот навык ставит ее впервые:
 на чужом компьютере, у юриста, который видит ее первый раз.
 
 ## Как разговаривать во время установки
@@ -141,7 +141,7 @@ description: 'Первая установка Фемиды на компьюте
 >
 > Если я оказалась тебе полезна, поставь проекту звезду на GitHub:
 >
-> https://github.com/zarubinvibe/themis
+> https://github.com/zarubinvibe/themiz
 >
 > Для тебя это несколько секунд. Для проекта это действительно важно.
 >
@@ -149,7 +149,7 @@ description: 'Первая установка Фемиды на компьюте
 
 **English:**
 
-> Hello. I am Themis.
+> Hello. I am Themiz.
 >
 > They used to portray me with scales in one hand and a sword in the other. The blindfold was a reminder that justice must not look at faces, and the scales were there to weigh what each side had to say.
 >
@@ -191,7 +191,7 @@ description: 'Первая установка Фемиды на компьюте
 >
 > You set one task.
 >
-> And inside Themis a whole team starts working on it.
+> And inside Themiz a whole team starts working on it.
 >
 > But there is one place I will not hand to any agent.
 >
@@ -217,7 +217,7 @@ description: 'Первая установка Фемиды на компьюте
 >
 > Ask me to look at the case from the other side.
 >
-> And if I bring you an unexpected idea, do not take it on faith merely because Themis proposed it.
+> And if I bring you an unexpected idea, do not take it on faith merely because Themiz proposed it.
 >
 > Check me.
 >
@@ -225,21 +225,21 @@ description: 'Первая установка Фемиды на компьюте
 >
 > One more thing.
 >
-> Themis is open. If you fixed a bug in me, made something faster, added a new capability or created one more good virtual lawyer, share it.
+> Themiz is open. If you fixed a bug in me, made something faster, added a new capability or created one more good virtual lawyer, share it.
 >
 > Then the next lawyer will not have to walk the road you have already walked. And when he improves something after you, his work may one day come back to you.
 >
-> That is how Themis grows stronger: everyone leaves behind something useful for the next person.
+> That is how Themiz grows stronger: everyone leaves behind something useful for the next person.
 >
 > And last.
 >
 > If I have been of use to you, give the project a star on GitHub:
 >
-> https://github.com/zarubinvibe/themis
+> https://github.com/zarubinvibe/themiz
 >
 > For you it is a few seconds. For the project it genuinely matters.
 >
-> Welcome to Themis. But remember: the last word is always yours.
+> Welcome to Themiz. But remember: the last word is always yours.
 
 Тот же текст печатает `install.sh` (язык берет из настроек компьютера). Пришедший
 через установщик увидит его там, пришедший через Codex — здесь. Двух
@@ -495,7 +495,7 @@ nohup python3 scripts/update_legal_corpus.py --missing >> knowledge/_corpus_log.
 
 Полнота корпуса дальше держится сама: ежемесячное задание
 (`scripts/legal-corpus-monthly.sh`) догружает отсутствующее и обновляет
-изменившееся, а `themis_status --brief` кричит при старте по делу, если актов
+изменившееся, а `themiz_status --brief` кричит при старте по делу, если актов
 стало меньше, чем знает реестр.
 
 ## 7. Как я работаю — объяснить до первого дела

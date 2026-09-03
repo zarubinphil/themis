@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""themis_metiz.py - питонский фасад врезки Метиды. Одна строка на стороне дома.
+"""themiz_metiz.py - питонский фасад врезки Метиды. Одна строка на стороне дома.
 
 Зачем отдельный файл. Дом Фемиды питонский, ядро Метиды - TypeScript; мост через node
 неизбежен. Он стоит здесь ОДИН раз, чтобы врезка в прибор дома оставалась одной строкой,
 а откат - обратной заменой той же одной строки. Логики сжатия тут нет ни одной: она вся
-в `scripts/themis-metiz.mjs` и дальше в Метиде.
+в `scripts/themiz-metiz.mjs` и дальше в Метиде.
 
 СОСТОЯНИЕ: врезка сделана, и она ровно в двух точках scripts/markdown_extract.py - там, где дом
 отдает модели не превью, а тело. Обе ветки зовут ОДИН фасад с одним профилем; разведены только
@@ -12,21 +12,21 @@
 
     ВРЕЗКА 1 (ветка --inline, тело документа целиком до --max-chars):
         было:  out = body[: a.max_chars]
-        стало: out = __import__("themis_metiz").squeeze_text(body[: a.max_chars], p, "inline")
+        стало: out = __import__("themiz_metiz").squeeze_text(body[: a.max_chars], p, "inline")
 
     ВРЕЗКА 2 (ветка --grep, список совпадений; потолка символов у нее нет вовсе):
         было:  print("\n".join(hits[:400]))
-        стало: print(__import__("themis_metiz").squeeze_text("\n".join(hits[:400]), p, "grep"))
+        стало: print(__import__("themiz_metiz").squeeze_text("\n".join(hits[:400]), p, "grep"))
 
     ОТКАТ (обратная замена тех же двух строк; любую можно откатить отдельно):
         python3 - <<'PY'
         import pathlib
         f = pathlib.Path("scripts/markdown_extract.py"); s = f.read_text(encoding="utf-8")
         s = s.replace(
-            'out = __import__("themis_metiz").squeeze_text(body[: a.max_chars], p, "inline")',
+            'out = __import__("themiz_metiz").squeeze_text(body[: a.max_chars], p, "inline")',
             'out = body[: a.max_chars]')
         s = s.replace(
-            'print(__import__("themis_metiz").squeeze_text("\\n".join(hits[:400]), p, "grep"))',
+            'print(__import__("themiz_metiz").squeeze_text("\\n".join(hits[:400]), p, "grep"))',
             'print("\\n".join(hits[:400]))')
         f.write_text(s, encoding="utf-8")
         PY
@@ -53,7 +53,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-MOST = HERE / "themis-metiz.mjs"
+MOST = HERE / "themiz-metiz.mjs"
 # Потолок ожидания. Сжатие 200 КБ идет доли секунды; минута - это уже зависший мост, и ждать
 # его дольше значит держать заложником работу по делу.
 TIMEOUT = 60
@@ -63,7 +63,7 @@ def _tiho(why: str) -> None:
     """Причина - в stderr, и только туда. В stdout идет документ дела, служебной строке там
     не место: модель приняла бы ее за часть материала."""
     try:
-        print(f"themis-metiz: {why}", file=sys.stderr)
+        print(f"themiz-metiz: {why}", file=sys.stderr)
     except Exception:
         pass
 
@@ -186,7 +186,7 @@ def selftest() -> int:
             chistyy = dict(os.environ, PATH=str(td / "pusto"))
             p = subprocess.run(
                 [sys.executable, "-c",
-                 "import sys; sys.path.insert(0, sys.argv[1]); import themis_metiz as m;"
+                 "import sys; sys.path.insert(0, sys.argv[1]); import themiz_metiz as m;"
                  "t = sys.stdin.read();"
                  "sys.stdout.write('RAVNO' if m.squeeze_text(t, sys.argv[2]) == t else 'RAZOSHLOS')",
                  str(HERE), str(delo)],
@@ -198,11 +198,11 @@ def selftest() -> int:
             # Копия фасада без соседа-моста: мост мог не доехать при частичной установке.
             odin = td / "odin"
             odin.mkdir(exist_ok=True)
-            (odin / "themis_metiz.py").write_text(
+            (odin / "themiz_metiz.py").write_text(
                 Path(__file__).read_text(encoding="utf-8"), encoding="utf-8")
             p = subprocess.run(
                 [sys.executable, "-c",
-                 "import sys; sys.path.insert(0, sys.argv[1]); import themis_metiz as m;"
+                 "import sys; sys.path.insert(0, sys.argv[1]); import themiz_metiz as m;"
                  "t = sys.stdin.read();"
                  "sys.stdout.write('RAVNO' if m.squeeze_text(t, sys.argv[2]) == t else 'RAZOSHLOS')",
                  str(odin), str(delo)],
@@ -260,20 +260,21 @@ def selftest() -> int:
             """
             skripty = koren / "scripts"
             skripty.mkdir(parents=True, exist_ok=True)
-            for imya in ("markdown_extract.py", "themis_metiz.py", "themis-metiz.mjs"):
+            for imya in ("markdown_extract.py", "themiz_metiz.py", "themiz-metiz.mjs",
+                         "sreda.py"):
                 (skripty / imya).write_bytes((HERE / imya).read_bytes())
             return skripty
 
         def _progon(dom: Path, material: Path):
-            # Кеш прибора выводится из HOME, дом состояния - из THEMIS_HOME с откатом на HOME.
-            # Подменяются ОБА: одного HOME мало, потому что унаследованный THEMIS_HOME (его
+            # Кеш прибора выводится из HOME, дом состояния - из THEMIZ_HOME с откатом на HOME.
+            # Подменяются ОБА: одного HOME мало, потому что унаследованный THEMIZ_HOME (его
             # ставит, например, селфтест моста) увел бы журнал мимо пробы, и проба покраснела
             # бы на пустом месте. С обоими проба не трогает ни журнал владельца, ни его кеш.
-            # THEMIS_METIZ_DIR назван прямо: у корня пробы нет соседа-Метиды, а без него проба
+            # THEMIZ_METIZ_DIR назван прямо: у корня пробы нет соседа-Метиды, а без него проба
             # проверяла бы только откат. Нет Метиды на диске - проба все равно годна: журнал
             # замеров обязан лечь и на выключенном сжатии (доктрина 3).
-            okr = dict(os.environ, HOME=str(dom), THEMIS_HOME=str(dom / ".themis"),
-                       THEMIS_METIZ_DIR=str(HERE.parent.parent / "metiz"))
+            okr = dict(os.environ, HOME=str(dom), THEMIZ_HOME=str(dom / ".themiz"),
+                       THEMIZ_METIZ_DIR=str(HERE.parent.parent / "metiz"))
             p = subprocess.run(
                 [sys.executable, str(_proekt(dom) / "markdown_extract.py"), str(material),
                  "--grep", SHABLON],
@@ -292,11 +293,11 @@ def selftest() -> int:
 
             # Доктрина 2 и 4 разом: либо выигрыша не было и вход вернулся байт в байт, либо
             # выход изменен - и тогда в нем обязан стоять маркер, которым он восстановим.
-            assert telo == etalon or "[metiz:fold" in telo or "[themis:ccr" in telo, (
+            assert telo == etalon or "[metiz:fold" in telo or "[themiz:ccr" in telo, (
                 "выдача --grep изменена, но маркера восстановления в ней нет")
 
             # Доктрина 3: замер обязан лечь в журнал, и лечь именно по этому телу.
-            zhurnal = dom / ".themis" / "state" / "squeeze.jsonl"
+            zhurnal = dom / ".themiz" / "state" / "squeeze.jsonl"
             assert zhurnal.is_file(), "врезки в ветке --grep нет: журнал замеров пуст"
             import json as _json
             zapisi = [_json.loads(x) for x in zhurnal.read_text(encoding="utf-8").splitlines() if x]
@@ -315,7 +316,7 @@ def selftest() -> int:
             p = _progon(dom, mat)
             assert _telo_grep(p.stdout) == _etalon(dom / ".cache" / "legal_extract"), (
                 "материал вне дерева дел был изменен")
-            assert not (dom / ".themis" / "state" / "squeeze.jsonl").is_file(), (
+            assert not (dom / ".themiz" / "state" / "squeeze.jsonl").is_file(), (
                 "материал вне дела попал в журнал замеров")
 
         def imya_ne_uhodit_v_argv():
@@ -339,7 +340,7 @@ def selftest() -> int:
             put.parent.mkdir(parents=True, exist_ok=True)
             p = subprocess.run(
                 [sys.executable, "-c",
-                 "import sys; sys.path.insert(0, sys.argv[1]); import themis_metiz as m;"
+                 "import sys; sys.path.insert(0, sys.argv[1]); import themiz_metiz as m;"
                  "t = sys.stdin.read();"
                  "sys.stdout.write('RAVNO' if m.squeeze_text(t, sys.argv[2]) == t else 'RAZOSHLOS')",
                  str(HERE), str(put)],
@@ -377,7 +378,7 @@ def selftest() -> int:
             try:
                 p = subprocess.run(
                     [sys.executable, "-c",
-                     "import sys; sys.path.insert(0, sys.argv[1]); import themis_metiz as m;"
+                     "import sys; sys.path.insert(0, sys.argv[1]); import themiz_metiz as m;"
                      "t = sys.stdin.read();"
                      "put = '/' + 'a' * int(sys.argv[2]);"
                      "sys.stdout.write('RAVNO' if m.squeeze_text(t, put) == t else 'RAZOSHLOS')",
@@ -424,7 +425,7 @@ def selftest() -> int:
         proba("ветка --grep прибора дома зовет Метиду и пишет замер", vetka_grep_zovet_metidu)
         proba("ветка --grep не сжимает материал вне дерева дел", vetka_grep_vne_dela)
 
-    print("themis_metiz: КРАСНЫЙ" if plohih else "themis_metiz: зеленый")
+    print("themiz_metiz: КРАСНЫЙ" if plohih else "themiz_metiz: зеленый")
     return 1 if plohih else 0
 
 

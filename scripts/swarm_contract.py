@@ -34,6 +34,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
+import sreda  # noqa: E402,F401  переходный период имен переменных
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPTS_DIR.parent
@@ -99,7 +100,7 @@ LIVE_STALE_MIN = COORD_TIME_CEILING_MIN
 
 
 def live_state_path() -> Path:
-    override = os.environ.get("THEMIS_SWARM_LIVE")  # селфтест/изоляция прогона
+    override = os.environ.get("THEMIZ_SWARM_LIVE")  # селфтест/изоляция прогона
     return Path(override) if override else PROJECT_ROOT / ".cache" / "swarm_live.json"
 
 

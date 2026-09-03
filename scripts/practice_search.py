@@ -59,6 +59,7 @@ import threading
 import time
 import urllib.parse
 from pathlib import Path
+import sreda  # noqa: E402,F401  переходный период имен переменных
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPTS_DIR not in sys.path:
@@ -341,23 +342,23 @@ def parse_results(content, section, limit):
 # РЕШЕНИЕ ВЛАДЕЛЬЦА 03.08.2026: поиск разрешен, риск принят осознанно.
 # Единственная точка правды — константа ниже; ее же читает PreToolUse-хук
 # scripts/claude_guard.py, чтобы два гейта не разъехались.
-# Выключить обратно: SUDACT_SEARCH_ALLOWED = False либо THEMIS_SUDACT_SEARCH=0.
+# Выключить обратно: SUDACT_SEARCH_ALLOWED = False либо THEMIZ_SUDACT_SEARCH=0.
 SUDACT_SEARCH_ALLOWED = True
 ROBOTS_BLOCKED_HINT = (
-    "ПОИСК ВЫКЛЮЧЕН (SUDACT_SEARCH_ALLOWED=False либо THEMIS_SUDACT_SEARCH=0). "
+    "ПОИСК ВЫКЛЮЧЕН (SUDACT_SEARCH_ALLOWED=False либо THEMIZ_SUDACT_SEARCH=0). "
     "Напоминание: sudact.ru в robots.txt запрещает роботам путь "
     "/{раздел}/doc_ajax/, а асинхронный поиск идет только через него "
     "(разрешенный /doc/ выдачи не отдает — проверено 03.08.2026).\n"
     "Что можно без ограничений: открыть известный акт — practice_search.py --doc URL.\n"
     "Что делать с поиском: решение владельца. Разрешил — "
-    "THEMIS_SUDACT_SEARCH=1 либо --i-accept-robots-risk, и строку в "
+    "THEMIZ_SUDACT_SEARCH=1 либо --i-accept-robots-risk, и строку в "
     "knowledge/allowed-services.md. Не разрешил — практику брать из "
     "knowledge/practice_index.md и договорного канала."
 )
 
 
 def search_allowed() -> bool:
-    env = os.environ.get("THEMIS_SUDACT_SEARCH")
+    env = os.environ.get("THEMIZ_SUDACT_SEARCH")
     if env is not None:
         return env == "1"          # переменная перекрывает решение в обе стороны
     return SUDACT_SEARCH_ALLOWED
@@ -367,10 +368,10 @@ _CASE_OVERRIDE = ""  # выставляется main() из явного --case
 
 
 def _run_case() -> str:
-    """Дело прогона: явный --case (main()) важнее $THEMIS_CASE. Переменную в бою
+    """Дело прогона: явный --case (main()) важнее $THEMIZ_CASE. Переменную в бою
     никто не выставлял — флага не было вовсе, и мертвый канал не долетал до
     прибора (128 опросов мертвого источника, прогон 01.09.2026)."""
-    delo = _CASE_OVERRIDE or os.environ.get("THEMIS_CASE", "")
+    delo = _CASE_OVERRIDE or os.environ.get("THEMIZ_CASE", "")
     if delo:
         return delo
     # Третий источник — указатель прогона, который ставит проводник. Он и есть
@@ -436,7 +437,7 @@ def partition_exit_code(report: dict) -> int:
 
 
 def apply_risk_flag(env_value: str | None, flag: bool) -> str | None:
-    """Каким станет THEMIS_SUDACT_SEARCH после флага --i-accept-robots-risk.
+    """Каким станет THEMIZ_SUDACT_SEARCH после флага --i-accept-robots-risk.
 
     Возвращает '1' (разрешить), None (флага нет — ничего не менять) либо строку
     'ОТКАЗ' (явный запрет перебивать нельзя). Вынесено отдельной функцией, чтобы
@@ -1031,9 +1032,9 @@ def selftest():
 
         # Общий файл состояния каналов: свежая отметка «мертв» закрывает источник
         # до истечения TTL — рой не опрашивает мертвый канал 128 раз (01.09.2026).
-        _case_env = os.environ.get("THEMIS_CASE")
+        _case_env = os.environ.get("THEMIZ_CASE")
         with tempfile.TemporaryDirectory() as _tmp:
-            os.environ["THEMIS_CASE"] = _tmp
+            os.environ["THEMIZ_CASE"] = _tmp
             note_source_failure("HTTP 500")
             marked = channels.is_dead(_tmp, "sudact")
             refused = False
@@ -1042,16 +1043,16 @@ def selftest():
             except PermissionError as e:
                 refused = "МЕРТВ" in str(e)
         if _case_env is None:
-            os.environ.pop("THEMIS_CASE", None)
+            os.environ.pop("THEMIZ_CASE", None)
         else:
-            os.environ["THEMIS_CASE"] = _case_env
+            os.environ["THEMIZ_CASE"] = _case_env
 
-        # Штатный путь узнать дело — явный --case, а не только $THEMIS_CASE: в бою
+        # Штатный путь узнать дело — явный --case, а не только $THEMIZ_CASE: в бою
         # переменную никто не выставлял (флага --case не было вовсе), и мертвый
         # канал оставался невидимым для повторного опроса.
         global _CASE_OVERRIDE
         _override_before = _CASE_OVERRIDE
-        _env_gone = os.environ.pop("THEMIS_CASE", None)
+        _env_gone = os.environ.pop("THEMIZ_CASE", None)
         with tempfile.TemporaryDirectory() as _tmp2:
             _CASE_OVERRIDE = _tmp2
             note_source_failure("HTTP 500 без переменной окружения")
@@ -1061,13 +1062,13 @@ def selftest():
                 search("иск", limit=5)
             except PermissionError as e:
                 refused_no_env = "МЕРТВ" in str(e)
-        os.environ["THEMIS_CASE"] = "не-эта-переменная"
+        os.environ["THEMIZ_CASE"] = "не-эта-переменная"
         _CASE_OVERRIDE = "эта-переменная"
         override_wins = _run_case() == "эта-переменная"
-        os.environ.pop("THEMIS_CASE", None)
+        os.environ.pop("THEMIZ_CASE", None)
         _CASE_OVERRIDE = _override_before
         if _env_gone is not None:
-            os.environ["THEMIS_CASE"] = _env_gone
+            os.environ["THEMIZ_CASE"] = _env_gone
 
         checks += [
             ("обойдены все регионы справочника", rep["регионов обойдено"] == 2),
@@ -1104,9 +1105,9 @@ def selftest():
              pcalls and all(c.get("case_doc") == "2-45/2026" for c in pcalls)),
             ("сбой источника пишется в общий файл каналов прогона", marked),
             ("меченый мертвым канал не опрашивается до истечения TTL", refused),
-            ("--case работает БЕЗ $THEMIS_CASE: сбой пишется в общий файл", marked_no_env),
-            ("--case работает БЕЗ $THEMIS_CASE: мертвый канал закрывает опрос", refused_no_env),
-            ("явный --case важнее $THEMIS_CASE", override_wins),
+            ("--case работает БЕЗ $THEMIZ_CASE: сбой пишется в общий файл", marked_no_env),
+            ("--case работает БЕЗ $THEMIZ_CASE: мертвый канал закрывает опрос", refused_no_env),
+            ("явный --case важнее $THEMIZ_CASE", override_wins),
             ("пустая выдача при ненулевом счетчике не кешируется",
              not cacheable([], "Найдено 183 документа")),
             ("пустая выдача при нулевом счетчике кешируется",
@@ -1278,23 +1279,23 @@ def main():
     ap.add_argument("--i-accept-robots-risk", action="store_true",
                     help="включить поиск, запрещенный robots.txt источника (решение владельца)")
     ap.add_argument("--case", default="", help="путь к делу — общий счет каналов и квот "
-                    "прогона (.agent/context/channels.json); иначе $THEMIS_CASE")
+                    "прогона (.agent/context/channels.json); иначе $THEMIZ_CASE")
     args = ap.parse_args()
     global _CASE_OVERRIDE
     _CASE_OVERRIDE = args.case
     # Флаг риска — согласие ЗА молчание, а не поверх явного запрета. Прежняя
     # безусловная запись env="1" делала аварийный выключатель бесполезным: тот, кто
-    # выставил THEMIS_SUDACT_SEARCH=0, получал поиск. Хук claude_guard.py при env=0
+    # выставил THEMIZ_SUDACT_SEARCH=0, получал поиск. Хук claude_guard.py при env=0
     # сырой curl не пускает — скрипт и хук расходились.
-    decided = apply_risk_flag(os.environ.get("THEMIS_SUDACT_SEARCH"),
+    decided = apply_risk_flag(os.environ.get("THEMIZ_SUDACT_SEARCH"),
                               getattr(args, "i_accept_robots_risk", False))
     if decided == "ОТКАЗ":
-        print("ОТКАЗ: THEMIS_SUDACT_SEARCH=0 — поиск выключен явно. Флаг "
+        print("ОТКАЗ: THEMIZ_SUDACT_SEARCH=0 — поиск выключен явно. Флаг "
               "--i-accept-robots-risk запрет не снимает: снимите переменную "
-              "или выставьте THEMIS_SUDACT_SEARCH=1.", file=sys.stderr)
+              "или выставьте THEMIZ_SUDACT_SEARCH=1.", file=sys.stderr)
         return 4
     if decided:
-        os.environ["THEMIS_SUDACT_SEARCH"] = decided
+        os.environ["THEMIZ_SUDACT_SEARCH"] = decided
 
     if args.selftest:
         return selftest()

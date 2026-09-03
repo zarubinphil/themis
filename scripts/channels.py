@@ -26,7 +26,7 @@
     python3 scripts/channels.py {дело} --json
     python3 scripts/channels.py --selftest                     # без сети и без дела
 
-Путь к делу можно не писать: берется из $THEMIS_CASE.
+Путь к делу можно не писать: берется из $THEMIZ_CASE.
 """
 import argparse
 import fcntl
@@ -35,6 +35,7 @@ import os
 import sys
 import time
 from pathlib import Path
+import sreda  # noqa: E402,F401  переходный период имен переменных
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import case_paths  # noqa: E402
@@ -149,9 +150,9 @@ def quota_status(case, name) -> tuple:
 # --- указатель текущего дела прогона -----------------------------------------
 # Зачем он есть. Общий счет квоты и отметка мертвого канала живут В ДЕЛЕ
 # (state_path = context(case)/channels.json), а знать дело обязаны трое: preflight,
-# practice_search и хук claude_guard. Проводник дело ЗНАЕТ (themis-pipeline.js:16,
+# practice_search и хук claude_guard. Проводник дело ЗНАЕТ (themiz-pipeline.js:16,
 # аргумент обязателен), но хук запускается харнессом и среды проводника не видит —
-# $THEMIS_CASE до него не долетает никогда. Указатель и есть тот штатный путь:
+# $THEMIZ_CASE до него не долетает никогда. Указатель и есть тот штатный путь:
 # пишет его проводник в начале прогона, читают все трое.
 # Держатель ОДИН — этот прибор: чей общий счет, того и указатель на дело.
 TEKUSHCHEE = (Path(__file__).resolve().parent.parent
@@ -222,8 +223,8 @@ def selftest() -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Общий счет каналов и квот прогона")
-    ap.add_argument("case", nargs="?", default=os.environ.get("THEMIS_CASE", ""),
-                    help="путь к делу (или $THEMIS_CASE)")
+    ap.add_argument("case", nargs="?", default=os.environ.get("THEMIZ_CASE", ""),
+                    help="путь к делу (или $THEMIZ_CASE)")
     ap.add_argument("--show", action="store_true")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--check", metavar="КАНАЛ", help="код 2, если канал помечен мертвым")
@@ -239,7 +240,7 @@ def main() -> int:
     if a.selftest:
         return selftest()
     if not a.case:
-        ap.error("нужен путь к делу (аргумент или $THEMIS_CASE)")
+        ap.error("нужен путь к делу (аргумент или $THEMIZ_CASE)")
     case = Path(a.case)
 
     if a.dead or a.alive:

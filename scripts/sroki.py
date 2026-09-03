@@ -318,11 +318,11 @@ def uid_valid(uid: str) -> bool:
 def _notify_deadline(end: date) -> None:
     """Считанный срок → напоминание в Telegram, тем же путем, что и morning-briefing.sh:
     секрета нет либо бот выключен — молча пропускаем, вычисление срока от бота не зависит.
-    Дата — единственное, что уходит наружу (themis_bot.cmd_notify_deadline сам режет ПД)."""
-    secret = os.path.join(os.path.expanduser("~"), ".secrets", "themis-telegram.env")
+    Дата — единственное, что уходит наружу (themiz_bot.cmd_notify_deadline сам режет ПД)."""
+    secret = os.path.join(os.path.expanduser("~"), ".secrets", "themiz-telegram.env")
     if not os.path.isfile(secret):
         return
-    bot = os.path.join(os.path.dirname(os.path.abspath(__file__)), "themis_bot.py")
+    bot = os.path.join(os.path.dirname(os.path.abspath(__file__)), "themiz_bot.py")
     env = dict(os.environ)
     for line in open(secret, encoding="utf-8"):
         line = line.strip()
@@ -349,7 +349,7 @@ def main() -> int:
     ap.add_argument("--offline", action="store_true",
                     help="не ходить в сеть: резерв ст. 112 ТК РФ, расчет приблизителен")
     ap.add_argument("--notify", action="store_true",
-                    help="напомнить в Telegram (themis_bot --notify-deadline), "
+                    help="напомнить в Telegram (themiz_bot --notify-deadline), "
                          "если секрет бота настроен; бот выключен — молча пропустить")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--selftest", action="store_true")

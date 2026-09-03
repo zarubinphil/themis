@@ -1,9 +1,9 @@
-THEMIS COMMUNITY LICENCE 1.0
+THEMIZ COMMUNITY LICENCE 1.0
 Source-available. Free for an individual lawyer. Paid for organisations.
 
 Copyright (c) 2026 Philipp Andreevich Zarubin. All rights reserved.
 
-Themis is not open-source software under the OSI definition. It is source-
+Themiz is not open-source software under the OSI definition. It is source-
 available: you may read the source, run it, and change it for yourself, within
 the limits set out below. Every right not expressly granted here stays with the
 copyright holder.
@@ -16,7 +16,7 @@ text prevails.
 1. DEFINITIONS
 --------------------------------------------------------------------------
 
-"Software" — Themis: its source code, scripts, agent and skill definitions,
+"Software" — Themiz: its source code, scripts, agent and skill definitions,
 documentation and any part of them.
 
 "Rights holder" — Philipp Andreevich Zarubin.
@@ -70,7 +70,7 @@ https://github.com/zarubinvibe
 4. CONTRIBUTIONS
 --------------------------------------------------------------------------
 
-Themis is meant to be improved by the lawyers who use it. If you send a
+Themiz is meant to be improved by the lawyers who use it. If you send a
 contribution (a pull request, patch or any other material), you grant the
 rights holder a perpetual, worldwide, non-exclusive, royalty-free, irrevocable
 right to use, modify, publish and license that contribution as part of the
@@ -90,7 +90,7 @@ case-folder names, no registries. A case-folder name is a person's surname.
 The Software is provided "as is". The rights holder gives no warranty of any
 kind, express or implied, including fitness for a particular purpose.
 
-Themis does not practise law and does not give legal advice. It prepares
+Themiz does not practise law and does not give legal advice. It prepares
 material for a lawyer. Every conclusion, every document and every decision on a
 case remains the professional responsibility of the lawyer using it. Checking
 what the Software produces before it goes to a court or a client is your duty,
@@ -118,7 +118,7 @@ This licence is governed by the law of the Russian Federation.
 8. EARLIER VERSIONS
 --------------------------------------------------------------------------
 
-Until 21.08.2026 Themis was distributed under the MIT Licence. Copies obtained
+Until 21.08.2026 Themiz was distributed under the MIT Licence. Copies obtained
 before that date remain under the MIT Licence for that version: a licence
 already granted cannot be withdrawn retroactively. This licence governs the
 version it is distributed with, and every later one.

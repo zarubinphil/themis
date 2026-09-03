@@ -4,7 +4,7 @@ Femida Cockpit — тонкая оболочка над существующим
 
 Принцип: кокпит НЕ меняет pipeline. Он только:
   1. принимает drag-drop документы → кладет в $HOME/Desktop/inbox/ (Femida inbox)
-  2. запускает протокол Themis (claude -p в корне проекта)
+  2. запускает протокол Themiz (claude -p в корне проекта)
   3. стримит работу офиса (агенты-юристы) в браузер через SSE,
      строя реплики из реального audit.log + stdout прогона.
 
@@ -22,15 +22,20 @@ import sys
 import time
 from pathlib import Path
 
+# Переходный период имен переменных: кокпит живет вне scripts/, поэтому
+# путь до слоя добавляется здесь, до первого чтения окружения.
+sys.path.append(str(Path(__file__).resolve().parent.parent / "scripts"))
+import sreda  # noqa: E402,F401
+
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, FileResponse
 
 # ── Пути (фиксированы на систему Фемида, НЕ Мнемозина) ──────────────────────
 HOME = Path.home()
-INBOX = Path(os.environ.get("THEMIS_INBOX") or HOME / "Desktop" / "inbox")  # НЕ _ВХОДЯЩИЕ
+INBOX = Path(os.environ.get("THEMIZ_INBOX") or HOME / "Desktop" / "inbox")  # НЕ _ВХОДЯЩИЕ
 import shutil as _shutil
-# Корень проекта Themis: env THEMIS_HOME или каталог на уровень выше cockpit/
-LEGAL = Path(os.environ.get("THEMIS_HOME") or Path(__file__).resolve().parent.parent)
+# Корень проекта Themiz: env THEMIZ_HOME или каталог на уровень выше cockpit/
+LEGAL = Path(os.environ.get("THEMIZ_HOME") or Path(__file__).resolve().parent.parent)
 AUDIT_LOG = LEGAL / "audit.log"
 CASES_INDEX = LEGAL / "cases" / "_index.md"
 CLAUDE_BIN = Path(_shutil.which("claude") or (HOME / ".local" / "bin" / "claude"))
@@ -59,15 +64,15 @@ app = FastAPI(title="Femida Cockpit", lifespan=_lifespan)
 # она окажется на сервере, любой запрос снаружи станет командой Фемиде.
 # Отсюда три вещи: секрет, ограничение частоты и журнал доступа.
 #
-# Секрет живет в $HOME/.secrets/themis-panel.env (переменная THEMIS_PANEL_TOKEN);
+# Секрет живет в $HOME/.secrets/themiz-panel.env (переменная THEMIZ_PANEL_TOKEN);
 # в коде и git — только ИМЯ переменной. Секрет не задан = локальный режим:
 # аутентификации нет, но и слушать не-петлевой интерфейс панель откажется.
 import hmac as _hmac
 from collections import deque as _deque
 
-PANEL_TOKEN = (os.environ.get("THEMIS_PANEL_TOKEN") or "").strip()
-ACCESS_LOG = Path(os.environ.get("THEMIS_ACCESS_LOG") or (LEGAL / "access.log"))
-COOKIE_NAME = "X-Themis-Token"
+PANEL_TOKEN = (os.environ.get("THEMIZ_PANEL_TOKEN") or "").strip()
+ACCESS_LOG = Path(os.environ.get("THEMIZ_ACCESS_LOG") or (LEGAL / "access.log"))
+COOKIE_NAME = "X-Themiz-Token"
 # Маршруты, которые ЧТО-ТО ДЕЛАЮТ: запускают прогон, пишут на диск, открывают файл.
 MUTATING = ("/api/task", "/api/run", "/api/new-case", "/api/learn-redline",
             "/api/open", "/api/upload")
@@ -76,8 +81,8 @@ _HITS: dict = {}
 # X-Forwarded-For в scope, и заголовок начинает выглядеть правдой: клиент меняет
 # фальшивый адрес на каждом запросе и получает НОВОЕ ведро лимита, а в журнале
 # остается выдуманный след. Доверяем заголовку только когда прокси назван явно
-# (THEMIS_TRUSTED_PROXY); иначе заявленный адрес помечается и делит одно ведро.
-TRUSTED_PROXY = (os.environ.get("THEMIS_TRUSTED_PROXY") or "").strip()
+# (THEMIZ_TRUSTED_PROXY); иначе заявленный адрес помечается и делит одно ведро.
+TRUSTED_PROXY = (os.environ.get("THEMIZ_TRUSTED_PROXY") or "").strip()
 
 
 def _client_of(request) -> str:
@@ -96,8 +101,8 @@ def _rate_key(request) -> str:
 
 
 def _rate_ok(client: str) -> bool:
-    """Скользящее окно в минуту на клиента. Порог — THEMIS_RATE_LIMIT."""
-    limit = _limit("THEMIS_RATE_LIMIT", 60)
+    """Скользящее окно в минуту на клиента. Порог — THEMIZ_RATE_LIMIT."""
+    limit = _limit("THEMIZ_RATE_LIMIT", 60)
     now = time.time()
     q = _HITS.setdefault(client, _deque())
     while q and now - q[0] > 60:
@@ -126,7 +131,7 @@ async def strazh(request, call_next):
     mutating = any(path.startswith(p) for p in MUTATING)
     client = _client_of(request)
     if PANEL_TOKEN and (path.startswith("/api/") or path.startswith("/miniapp")):
-        given = (request.headers.get("x-themis-token")
+        given = (request.headers.get("x-themiz-token")
                  or request.cookies.get(COOKIE_NAME) or "")
         if not _hmac.compare_digest(given, PANEL_TOKEN):
             _audit(request.method, path, client, "401")
@@ -527,7 +532,7 @@ def open_file(payload: dict) -> JSONResponse:
 # Бот отправляет владельцу ссылку, а не файл: все, что попало в Telegram,
 # разглашено Telegram. В ссылке нет ни имени дела, ни токена — только непрозрачный
 # идентификатор; узнает владельца панель, на своей стороне и своим входом.
-DOC_LINKS = Path(os.environ.get("THEMIS_DOC_LINKS") or (HOME / ".themis" / "doc-links.json"))
+DOC_LINKS = Path(os.environ.get("THEMIZ_DOC_LINKS") or (HOME / ".themiz" / "doc-links.json"))
 _HEARING_DATE = _re.compile(r"^(?:(\d{2})-(\d{2})-(\d{4})|(\d{4})-(\d{2})-(\d{2}))[_-]")
 
 
@@ -640,7 +645,7 @@ q('#sdelat').onclick=async()=>{
 </script></body></html>"""
 
 
-VOICE_QUEUE = Path(os.environ.get("THEMIS_BOT_QUEUE") or (HOME / ".themis" / "voice-queue.jsonl"))
+VOICE_QUEUE = Path(os.environ.get("THEMIZ_BOT_QUEUE") or (HOME / ".themiz" / "voice-queue.jsonl"))
 
 
 @app.get("/api/voice-queue")
@@ -907,9 +912,9 @@ def _limit(name: str, default: int) -> int:
         return default
 
 
-UPLOAD_MAX_BYTES = _limit("THEMIS_UPLOAD_MAX_BYTES", 50 * 1024 * 1024)
-UPLOAD_MAX_FILES = _limit("THEMIS_UPLOAD_MAX_FILES", 30)
-UPLOAD_MAX_TOTAL = _limit("THEMIS_UPLOAD_MAX_TOTAL", 200 * 1024 * 1024)
+UPLOAD_MAX_BYTES = _limit("THEMIZ_UPLOAD_MAX_BYTES", 50 * 1024 * 1024)
+UPLOAD_MAX_FILES = _limit("THEMIZ_UPLOAD_MAX_FILES", 30)
+UPLOAD_MAX_TOTAL = _limit("THEMIZ_UPLOAD_MAX_TOTAL", 200 * 1024 * 1024)
 
 
 @app.post("/api/upload")
@@ -1045,15 +1050,15 @@ def _bind_or_refuse(host: str) -> None:
         sys.exit(
             f"ОТКАЗ: панель просят слушать {host}, а секрет не задан — "
             "отличить владельца от чужого нечем. Положить токен в "
-            "$HOME/.secrets/themis-panel.env (переменная THEMIS_PANEL_TOKEN) и "
+            "$HOME/.secrets/themiz-panel.env (переменная THEMIZ_PANEL_TOKEN) и "
             "передать его в окружение запуска. Значение в git не хранить."
         )
 
 
 if __name__ == "__main__":
     import uvicorn
-    host = os.environ.get("THEMIS_PANEL_HOST", "127.0.0.1")
-    port = _limit("THEMIS_PANEL_PORT", 8800)
+    host = os.environ.get("THEMIZ_PANEL_HOST", "127.0.0.1")
+    port = _limit("THEMIZ_PANEL_PORT", 8800)
     _bind_or_refuse(host)
     rezhim = "с токеном" if PANEL_TOKEN else "локальный, без токена"
     print(f"Femida Cockpit → http://{host}:{port}   ({rezhim}; Ctrl+C стоп)")

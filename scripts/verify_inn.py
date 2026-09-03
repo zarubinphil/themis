@@ -22,7 +22,7 @@
    в документе оппонента.
 
 	Ключ берется в порядке: env `DADATA_API_KEY` → Keychain → файл из env
-	`THEMIS_DADATA_ENV` (строка `DADATA_API_KEY=...`). В код и в git ключ не попадает,
+	`THEMIZ_DADATA_ENV` (строка `DADATA_API_KEY=...`). В код и в git ключ не попадает,
 в вывод не печатается. Ответы кешируются в `~/.cache/legal_inn/<инн>.json` —
 повторная проверка того же ИНН сети не трогает.
 
@@ -44,6 +44,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import sreda  # noqa: E402,F401  переходный период имен переменных
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPTS_DIR not in sys.path:
@@ -51,8 +52,8 @@ if SCRIPTS_DIR not in sys.path:
 import pii_gate  # noqa: E402
 
 CACHE = os.path.expanduser("~/.cache/legal_inn")
-SECRETS = os.environ.get("THEMIS_DADATA_ENV")
-KEYCHAIN_ITEM = "THEMIS_DADATA_API_KEY"
+SECRETS = os.environ.get("THEMIZ_DADATA_ENV")
+KEYCHAIN_ITEM = "THEMIZ_DADATA_API_KEY"
 API = "https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/party"
 
 INN_RE = re.compile(r"\b(\d{10}|\d{12})\b")
@@ -95,7 +96,7 @@ def ogrn_valid(ogrn: str) -> bool:
 
 
 def _key() -> str | None:
-    """Ключ: env → Keychain → файл из THEMIS_DADATA_ENV. В код и git не попадает."""
+    """Ключ: env → Keychain → файл из THEMIZ_DADATA_ENV. В код и git не попадает."""
     k = os.environ.get("DADATA_API_KEY")
     if k:
         return k.strip()

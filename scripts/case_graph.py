@@ -662,7 +662,7 @@ VREZKA = (
      "дело заводится без проверки конфликта интересов"),
     (".agents/skills/source-command-new-case/SKILL.md", "registry_check.py --conflict",
      "вторая копия команды заводит дело без проверки конфликта"),
-    ("scripts/themis_status.py", "graph_state",
+    ("scripts/themiz_status.py", "graph_state",
      "сводка старта молчит о графе — он станет тихим артефактом"),
     (".claude/agents/case-mapper.md", "| Позиция | Сумма | Сторона | Доля |",
      "контракт карты потерял колонки доли — правило пообъектности снова неизмеримо"),

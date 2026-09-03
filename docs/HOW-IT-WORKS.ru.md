@@ -56,7 +56,7 @@ cases/<клиент>/<дело>/
 Где вы находитесь, показывает одна команда, а не чтение полудюжины файлов:
 
 ```bash
-python3 scripts/themis_status.py cases/<клиент>/<дело> --brief
+python3 scripts/themiz_status.py cases/<клиент>/<дело> --brief
 ```
 
 Она печатает реквизиты, ближайшее заседание, объем материалов, состояние всех
@@ -443,10 +443,10 @@ $ python3 scripts/practice_search.py "раздел совместно нажит
 «готово». Все остальное держит сторож на выходе, и это проверяется:
 
 ```
-$ python3 scripts/themis_bot.py --check-out soobshenie.txt      # «Заседание 25.09.2026 в 10:00, документ готов»
+$ python3 scripts/themiz_bot.py --check-out soobshenie.txt      # «Заседание 25.09.2026 в 10:00, документ готов»
 чисто — такой текст бот отправит
 
-$ python3 scripts/themis_bot.py --check-out drugoe.txt          # с фамилией, номером дела и суммой
+$ python3 scripts/themiz_bot.py --check-out drugoe.txt          # с фамилией, номером дела и суммой
 наружу не уйдет: ПД (ДЕЛО), ПД (ФИО), ПД (ФИО?), сумма (350 000 руб.)
 ```
 
@@ -470,5 +470,5 @@ $ python3 scripts/themis_bot.py --check-out drugoe.txt          # с фамил�
 - [README](../README.md) — короткая витрина и установка.
 - [`scripts/setup_doctor.py`](../scripts/setup_doctor.py) — честный ответ на вопрос
   «а что у меня не работает».
-- [`scripts/themis_status.py`](../scripts/themis_status.py) — где я в этом деле.
+- [`scripts/themiz_status.py`](../scripts/themiz_status.py) — где я в этом деле.
 - [English version](HOW-IT-WORKS.en.md).

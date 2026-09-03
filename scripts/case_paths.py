@@ -154,7 +154,7 @@ def verdicts(case):
 
 # ── Машинное состояние прогона (M01) ──────────────────────────────────────────
 # ЕДИНСТВЕННЫЙ адрес файла прогона. Сторож (claude_guard) читает его, проводник
-# (themis-pipeline) и владелец пишут через CLI ниже — второго адреса не заводить.
+# (themiz-pipeline) и владелец пишут через CLI ниже — второго адреса не заводить.
 # Лежит в .agent/context/: сторож освобождает эту папку от гейта протокола (кроме
 # практики/позиции), человеку кухня не видна. Ключи: guide (проводник запущен),
 # preflight_code (последний код preflight_search), preflight_override (решение
@@ -252,7 +252,7 @@ CONTRACT_DOCS = (
     ".claude/agents/doc-drafter.md",
     ".claude/agents/doc-reviewer.md",
     ".claude/skills/doc-drafter/SKILL.md",
-    ".claude/skills/themis-setup/SKILL.md",
+    ".claude/skills/themiz-setup/SKILL.md",
 )
 REVIEW_CONTRACT_DOCS = (
     ".claude/commands/draft.md",
@@ -438,10 +438,10 @@ def selftest():
         # Файл прогона (M01): один адрес в .agent/context, аддитивная запись
         assert run_state(case) == case / ".agent/context/run.json"
         assert run_read(case) == {}, "пустое состояние не пусто"
-        run_write(case, guide="themis-pipeline")
+        run_write(case, guide="themiz-pipeline")
         run_write(case, preflight_code=0)
         st = run_read(case)
-        assert st == {"guide": "themis-pipeline", "preflight_code": 0}, \
+        assert st == {"guide": "themiz-pipeline", "preflight_code": 0}, \
             f"аддитивная запись прогона сломана: {st}"
 
     # Unicode: NFD и NFC одного имени обязаны считаться одним делом

@@ -2,9 +2,9 @@
 """Машина состояний протокола Фемиды — детерминированный статус дела.
 
 Использование:
-    python3 scripts/themis_status.py cases/{клиент}/{дело}
-    python3 scripts/themis_status.py cases/{клиент}/{дело} --brief
-    python3 scripts/themis_status.py --selftest
+    python3 scripts/themiz_status.py cases/{клиент}/{дело}
+    python3 scripts/themiz_status.py cases/{клиент}/{дело} --brief
+    python3 scripts/themiz_status.py --selftest
 
 Читает маркеры с ДИСКА (не из памяти модели) и печатает: статус каждого шага
 и СЛЕДУЮЩИЙ ШАГ. Фемида обязана работать по этому выводу — это единственный
@@ -26,11 +26,12 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+import sreda  # noqa: E402,F401  переходный период имен переменных
 
 # Кеш роутера извлечения: если файл там есть, он уже распознан и
 # перераспознавать его запрещено (конституция, раздел LOCAL-FIRST).
 EXTRACT_CACHE = Path(os.environ.get(
-    "THEMIS_EXTRACT_CACHE", Path.home() / ".cache" / "legal_extract"))
+    "THEMIZ_EXTRACT_CACHE", Path.home() / ".cache" / "legal_extract"))
 SCAN_EXT = {".pdf", ".jpg", ".jpeg", ".png", ".tiff", ".tif", ".heic", ".bmp"}
 TEXT_EXT = {".docx", ".xlsx", ".pptx", ".rtf", ".txt", ".md", ".html", ".csv"}
 # Флаг предписан документами параметризованным — «[ОБНОВИТЬ КЛИЕНТА: поле: значение]»,
@@ -423,7 +424,7 @@ def main() -> int:
     if a.selftest:
         return selftest()
     if not a.case:
-        print("usage: themis_status.py cases/{клиент}/{дело} [--brief]", file=sys.stderr)
+        print("usage: themiz_status.py cases/{клиент}/{дело} [--brief]", file=sys.stderr)
         return 1
     sys.argv = [sys.argv[0], a.case]
 
@@ -699,7 +700,7 @@ def selftest() -> int:
     # M02: человеческий протокол может говорить что угодно, шаг 5 отвечает
     # только verdict.py --check. Сначала честное одобрение, затем правка .md:
     # review_log остается зеленым, машинный статус обязан стать красным.
-    os.environ["THEMIS_VERDICT_KEY"] = "selftest-key-do-not-use-in-prod"
+    os.environ["THEMIZ_VERDICT_KEY"] = "selftest-key-do-not-use-in-prod"
     import verdict as vd
     status_md = drafts / "status.md"
     status_md.write_text("# Ходатайство\n\nПрошу суд отложить заседание "

@@ -1,6 +1,6 @@
 # Security policy
 
-Themis works with real case material: scans, client documents, deadlines, and drafts. The repository holds the agent prompts, the calculators, the guards, and the workflow. Your machine holds the case files.
+Themiz works with real case material: scans, client documents, deadlines, and drafts. The repository holds the agent prompts, the calculators, the guards, and the workflow. Your machine holds the case files.
 
 ## Trust boundary
 
@@ -9,9 +9,9 @@ Themis works with real case material: scans, client documents, deadlines, and dr
 - A cloud check of a single page is allowed only when local recognition returns nothing, or when a critical detail has to be confirmed. There is no silent switch to the cloud.
 - Telegram reminders go through your own bot and carry dates and a completion word. No names, case numbers, or amounts.
 - Agent output is untrusted model output, including case maps, found practice, and draft documents. A lawyer decides.
-- Themis does not implement a sandbox. File access, shell commands, and network access are governed by the agent runtime you start it in.
+- Themiz does not implement a sandbox. File access, shell commands, and network access are governed by the agent runtime you start it in.
 
-Keep client material on an encrypted disk, run Themis under an account only you use, and review `git status` before any commit in a case repository.
+Keep client material on an encrypted disk, run Themiz under an account only you use, and review `git status` before any commit in a case repository.
 
 ## Personal data
 

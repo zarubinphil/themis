@@ -938,9 +938,9 @@ def selftest() -> int:
     names = client_names(cases)
     pat = name_pattern(names)
     pat_msg = name_pattern(names, cyrillic=True)
-    abs_path = "/" + "Users/test/" + "Проекты/themis"
-    home_projects = "~/" + "Проекты/themis"
-    secret_path = "~/" + ".secrets/themis.env"
+    abs_path = "/" + "Users/test/" + "Проекты/themiz"
+    home_projects = "~/" + "Проекты/themiz"
+    secret_path = "~/" + ".secrets/themiz.env"
     mixed_paths = "/" + "Users/test/x " + "~/" + ".secrets/a"
 
     def _docx_bytes(body: str) -> bytes:

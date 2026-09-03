@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """render_tail.py — дорендер хвоста скан-PDF сверх потолка MAXP роутера.
 
-markdown_extract.py рендерит/OCR-ит не более MAXP (=500, env THEMIS_MAX_PAGES) страниц;
+markdown_extract.py рендерит/OCR-ит не более MAXP (=500, env THEMIZ_MAX_PAGES) страниц;
 усечение помечается в note: «УСЕЧЕНО: всего N стр., обработано MAXP». Этот скрипт
 отрисовывает и OCR-ит остаток локальным Apple Vision ($0) в те же сайдкары
 ocr_dir/page_NNN.{png,txt}. Идемпотентен: страницы с готовым .txt пропускает.

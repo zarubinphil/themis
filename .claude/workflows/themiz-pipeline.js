@@ -1,9 +1,9 @@
 export const meta = {
-  name: 'themis-pipeline',
-  description: 'Тонкий проводник конвейера Фемиды. Дает единственное, чего нет ни у одного python-прибора: принудительный порядок фаз и параллельный запуск (карта ∥ охота, три линзы). Ворота НЕ дублирует — зовет их в приборах (themis_status, document_guard, quality_gate, verdict, хук claude_guard). Аргумент — путь к делу cases/<клиент>/<дело> (строка или {case}).',
-  whenToUse: 'Прогон дела по протоколу 0→5. Workflow({ name: "themis-pipeline", args: "cases/<клиент>/<дело>" })',
+  name: 'themiz-pipeline',
+  description: 'Тонкий проводник конвейера Фемиды. Дает единственное, чего нет ни у одного python-прибора: принудительный порядок фаз и параллельный запуск (карта ∥ охота, три линзы). Ворота НЕ дублирует — зовет их в приборах (themiz_status, document_guard, quality_gate, verdict, хук claude_guard). Аргумент — путь к делу cases/<клиент>/<дело> (строка или {case}).',
+  whenToUse: 'Прогон дела по протоколу 0→5. Workflow({ name: "themiz-pipeline", args: "cases/<клиент>/<дело>" })',
   phases: [
-    { title: 'Guard', detail: 'themis_status <дело> + preflight_search — красный код любой команды стопает прогон' },
+    { title: 'Guard', detail: 'themiz_status <дело> + preflight_search — красный код любой команды стопает прогон' },
     { title: 'Census', detail: 'document_guard --rules — перепись требований к документу до начала работы' },
     { title: 'Работа', detail: 'карта → охота (карта первой, реш. владельца 01.09.2026), затем синтез, затем doc-drafter' },
     { title: 'Полнота', detail: 'verdict --preflight прогоняет три прибора и пишет signed-допуск редакции — красный не пускает к рецензии' },
@@ -19,7 +19,7 @@ const CASE = (function () {
   if (t.charAt(0) === '{') { try { const p = JSON.parse(t); if (p && p.case) return String(p.case).trim() } catch (e) {} }
   return t
 })()
-if (!CASE) throw new Error('themis-pipeline: не задан путь к делу (args = "cases/<клиент>/<дело>")')
+if (!CASE) throw new Error('themiz-pipeline: не задан путь к делу (args = "cases/<клиент>/<дело>")')
 
 
 // ── ворота: команда выполняется КОДОМ, не моделью ────────────────────────
@@ -39,7 +39,7 @@ const gate = function (cmd, label, phase) {
   return out
 }
 const budgetGate = function (phase) {
-  return gate('python3 scripts/themis_status.py ' + JSON.stringify(CASE), 'budget/status', phase)
+  return gate('python3 scripts/themiz_status.py ' + JSON.stringify(CASE), 'budget/status', phase)
 }
 
 // Файл прогона (M01): единственный адрес держит case_paths.py — второго не заводим.
@@ -57,9 +57,9 @@ const OWNER_FILE = path.join(DRAFTS_DIR, '.owner')
 const OWNER_TOKEN = crypto.randomUUID()
 const acquireDraftsOwner = async function () {
   await fs.mkdir(DRAFTS_DIR, { recursive: true })
-  process.env.THEMIS_DRAFTS_OWNER = OWNER_TOKEN
+  process.env.THEMIZ_DRAFTS_OWNER = OWNER_TOKEN
   try {
-    await fs.writeFile(OWNER_FILE, 'themis-pipeline token=' + OWNER_TOKEN + ' at=' + new Date().toISOString() + '\n',
+    await fs.writeFile(OWNER_FILE, 'themiz-pipeline token=' + OWNER_TOKEN + ' at=' + new Date().toISOString() + '\n',
       { encoding: 'utf8', flag: 'wx' })
   } catch (e) {
     if (e && e.code === 'EEXIST') {
@@ -75,13 +75,13 @@ const releaseDraftsOwner = async function () {
   else log('Owner lock не снят: файл уже принадлежит другому процессу')
 }
 
-// ═══ Guard ═══ порядок держит themis_status, доступность сервисов — preflight
+// ═══ Guard ═══ порядок держит themiz_status, доступность сервисов — preflight
 phase('Guard')
 log('Guard: корпус, расход, дело, сервисы')
 // Отметка запуска проводника ложится ПЕРВОЙ и стирает вчерашнее решение по preflight:
 // каждый прогон решает заново. Даже если Guard дальше упадет — отметка + код preflight
 // уже на диске, и прямой спавн охотника поймается сторожем.
-runSet('guide', 'themis-pipeline')
+runSet('guide', 'themiz-pipeline')
 runSet('preflight_override', null)
 budgetGate('Guard')
 // Указатель дела ставится ПЕРЕД preflight: его читают preflight, practice_search и
@@ -92,7 +92,7 @@ childProcess.spawnSync('/bin/sh', ['-c',
   JSON.stringify(CASE)], { encoding: 'utf8' })
 const _pf = childProcess.spawnSync('/bin/sh', ['-c',
   'python3 scripts/preflight_search.py --case ' + JSON.stringify(CASE)],
-  { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, env: Object.assign({}, process.env, { THEMIS_CASE: CASE }) })
+  { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, env: Object.assign({}, process.env, { THEMIZ_CASE: CASE }) })
 const _pfCode = _pf.status == null ? 1 : _pf.status
 runSet('preflight_code', _pfCode)
 log('[Guard] guard:preflight → код ' + _pfCode)
@@ -190,9 +190,9 @@ const lenses = await parallel([
 ])
 // сводный вердикт один; полный контракт Кони применяет именно doc-reviewer.
 // Проводник — санкционированный оркестратор рецензии: открываем сторожу его спавн
-// doc-reviewer токеном (тот же механизм env, что и THEMIS_DRAFTS_OWNER). Прямой
+// doc-reviewer токеном (тот же механизм env, что и THEMIZ_DRAFTS_OWNER). Прямой
 // doc-reviewer из главного потока токена не несет и остается заблокирован.
-process.env.THEMIS_DOC_REVIEWER_OK = '1'
+process.env.THEMIZ_DOC_REVIEWER_OK = '1'
 try {
 await agent(
   'Сводный вердикт по черновику ' + DRAFT_MD + '. Три линзы вернули:\n\n' +
@@ -204,7 +204,7 @@ await agent(
   { label: 'verdict', phase: 'Рецензия', agentType: 'doc-reviewer', model: 'opus' }
 )
 } finally {
-  delete process.env.THEMIS_DOC_REVIEWER_OK
+  delete process.env.THEMIZ_DOC_REVIEWER_OK
 }
 
 // ═══ Сборка ═══ финальный .docx и его проверка формой
@@ -227,5 +227,5 @@ log('Конвейер пройден: ' + DOCX_PATH)
 return { case: CASE, draft: DRAFT_MD, docx: DOCX_PATH }
 } finally {
   await releaseDraftsOwner()
-  delete process.env.THEMIS_DRAFTS_OWNER
+  delete process.env.THEMIZ_DRAFTS_OWNER
 }

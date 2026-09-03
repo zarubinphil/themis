@@ -15,7 +15,7 @@
   1. обезличивание `pii_gate --mask`; реквизитов не нашлось — текст проверяется
      `pii_gate --residual`, и грязный текст НЕ уходит;
   2. рабочий каталог — временный, и в нем только обезличенный файл;
-  3. окружение вычищено: THEMIS_*, токены и ключи не наследуются, PATH фиксирован,
+  3. окружение вычищено: THEMIZ_*, токены и ключи не наследуются, PATH фиксирован,
      stdin закрыт (человеческий гейт не утекает в чужой процесс);
   4. успех по трем сигналам: код 0, ответ непуст, нет маркеров отказа;
   5. журнал отправок без исходного текста: провайдер, время, длина, отпечаток.
@@ -38,6 +38,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+import sreda  # noqa: E402,F401  переходный период имен переменных
 
 SCRIPTS = Path(__file__).resolve().parent
 PII = SCRIPTS / "pii_gate.py"
@@ -45,7 +46,7 @@ PII = SCRIPTS / "pii_gate.py"
 KEEP_ENV = ("HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TERM", "LC_CTYPE", "TMPDIR", "LC_TIME")
 SAFE_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 # Признаки нашего секрета в имени переменной: такие не уходят никуда и никогда.
-SECRET_RE = re.compile(r"THEMIS|TOKEN|SECRET|API_?KEY|PASSWORD|CREDENTIAL|ANTHROPIC|OPENAI",
+SECRET_RE = re.compile(r"THEMIZ|TOKEN|SECRET|API_?KEY|PASSWORD|CREDENTIAL|ANTHROPIC|OPENAI",
                        re.I)
 OTKAZ_MARKERY = ("error:", "ошибка:", "rate limit", "quota", "not logged", "unauthorized")
 
@@ -178,7 +179,7 @@ def call(provider: str, prompt: Path, cmd=None, timeout: int = 300,
     # требование владельца исполняется, а не только объявляется.
     argv = list(argv) + _model_effort_args(model, effort)
 
-    with tempfile.TemporaryDirectory(prefix="themis-foreign-") as td:
+    with tempfile.TemporaryDirectory(prefix="themiz-foreign-") as td:
         # Рабочий каталог — ВНУТРИ временного, чтобы и на уровень выше чужому CLI
         # было видно только его: системный temp содержит десятки тысяч чужих записей.
         work = Path(td) / "work"
@@ -253,7 +254,7 @@ def selftest() -> int:
                       encoding="utf-8")
         out = td / "otvet.txt"
         log = td / "otpravki.log"
-        os.environ["THEMIS_PROBA_SEKRET"] = "ne-dolzhen-utech"
+        os.environ["THEMIZ_PROBA_SEKRET"] = "ne-dolzhen-utech"
         assert call("proba", pd, vidok, out=out, log=log) == 0, "герметичный вызов не прошел"
         sosedi = td / "sosedi.txt"
         sosed = sh("sosed.sh", f'ls -A .. | wc -l > {sosedi}\necho "ответ"\n')
@@ -278,7 +279,7 @@ def selftest() -> int:
         vid = vidok_out.read_text(encoding="utf-8")
         for utechka in ("Иванова", "771234567890", "А65-1234/2026"):
             assert utechka not in vid, f"за границу ушло «{utechka}»"
-        assert "THEMIS_PROBA_SEKRET" not in vid, "наша переменная утекла в чужое окружение"
+        assert "THEMIZ_PROBA_SEKRET" not in vid, "наша переменная утекла в чужое окружение"
         assert "PATH" in vid, "без PATH чужой CLI не запустится"
         assert ".karta.json" not in vid, "карта обезличивания показана чужому CLI"
         assert out.is_file() and "333" in out.read_text(encoding="utf-8"), "ответ не сохранен"
@@ -328,7 +329,7 @@ def selftest() -> int:
         vid2 = vidok_out.read_text(encoding="utf-8")
         assert "1234 567890" not in vid2, "паспорт ушел за границу"
         assert code == 0 or not o.exists(), "отказ оставил файл ответа"
-        os.environ.pop("THEMIS_PROBA_SEKRET", None)
+        os.environ.pop("THEMIZ_PROBA_SEKRET", None)
     print("selftest пройден: за границу уходит обезличенное, отказ не пишет ничего")
     return 0
 

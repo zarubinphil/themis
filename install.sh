@@ -1,17 +1,18 @@
 #!/bin/bash
-# Themis — установка «под ключ». Запуск из корня проекта: bash install.sh
+# Themiz — установка «под ключ». Запуск из корня проекта: bash install.sh
 set -e
 cd "$(dirname "$0")"
 ROOT="$(pwd)"
+. scripts/sreda.sh
 # Привет от автора. Язык — по локали системы: русская локаль → по-русски,
 # любая другая → по-английски. Первое, что видит человек, поставивший систему.
 case "${LANG:-}${LC_ALL:-}" in
-  ru*|*RU*) THEMIS_LANG=ru ;;
-  *)        THEMIS_LANG=en ;;
+  ru*|*RU*) THEMIZ_LANG=ru ;;
+  *)        THEMIZ_LANG=en ;;
 esac
 
 echo "════════════════════════════════════════════"
-if [ "$THEMIS_LANG" = "ru" ]; then
+if [ "$THEMIZ_LANG" = "ru" ]; then
   echo "  Фемида"
   echo "════════════════════════════════════════════"
   echo ""
@@ -136,17 +137,17 @@ if [ "$THEMIS_LANG" = "ru" ]; then
   echo ""
   echo "  Если я оказалась тебе полезна, поставь проекту звезду на GitHub:"
   echo ""
-  echo "      https://github.com/zarubinvibe/themis"
+  echo "      https://github.com/zarubinvibe/themiz"
   echo ""
   echo "  Для тебя это несколько секунд. Для проекта это действительно важно."
   echo ""
   echo "  Добро пожаловать в Фемиду. Но помни, последнее решение всегда остается за"
   echo "  тобой!"
 else
-  echo "  Themis"
+  echo "  Themiz"
   echo "════════════════════════════════════════════"
   echo ""
-  echo "  Hello. I am Themis."
+  echo "  Hello. I am Themiz."
   echo ""
   echo "  They used to portray me with scales in one hand and a sword in the other."
   echo "  The blindfold was a reminder that justice must not look at faces, and the"
@@ -211,7 +212,7 @@ else
   echo ""
   echo "  You set one task."
   echo ""
-  echo "  And inside Themis a whole team starts working on it."
+  echo "  And inside Themiz a whole team starts working on it."
   echo ""
   echo "  But there is one place I will not hand to any agent."
   echo ""
@@ -245,7 +246,7 @@ else
   echo "  Ask me to look at the case from the other side."
   echo ""
   echo "  And if I bring you an unexpected idea, do not take it on faith merely"
-  echo "  because Themis proposed it."
+  echo "  because Themiz proposed it."
   echo ""
   echo "  Check me."
   echo ""
@@ -253,25 +254,25 @@ else
   echo ""
   echo "  One more thing."
   echo ""
-  echo "  Themis is open. If you fixed a bug in me, made something faster, added a"
+  echo "  Themiz is open. If you fixed a bug in me, made something faster, added a"
   echo "  new capability or created one more good virtual lawyer, share it."
   echo ""
   echo "  Then the next lawyer will not have to walk the road you have already"
   echo "  walked. And when he improves something after you, his work may one day"
   echo "  come back to you."
   echo ""
-  echo "  That is how Themis grows stronger: everyone leaves behind something useful"
+  echo "  That is how Themiz grows stronger: everyone leaves behind something useful"
   echo "  for the next person."
   echo ""
   echo "  And last."
   echo ""
   echo "  If I have been of use to you, give the project a star on GitHub:"
   echo ""
-  echo "      https://github.com/zarubinvibe/themis"
+  echo "      https://github.com/zarubinvibe/themiz"
   echo ""
   echo "  For you it is a few seconds. For the project it genuinely matters."
   echo ""
-  echo "  Welcome to Themis. But remember: the last word is always yours."
+  echo "  Welcome to Themiz. But remember: the last word is always yours."
 fi
 echo "════════════════════════════════════════════"
 
@@ -301,7 +302,7 @@ fi
 # Я не ставлю на чужой компьютер ничего молча. Сначала называю, что именно, зачем
 # и сколько это весит, и жду прямого согласия. «Сейчас поставлю зависимости» —
 # это не разрешение, а его имитация.
-if [ "$THEMIS_LANG" = "ru" ]; then
+if [ "$THEMIZ_LANG" = "ru" ]; then
   echo ""
   echo "  Прежде чем что-то ставить, скажу, что мне нужно и зачем."
   echo ""
@@ -365,8 +366,8 @@ fi
 # не гейт: прецедент 21.08.2026, проба с ответом «n» прошла установку насквозь,
 # потому что ответ ушел мимо /dev/tty.
 SOGLASIE=""
-if [ "${THEMIS_YES:-}" = "1" ]; then
-  SOGLASIE="y"                      # для неинтерактивной установки: THEMIS_YES=1
+if [ "${THEMIZ_YES:-}" = "1" ]; then
+  SOGLASIE="y"                      # для неинтерактивной установки: THEMIZ_YES=1
 elif [ -r /dev/tty ] && [ -t 1 ]; then
   read -r SOGLASIE < /dev/tty || SOGLASIE="__net__"
 elif [ -p /dev/stdin ]; then
@@ -381,17 +382,17 @@ elif [ ! -t 0 ] && [ ! -t 1 ]; then
   # гейт зеленел бы на дереве, которое никто ни разу не поставил. Ставим и
   # говорим об этом вслух - решение владельца 03.09.2026.
   SOGLASIE="y"
-  THEMIS_AVTO="1"
+  THEMIZ_AVTO="1"
 else
   SOGLASIE="__net__"
 fi
-[ -z "$SOGLASIE" ] && [ "${THEMIS_YES:-}" != "1" ] && [ "${THEMIS_AVTO:-}" != "1" ] && [ ! -t 0 ] && SOGLASIE="__net__"
+[ -z "$SOGLASIE" ] && [ "${THEMIZ_YES:-}" != "1" ] && [ "${THEMIZ_AVTO:-}" != "1" ] && [ ! -t 0 ] && SOGLASIE="__net__"
 
 # Автоматический прогон обязан назвать себя: тихая установка без спроса
 # неотличима от установки, на которую согласились.
-if [ "${THEMIS_AVTO:-}" = "1" ]; then
+if [ "${THEMIZ_AVTO:-}" = "1" ]; then
   echo ""
-  if [ "$THEMIS_LANG" = "ru" ]; then
+  if [ "$THEMIZ_LANG" = "ru" ]; then
     echo "  Терминала нет и трубы нет - это автоматический прогон. Ставлю без вопроса."
     echo "  Человеку я задаю его всегда: bash install.sh в терминале."
   else
@@ -402,21 +403,21 @@ fi
 
 if [ "$SOGLASIE" = "__net__" ]; then
   echo ""
-  if [ "$THEMIS_LANG" = "ru" ]; then
+  if [ "$THEMIZ_LANG" = "ru" ]; then
     echo "  Не смог спросить разрешение — значит не ставлю."
     echo "  Запусти в терминале: bash install.sh"
-    echo "  Либо разреши заранее:  THEMIS_YES=1 bash install.sh"
+    echo "  Либо разреши заранее:  THEMIZ_YES=1 bash install.sh"
   else
     echo "  I could not ask for permission, so I install nothing."
     echo "  Run it in a terminal:  bash install.sh"
-    echo "  Or agree up front:     THEMIS_YES=1 bash install.sh"
+    echo "  Or agree up front:     THEMIZ_YES=1 bash install.sh"
   fi
   exit 1
 fi
 
 case "$SOGLASIE" in
   n|N|нет|no)
-    if [ "$THEMIS_LANG" = "ru" ]; then
+    if [ "$THEMIZ_LANG" = "ru" ]; then
       echo ""
       echo "  Понял, ничего не ставлю. Запусти bash install.sh, когда решишь."
     else
@@ -425,6 +426,26 @@ case "$SOGLASIE" in
     fi
     exit 0 ;;
 esac
+
+# Переходный период имени: состояние и кеш прошлой установки переезжают один раз.
+# Прежнее имя получается заменой буквы, а не литералом — иначе следующая массовая
+# замена имени съест этот переезд вместе со всем остальным.
+pereezd_prezhnego() {
+  prezhnij="$1"; novyj="$2"
+  [ -d "$prezhnij" ] || return 0
+  # Пустой новый каталог переездом не считается: его мог создать любой прибор
+  # до первого запуска, и тогда данные прошлой установки осиротели бы молча.
+  if [ -d "$novyj" ] && [ -n "$(ls -A "$novyj" 2>/dev/null)" ]; then
+    echo "  ⚠ $novyj не пуст — $prezhnij оставлен как есть, перенести вручную"
+    return 0
+  fi
+  rmdir "$novyj" 2>/dev/null
+  mv "$prezhnij" "$novyj" && echo "  ✓ переехало: $prezhnij → $novyj"
+  return 0
+}
+IMYA_PREZHNEE="$(printf '%s' 'themiz' | tr 'z' 's')"
+pereezd_prezhnego "$HOME/.$IMYA_PREZHNEE" "$HOME/.themiz"
+pereezd_prezhnego "$HOME/.cache/$IMYA_PREZHNEE" "$HOME/.cache/themiz"
 
 # ── 1. Python-зависимости ────────────────────────────────────────────────────
 echo ""
@@ -448,7 +469,7 @@ for M in fitz PIL docx yaml fastapi reportlab pypdfium2 pypdf; do
 done
 if [ -n "$NEDOSTAET" ]; then
   echo ""
-  if [ "$THEMIS_LANG" = "ru" ]; then
+  if [ "$THEMIZ_LANG" = "ru" ]; then
     echo "  ✗ Пакеты не встали:$NEDOSTAET"
     echo "    Похоже, системный Python защищен (PEP 668). Обходные пути:"
     echo "      python3 -m venv .venv && . .venv/bin/activate && bash install.sh"
@@ -560,7 +581,7 @@ if command -v claude >/dev/null 2>&1; then
   echo "      ✓ claude найден: $(command -v claude)"
 else
   echo "      ⚠ claude CLI не найден. Установи Claude Code: https://claude.com/claude-code"
-  echo "        Themis работает поверх него (агенты, протокол, cockpit запускает claude -p)."
+  echo "        Themiz работает поверх него (агенты, протокол, cockpit запускает claude -p)."
 fi
 
 # ── 6.5. Сторож персональных данных ──────────────────────────────────────────
@@ -581,16 +602,22 @@ python3 scripts/pd_guard.py --install
 echo ""
 echo "[6.6] Расписание бота-уведомителя (launchd)…"
 if [ "$(uname)" = "Darwin" ]; then
-  PLIST_DST="$HOME/Library/LaunchAgents/themis.morning-briefing.plist"
+  PLIST_DST="$HOME/Library/LaunchAgents/themiz.morning-briefing.plist"
   mkdir -p "$HOME/Library/LaunchAgents"
-  sed "s|__THEMIS_HOME__|$PWD|g" scripts/themis.morning-briefing.plist > "$PLIST_DST"
+  PREZHNIJ_PLIST="$HOME/Library/LaunchAgents/$(printf '%s' 'themiz' | tr 'z' 's').morning-briefing.plist"
+  if [ -f "$PREZHNIJ_PLIST" ]; then
+    launchctl unload "$PREZHNIJ_PLIST" 2>/dev/null
+    rm -f "$PREZHNIJ_PLIST"
+    echo "      ✓ прежняя метка утренней сводки снята — иначе сводка приходила бы дважды"
+  fi
+  sed "s|__THEMIZ_HOME__|$PWD|g" scripts/themiz.morning-briefing.plist > "$PLIST_DST"
   launchctl unload "$PLIST_DST" 2>/dev/null
   if launchctl load "$PLIST_DST" 2>/dev/null; then
     echo "      ✓ утренняя сводка запланирована на 9:00 ($PLIST_DST)"
   else
     echo "      ⚠ launchctl load не удался — поставить вручную: launchctl load $PLIST_DST"
   fi
-  echo '      Секрет Telegram (необязателен) — $HOME/.secrets/themis-telegram.env, см. CLAUDE.md.'
+  echo '      Секрет Telegram (необязателен) — $HOME/.secrets/themiz-telegram.env, см. CLAUDE.md.'
 else
   echo "      ⚠ launchd есть только в macOS — расписание не поставлено автоматически."
   echo "        Замена: Планировщик задач (Windows) / systemd-таймеры (Linux) на"
@@ -627,7 +654,7 @@ fi
 # просто выключено, и прибор говорит об этом вслух. Раньше ее отсутствие роняло
 # селфтест и выглядело поломкой продукта - изолированный прогон 03.09.2026.
 echo ""
-if [ "$THEMIS_LANG" = "ru" ]; then
+if [ "$THEMIZ_LANG" = "ru" ]; then
   echo "[доп.] Метида — сжатие контекста (необязательно)"
   echo "  Отдельный инструмент. Он ужимает материал перед отправкой модели:"
   echo "  меньше токенов на том же деле. Фемида работает и без него — сжатие"
@@ -635,14 +662,14 @@ if [ "$THEMIS_LANG" = "ru" ]; then
 else
   echo "[optional] Metida - context compression (optional)"
   echo "  A separate tool. It squeezes material before it goes to the model:"
-  echo "  fewer tokens on the same case. Themis works fine without it - the"
+  echo "  fewer tokens on the same case. Themiz works fine without it - the"
   echo "  compression is simply off, and the instruments say so out loud."
 fi
 METIDA_OTVET="n"
-if [ "${THEMIS_YES:-}" = "1" ] || [ "${THEMIS_AVTO:-}" = "1" ]; then
+if [ "${THEMIZ_YES:-}" = "1" ] || [ "${THEMIZ_AVTO:-}" = "1" ]; then
   METIDA_OTVET="n"                 # автоматический прогон ничего лишнего не тянет
 elif [ -r /dev/tty ] && [ -t 1 ]; then
-  if [ "$THEMIS_LANG" = "ru" ]; then
+  if [ "$THEMIZ_LANG" = "ru" ]; then
     printf "  Подключить Метиду? [Enter — нет, y — да]: "
   else
     printf "  Connect Metida? [Enter - no, y - yes]: "
@@ -651,17 +678,17 @@ elif [ -r /dev/tty ] && [ -t 1 ]; then
 fi
 case "$METIDA_OTVET" in
   y|Y|да|yes)
-    if [ "$THEMIS_LANG" = "ru" ]; then
+    if [ "$THEMIZ_LANG" = "ru" ]; then
       echo "  Назови каталог с исходниками Метиды и положи его в переменную:"
-      echo "      export THEMIS_METIZ_DIR=/путь/к/metiz"
-      echo "  После этого сжатие включится само, проверить: node scripts/themis-metiz.mjs --selftest"
+      echo "      export THEMIZ_METIZ_DIR=/путь/к/metiz"
+      echo "  После этого сжатие включится само, проверить: node scripts/themiz-metiz.mjs --selftest"
     else
       echo "  Point the tool at the Metida sources:"
-      echo "      export THEMIS_METIZ_DIR=/path/to/metiz"
-      echo "  Compression turns on by itself; check with: node scripts/themis-metiz.mjs --selftest"
+      echo "      export THEMIZ_METIZ_DIR=/path/to/metiz"
+      echo "  Compression turns on by itself; check with: node scripts/themiz-metiz.mjs --selftest"
     fi ;;
   *)
-    if [ "$THEMIS_LANG" = "ru" ]; then
+    if [ "$THEMIZ_LANG" = "ru" ]; then
       echo "      ✓ без Метиды — так и задумано, ничего не сломается"
     else
       echo "      ✓ without Metida - by design, nothing breaks"
@@ -680,6 +707,6 @@ else
 fi
 echo "  • Cockpit (UI):   python3 cockpit/app.py  → http://localhost:8800"
 echo "  • Или в Claude Code: открой проект, скажи «новое дело …»"
-echo "  • Обновление:     /themis-update  (тянет последнюю версию логики)"
+echo "  • Обновление:     /themiz-update  (тянет последнюю версию логики)"
 echo "  Данные дел в cases/ остаются ЛОКАЛЬНО и не публикуются."
 echo "════════════════════════════════════════════"

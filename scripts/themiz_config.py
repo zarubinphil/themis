@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""themis_config.py — настройки установки. Пустой конфиг = рабочая локальная система.
+"""themiz_config.py — настройки установки. Пустой конфиг = рабочая локальная система.
 
 Зачем. Фемиду ставит себе другой юрист, и у него нет ни нашего сервера, ни нашего
 бота. Значит, умолчание обязано быть таким: один Mac, ничего наружу. Сервер и бот —
@@ -10,8 +10,8 @@
     --check [--config ФАЙЛ]   годен ли конфиг: 0 — да, 1 — назвать беду
     --selftest                без сети
 
-Где лежит: `~/.themis/config.json` (вне репозитория — там нет ни чужих настроек,
-ни персональных данных). Путь можно задать переменной `THEMIS_CONFIG`.
+Где лежит: `~/.themiz/config.json` (вне репозитория — там нет ни чужих настроек,
+ни персональных данных). Путь можно задать переменной `THEMIZ_CONFIG`.
 
 **Секретов в конфиге нет.** Токен бота и токен панели живут в `$HOME/.secrets`, а конфиг
 называет только ИМЯ переменной окружения. Конфиг лежит рядом с проектом, попадает в
@@ -25,16 +25,17 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+import sreda  # noqa: E402,F401  переходный период имен переменных
 
-DEFAULT_PATH = Path(os.environ.get("THEMIS_CONFIG") or Path.home() / ".themis" / "config.json")
+DEFAULT_PATH = Path(os.environ.get("THEMIZ_CONFIG") or Path.home() / ".themiz" / "config.json")
 
 # Умолчания = локальная работа. Ни адреса сервера, ни токена бота: чужое сюда
 # не подставляется, свое владелец вписывает сам на онбординге.
 DEFAULTS = {
     "inbox": str(Path.home() / "Desktop" / "inbox"),
-    "server": {"enabled": False, "url": "", "token_env": "THEMIS_PANEL_TOKEN"},
-    "bot": {"enabled": False, "token_env": "THEMIS_TELEGRAM_BOT_TOKEN", "chat_id_env":
-            "THEMIS_TELEGRAM_CHAT_ID"},
+    "server": {"enabled": False, "url": "", "token_env": "THEMIZ_PANEL_TOKEN"},
+    "bot": {"enabled": False, "token_env": "THEMIZ_TELEGRAM_BOT_TOKEN", "chat_id_env":
+            "THEMIZ_TELEGRAM_CHAT_ID"},
     "practice": {"categories": [], "region": "", "arbitrazh": False},
     # Своя команда расшифровки голосового, если платформенная не подходит.
     # Пусто — движок выбирает scripts/voice_local.py по платформе.

@@ -22,7 +22,7 @@ Mac. Поэтому платформенное поведение проверя
      неработающим с платформенной заменой той же функции;
   4. пустой конфиг = рабочая локальная система, сервер и бот выключены; чужого
      токена и чужого адреса сервера в умолчаниях нет;
-  5. скилл themis-setup не только спрашивает, но и ОБЪЯСНЯЕТ устройство конвейера.
+  5. скилл themiz-setup не только спрашивает, но и ОБЪЯСНЯЕТ устройство конвейера.
 
 Выход: 0 — этап принят; 1 — есть несданное.
 """
@@ -36,7 +36,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "scripts"
-SKILL = ROOT / ".claude" / "skills" / "themis-setup" / "SKILL.md"
+SKILL = ROOT / ".claude" / "skills" / "themiz-setup" / "SKILL.md"
 NO_NET = {**os.environ, "HTTPS_PROXY": "http://127.0.0.1:1", "HTTP_PROXY": "http://127.0.0.1:1",
           "ALL_PROXY": "http://127.0.0.1:1", "NO_PROXY": "127.0.0.1,localhost"}
 PLATFORMS = ("darwin", "windows", "linux")
@@ -164,7 +164,7 @@ SMLTLK_CONTRACT = """  SMLTLK — штатный компонент, а не о�
                    (диктовка → voice-to-brief → бриф задачи);
       на прочих  — available false, сказано ПРЯМО, что приложение строки меню macOS
                    там не запускается, и названа платформенная замена той же функции.
-    Скилл themis-setup обязан упоминать SMLTLK: молчание запрещено."""
+    Скилл themiz-setup обязан упоминать SMLTLK: молчание запрещено."""
 
 
 def check_smltlk():
@@ -191,7 +191,7 @@ def check_smltlk():
             if not s.get("replacement"):
                 fails.append(("setup_doctor.py", f"{plat}: SMLTLK без замены — молчаливая деградация"))
     if SKILL.is_file() and "smltlk" not in SKILL.read_text(encoding="utf-8").lower():
-        fails.append(("themis-setup", "скилл молчит про SMLTLK, хотя он штатный компонент"))
+        fails.append(("themiz-setup", "скилл молчит про SMLTLK, хотя он штатный компонент"))
     # Обещание «ставится тем же онбордингом» обязано иметь исполнителя. Установщик,
     # не знающий про SMLTLK, превращает штатный компонент в слова: человек прочтет,
     # что он ставится, и не получит его.
@@ -218,7 +218,7 @@ def check_smltlk():
 
 
 # ── 4. Пустой конфиг = рабочая локальная система ────────────────────────────
-CONFIG_CONTRACT = """  scripts/themis_config.py — конфигурация установки
+CONFIG_CONTRACT = """  scripts/themiz_config.py — конфигурация установки
     --show [--config ФАЙЛ]   печатает действующие настройки машинно (JSON)
     --check [--config ФАЙЛ]  проверяет конфиг: код 0 — годен, 1 — назвать беду
     --selftest               без сети, код 0
@@ -232,52 +232,52 @@ CONFIG_CONTRACT = """  scripts/themis_config.py — конфигурация у�
 
 
 def check_config():
-    if not exists("themis_config.py"):
-        return [("themis_config.py", "прибора нет. Контракт:\n" + CONFIG_CONTRACT)]
+    if not exists("themiz_config.py"):
+        return [("themiz_config.py", "прибора нет. Контракт:\n" + CONFIG_CONTRACT)]
     fails = []
-    code, out, err = run([tool("themis_config.py"), "--selftest"])
+    code, out, err = run([tool("themiz_config.py"), "--selftest"])
     if code != 0:
-        fails.append(("themis_config.py", f"--selftest вернул {code}: {(out + err).strip()[-300:]}"))
+        fails.append(("themiz_config.py", f"--selftest вернул {code}: {(out + err).strip()[-300:]}"))
     with tempfile.TemporaryDirectory() as td:
         pusto = Path(td) / "net-takogo.json"
-        code, out, err = run([tool("themis_config.py"), "--show", "--config", str(pusto)])
+        code, out, err = run([tool("themiz_config.py"), "--show", "--config", str(pusto)])
         if code != 0:
-            fails.append(("themis_config.py", f"без конфига --show вернул {code}: {(out + err)[:200]}"))
+            fails.append(("themiz_config.py", f"без конфига --show вернул {code}: {(out + err)[:200]}"))
         else:
             try:
                 d = json.loads(out)
             except ValueError:
                 d = None
-                fails.append(("themis_config.py", f"--show не дал JSON: {out.strip()[:150]}"))
+                fails.append(("themiz_config.py", f"--show не дал JSON: {out.strip()[:150]}"))
             if d is not None:
                 if (d.get("server") or {}).get("enabled"):
-                    fails.append(("themis_config.py", "без конфига сервер включен"))
+                    fails.append(("themiz_config.py", "без конфига сервер включен"))
                 if (d.get("bot") or {}).get("enabled"):
-                    fails.append(("themis_config.py", "без конфига бот включен"))
+                    fails.append(("themiz_config.py", "без конфига бот включен"))
                 if (d.get("server") or {}).get("url"):
-                    fails.append(("themis_config.py", "в умолчаниях чужой адрес сервера"))
+                    fails.append(("themiz_config.py", "в умолчаниях чужой адрес сервера"))
                 if (d.get("bot") or {}).get("token"):
-                    fails.append(("themis_config.py", "в умолчаниях чужой токен бота"))
-        code, out, err = run([tool("themis_config.py"), "--check", "--config", str(pusto)])
+                    fails.append(("themiz_config.py", "в умолчаниях чужой токен бота"))
+        code, out, err = run([tool("themiz_config.py"), "--check", "--config", str(pusto)])
         if code != 0:
-            fails.append(("themis_config.py", f"пустой конфиг объявлен негодным (код {code}) — "
+            fails.append(("themiz_config.py", f"пустой конфиг объявлен негодным (код {code}) — "
                                               "локальная работа без сервера должна быть нормой"))
         chuzhoy = Path(td) / "config.json"
         chuzhoy.write_text(json.dumps({"bot": {"enabled": True, "token": "123456:CHUZHOY"}},
                                       ensure_ascii=False), encoding="utf-8")
-        code, out, err = run([tool("themis_config.py"), "--check", "--config", str(chuzhoy)])
+        code, out, err = run([tool("themiz_config.py"), "--check", "--config", str(chuzhoy)])
         if code == 0:
-            fails.append(("themis_config.py", "секрет ВНУТРИ конфига принят — токен обязан "
+            fails.append(("themiz_config.py", "секрет ВНУТРИ конфига принят — токен обязан "
                                               "жить в $HOME/.secrets, в конфиге только имя переменной"))
     tracked = subprocess.run(["git", "ls-files"], cwd=str(ROOT), capture_output=True, text=True)
     for name in tracked.stdout.splitlines():
-        if name.endswith(("themis.config.json", "config.json")) and "example" not in name:
-            fails.append(("themis_config.py", f"конфиг машины в git: {name}"))
+        if name.endswith(("themiz.config.json", "config.json")) and "example" not in name:
+            fails.append(("themiz_config.py", f"конфиг машины в git: {name}"))
     return fails
 
 
 # ── 5. Онбординг объясняет, а не только спрашивает ──────────────────────────
-SKILL_CONTRACT = """  .claude/skills/themis-setup/SKILL.md — разбор по образцу grill-me
+SKILL_CONTRACT = """  .claude/skills/themiz-setup/SKILL.md — разбор по образцу grill-me
     СПРАШИВАЕТ (по одному вопросу, не списком): профиль практики · есть ли сервер
     и какой либо только локально · нужны ли уведомления и токен СОБСТВЕННОГО бота
     из BotFather · куда класть материалы. Наличие CLI НЕ спрашивается, а проверяется
@@ -300,9 +300,9 @@ SKILL_MUST = [("botfather", "свой бот в BotFather, чужой токен
 
 def check_skill():
     if not SKILL.is_file():
-        return [("themis-setup", "скилла нет. Контракт:\n" + SKILL_CONTRACT)]
+        return [("themiz-setup", "скилла нет. Контракт:\n" + SKILL_CONTRACT)]
     text = SKILL.read_text(encoding="utf-8").lower()
-    fails = [("themis-setup", f"скилл не дает: {what}")
+    fails = [("themiz-setup", f"скилл не дает: {what}")
              for needle, what in SKILL_MUST if needle not in text]
     code, out, err = run([tool("sync_prompts.py")])
     if code != 0:
@@ -325,7 +325,7 @@ def selftest():
     try:
         with tempfile.TemporaryDirectory() as td:
             SCRIPTS = Path(td)
-            assert check_config(), "пропавший themis_config.py не пойман"
+            assert check_config(), "пропавший themiz_config.py не пойман"
             assert check_probe(), "пропавший setup_doctor.py не пойман"
     finally:
         SCRIPTS = saved

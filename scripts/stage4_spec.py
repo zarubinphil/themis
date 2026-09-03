@@ -426,12 +426,12 @@ UPLOAD_CONTRACT = """  cockpit/app.py — POST /api/upload
       · размер одного файла      (по умолчанию 50 МБ)
       · число файлов в запросе   (по умолчанию 30)
       · суммарный объем запроса  (по умолчанию 200 МБ)
-    Пороги задаются переменными окружения THEMIS_UPLOAD_MAX_BYTES,
-    THEMIS_UPLOAD_MAX_FILES, THEMIS_UPLOAD_MAX_TOTAL — иначе приемка вынуждена
+    Пороги задаются переменными окружения THEMIZ_UPLOAD_MAX_BYTES,
+    THEMIZ_UPLOAD_MAX_FILES, THEMIZ_UPLOAD_MAX_TOTAL — иначе приемка вынуждена
     гонять сотни мегабайт, чтобы проверить лимит.
     При отказе в инбокс не попадает НИ ОДИН файл запроса (частичная запись хуже
     отказа: юрист видит половину дела и считает, что загрузил все).
-    Каталог инбокса берется из THEMIS_INBOX, если задан, — иначе приемка пишет
+    Каталог инбокса берется из THEMIZ_INBOX, если задан, — иначе приемка пишет
     в боевой инбокс владельца. Нормальная загрузка по-прежнему дает 200 и список."""
 
 
@@ -455,9 +455,9 @@ def check_upload_limits():
     with tempfile.TemporaryDirectory() as td:
         inbox = Path(td) / "inbox"
         port = _free_port()
-        env = {**os.environ, "THEMIS_INBOX": str(inbox),
-               "THEMIS_UPLOAD_MAX_BYTES": "2048", "THEMIS_UPLOAD_MAX_FILES": "3",
-               "THEMIS_UPLOAD_MAX_TOTAL": "4096"}
+        env = {**os.environ, "THEMIZ_INBOX": str(inbox),
+               "THEMIZ_UPLOAD_MAX_BYTES": "2048", "THEMIZ_UPLOAD_MAX_FILES": "3",
+               "THEMIZ_UPLOAD_MAX_TOTAL": "4096"}
         proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "app:app", "--port", str(port),
                                  "--host", "127.0.0.1", "--log-level", "warning"],
                                 cwd=str(ROOT / "cockpit"), env=env,
@@ -488,7 +488,7 @@ def check_upload_limits():
             elif len(r.json().get("saved", [])) != 2:
                 fails.append(("upload", f"нормальная загрузка сохранила не два файла: {r.text[:150]}"))
             if inbox.is_dir() and len(list(inbox.iterdir())) != 2:
-                fails.append(("upload", f"THEMIS_INBOX не соблюден: {[p.name for p in inbox.iterdir()][:3]}"))
+                fails.append(("upload", f"THEMIZ_INBOX не соблюден: {[p.name for p in inbox.iterdir()][:3]}"))
 
             before = sorted(p.name for p in inbox.iterdir()) if inbox.is_dir() else []
             r = post([("files", ("big.bin", b"z" * 5000, "application/octet-stream"))])

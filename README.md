@@ -1,18 +1,18 @@
-# Themis
+# Themiz
 
-Themis takes the mechanics of a court case off your desk: it reads the file, hunts case law, and reviews its own documents.
+Themiz takes the mechanics of a court case off your desk: it reads the file, hunts case law, and reviews its own documents.
 
 [Русский](README.ru.md) · [中文](README.zh.md)
 
-[![License](https://img.shields.io/badge/license-community%201.0-blue.svg)](LICENSE) [![Stars](https://img.shields.io/github/stars/zarubinvibe/themis?style=flat&color=C9A87A)](https://github.com/zarubinvibe/themis/stargazers) [![Status](https://img.shields.io/badge/status-in%20development-brightgreen.svg)](https://github.com/zarubinvibe/themis) [![Olympuz](https://img.shields.io/badge/olympuz-family-B8D6EA.svg)](https://github.com/zarubinvibe/athena#olympuz-family)
+[![License](https://img.shields.io/badge/license-community%201.0-blue.svg)](LICENSE) [![Stars](https://img.shields.io/github/stars/zarubinvibe/themiz?style=flat&color=C9A87A)](https://github.com/zarubinvibe/themiz/stargazers) [![Status](https://img.shields.io/badge/status-in%20development-brightgreen.svg)](https://github.com/zarubinvibe/themiz) [![Olympuz](https://img.shields.io/badge/olympuz-family-B8D6EA.svg)](https://github.com/zarubinvibe/athena#olympuz-family)
 
-<p align="center"><img src="docs/assets/pantheon/hero.png" alt="Themis in white marble with scales and sword beside the classical column, legal documents and agent review cards laid out in daylight" width="100%"></p>
+<p align="center"><img src="docs/assets/pantheon/hero.png" alt="Themiz in white marble with scales and sword beside the classical column, legal documents and agent review cards laid out in daylight" width="100%"></p>
 
 <!-- owner-welcome:start -->
 
 > Hello. I am a practising lawyer, and too much of my time went into mechanics: two hundred pages of scans, dates to reconcile, citations to check, one detail buried somewhere in the file.
 >
-> Themis takes that work and leaves me the part that needs judgement. She does not decide anything, and neither should she.
+> Themiz takes that work and leaves me the part that needs judgement. She does not decide anything, and neither should she.
 >
 > — Filipp Zarubin
 
@@ -35,11 +35,13 @@ Themis takes the mechanics of a court case off your desk: it reads the file, hun
 
 ## What This Is
 
-Themis works next to a lawyer. It reads the file on your computer, builds a case map, hunts practice for you and against you, drafts a document and hands it to a different agent for review. The decisions stay with you, and that is the design, not a disclaimer at the end.
+The project was renamed: Themis is now Themiz, spelled like the rest of the Olympuz family. Old GitHub links still redirect here, but an existing clone or fork needs `git remote set-url` to follow.
+
+Themiz works next to a lawyer. It reads the file on your computer, builds a case map, hunts practice for you and against you, drafts a document and hands it to a different agent for review. The decisions stay with you, and that is the design, not a disclaimer at the end.
 
 ## Why It Helps
 
-A good lawyer's time does not go into law. Two hundred pages of scans. Reconciling dates. Checking citations. That one detail that was definitely somewhere in volume three. Themis takes that part whole and leaves you the part where thinking happens.
+A good lawyer's time does not go into law. Two hundred pages of scans. Reconciling dates. Checking citations. That one detail that was definitely somewhere in volume three. Themiz takes that part whole and leaves you the part where thinking happens.
 
 ## The Main Advantage
 
@@ -83,7 +85,7 @@ A case moves through stages. Each has its own agents, and no document leaves wit
 
 You drop the file into the case folder. Client folders are closed from publication at the repository level, so material stays local.
 
-<p align="center"><img src="docs/assets/pantheon/workflow/01-intake.png" alt="Themis workflow stage 1: Hand over the case files, drawn as a wide Pantheon marble scene" width="100%"></p>
+<p align="center"><img src="docs/assets/pantheon/workflow/01-intake.png" alt="Themiz workflow stage 1: Hand over the case files, drawn as a wide Pantheon marble scene" width="100%"></p>
 
 **You get:** one folder per case, with everything the work will need.
 
@@ -91,7 +93,7 @@ You drop the file into the case folder. Client folders are closed from publicati
 
 Recognition runs locally, about a second and a half per page. Registration numbers, case numbers, and amounts are pulled out and checked by their control digit without going online.
 
-<p align="center"><img src="docs/assets/pantheon/workflow/02-extract.png" alt="Themis workflow stage 2: Scans are read on your Mac, drawn as a wide Pantheon marble scene" width="100%"></p>
+<p align="center"><img src="docs/assets/pantheon/workflow/02-extract.png" alt="Themiz workflow stage 2: Scans are read on your Mac, drawn as a wide Pantheon marble scene" width="100%"></p>
 
 **You get:** readable text with the key details already verified.
 
@@ -99,7 +101,7 @@ Recognition runs locally, about a second and a half per page. Registration numbe
 
 Facts move from the documents into a single map: who, when, what is claimed, and what proves it. A separate agent cross-checks the readers against each other.
 
-<p align="center"><img src="docs/assets/pantheon/workflow/03-case-map.png" alt="Themis workflow stage 3: The case map is built, drawn as a wide Pantheon marble scene" width="100%"></p>
+<p align="center"><img src="docs/assets/pantheon/workflow/03-case-map.png" alt="Themiz workflow stage 3: The case map is built, drawn as a wide Pantheon marble scene" width="100%"></p>
 
 **You get:** one place to look instead of rereading the whole file.
 
@@ -107,7 +109,7 @@ Facts move from the documents into a single map: who, when, what is claimed, and
 
 One agent looks for practice that supports your position, another for procedural moves, and a third deliberately hunts practice against you. The search request is depersonalised.
 
-<p align="center"><img src="docs/assets/pantheon/workflow/04-research.png" alt="Themis workflow stage 4: Case law for and against, drawn as a wide Pantheon marble scene" width="100%"></p>
+<p align="center"><img src="docs/assets/pantheon/workflow/04-research.png" alt="Themiz workflow stage 4: Case law for and against, drawn as a wide Pantheon marble scene" width="100%"></p>
 
 **You get:** both sides of the argument before the other side makes it.
 
@@ -115,7 +117,7 @@ One agent looks for practice that supports your position, another for procedural
 
 Five reviewer agents take the position apart from different angles and put it back together. Disagreement is the point: a weak argument is meant to fall here, not in court.
 
-<p align="center"><img src="docs/assets/pantheon/workflow/05-council.png" alt="Themis workflow stage 5: Five jurists argue it out, drawn as a wide Pantheon marble scene" width="100%"></p>
+<p align="center"><img src="docs/assets/pantheon/workflow/05-council.png" alt="Themiz workflow stage 5: Five jurists argue it out, drawn as a wide Pantheon marble scene" width="100%"></p>
 
 **You get:** a position with its weak points already named.
 
@@ -123,7 +125,7 @@ Five reviewer agents take the position apart from different angles and put it ba
 
 The document is written by one agent and reviewed by another that did not write it. Assembly before review is refused, the format is checked before filing, and a guard runs over personal data on every commit.
 
-<p align="center"><img src="docs/assets/pantheon/workflow/06-draft.png" alt="Themis workflow stage 6: One writes, another checks, drawn as a wide Pantheon marble scene" width="100%"></p>
+<p align="center"><img src="docs/assets/pantheon/workflow/06-draft.png" alt="Themiz workflow stage 6: One writes, another checks, drawn as a wide Pantheon marble scene" width="100%"></p>
 
 **You get:** a draft you edit as a lawyer, not a text you have to re-verify line by line.
 
@@ -131,7 +133,7 @@ The document is written by one agent and reviewed by another that did not write 
 
 Deadlines are calculated with the working calendar and a reference to the rule. A local dashboard shows the state of the work. Reminders go to your own bot, carrying dates only.
 
-<p align="center"><img src="docs/assets/pantheon/workflow/07-hearing.png" alt="Themis workflow stage 7: Hearing prep and reminders, drawn as a wide Pantheon marble scene" width="100%"></p>
+<p align="center"><img src="docs/assets/pantheon/workflow/07-hearing.png" alt="Themiz workflow stage 7: Hearing prep and reminders, drawn as a wide Pantheon marble scene" width="100%"></p>
 
 **You get:** the hearing prepared, and edits you make teach the next document.
 
@@ -140,13 +142,13 @@ Deadlines are calculated with the working calendar and a reference to the rule. 
 You need a Mac for scan recognition, Python 3.11 or newer, Xcode Command Line Tools, and Claude Code.
 
 ```bash
-git clone https://github.com/zarubinvibe/themis.git
-cd themis
+git clone https://github.com/zarubinvibe/themiz.git
+cd themiz
 claude
-# inside Claude Code run: /themis-setup
+# inside Claude Code run: /themiz-setup
 ```
 
-Prefer the plain installer? Run `bash install.sh` in the same folder; it installs dependencies after one confirmation but skips the interview about your practice. No Git? Take [the ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip). The local dashboard starts with `python3 cockpit/app.py` on port 8800. First time here? Open the project in Claude Code and run `/themis-setup`: the install goes as a conversation, one question at a time, and nothing is installed without your yes.
+Prefer the plain installer? Run `bash install.sh` in the same folder; it installs dependencies after one confirmation but skips the interview about your practice. No Git? Take [the ZIP](https://github.com/zarubinvibe/themiz/archive/refs/heads/main.zip). The local dashboard starts with `python3 cockpit/app.py` on port 8800. First time here? Open the project in Claude Code and run `/themiz-setup`: the install goes as a conversation, one question at a time, and nothing is installed without your yes.
 
 Never done this before? [The onboarding](docs/ONBOARDING.md) walks the whole first run step by step and says what you see after every command.
 
@@ -156,7 +158,7 @@ Never done this before? [The onboarding](docs/ONBOARDING.md) walks the whole fir
 
 | Choice | Best when | What you get | Trade-off |
 |---|---|---|---|
-| **Themis** | A real case with scans, deadlines, and documents | Local reading, case map, both sides of the practice, reviewed drafts | Mac for recognition, and a lawyer still decides |
+| **Themiz** | A real case with scans, deadlines, and documents | Local reading, case map, both sides of the practice, reviewed drafts | Mac for recognition, and a lawyer still decides |
 | Doing it by hand | A small case | Full control | Hours of mechanics per case |
 | A general chat assistant | A quick question about the law | Instant answers | Quotes from memory, no case file, no deadline maths |
 | A commercial legal platform | A firm with a budget | Support and integrations | Case material leaves your machine, and you pay per seat |
@@ -191,18 +193,18 @@ Status: in development, built to work under a lawyer's control. The main path ru
 - Local scan recognition depends on Apple Vision and works on macOS only. Text PDF, DOCX, and XLSX are read on other systems too.
 - Case law search depends on an external source and is sometimes unavailable.
 - A red gate or a missing agent stops the workflow instead of guessing.
-- Themis does not represent you, does not sign anything, and does not replace a lawyer's judgement.
+- Themiz does not represent you, does not sign anything, and does not replace a lawyer's judgement.
 - A clean install on Windows and Linux has not been verified yet.
 
 Deeper: [how it really works](docs/HOW-IT-WORKS.ru.md), in Russian and without advertising, and [the full reference](docs/DETAILS.md) with the agent roster.
 
 ## Star And Contribute
 
-Useful? Give Themis a star: [https://github.com/zarubinvibe/themis](https://github.com/zarubinvibe/themis). It takes a second and it decides whether other people ever find the project.
+Useful? Give Themiz a star: [https://github.com/zarubinvibe/themiz](https://github.com/zarubinvibe/themiz). It takes a second and it decides whether other people ever find the project.
 
 Want to change something? The path is short: fork the repository, create a branch, commit your change, push the branch, then open a Pull Request. Do not push directly to `main`; the release gate rejects it.
 
-Found a problem instead? Open an issue at [https://github.com/zarubinvibe/themis/issues](https://github.com/zarubinvibe/themis/issues) and say what you ran and what happened.
+Found a problem instead? Open an issue at [https://github.com/zarubinvibe/themiz/issues](https://github.com/zarubinvibe/themiz/issues) and say what you ran and what happened.
 
 <!-- beginner-readme:end -->
 
@@ -216,11 +218,11 @@ This is one of the public [Olympuz projects](https://github.com/zarubinvibe/athe
 | project | Athena | Portable agent OS that restores a complete Claude and Codex setup on a new Mac. | [Repository](https://github.com/zarubinvibe/athena) · [ZIP](https://github.com/zarubinvibe/athena/archive/refs/heads/main.zip) |
 | project | Helioz | 24/7 agent work conveyor with verified completion markers and goal-based overnight decisions. | [Repository](https://github.com/zarubinvibe/helioz) · [ZIP](https://github.com/zarubinvibe/helioz/archive/refs/heads/main.zip) |
 | project | Mnemazine | Local-first memory system that turns raw inputs into verified reusable knowledge. | [Repository](https://github.com/zarubinvibe/mnemazine) · [ZIP](https://github.com/zarubinvibe/mnemazine/archive/refs/heads/main.zip) |
-| project | Themis | Multi-agent assistant for Russian litigation with local OCR and review by a five-jurist council. | [Repository](https://github.com/zarubinvibe/themis) · [ZIP](https://github.com/zarubinvibe/themis/archive/refs/heads/main.zip) |
+| project | Themiz | Multi-agent assistant for Russian litigation with local OCR and review by a five-jurist council. | [Repository](https://github.com/zarubinvibe/themiz) · [ZIP](https://github.com/zarubinvibe/themiz/archive/refs/heads/main.zip) |
 | project | Zeuz | Factory that turns an idea into a governed multi-agent workflow with gates, observability, and replay. | [Repository](https://github.com/zarubinvibe/zeuz) · [ZIP](https://github.com/zarubinvibe/zeuz/archive/refs/heads/main.zip) |
 | project | Lynceuz | Collects public web evidence at zero cost and stops with an honest reason when the safe routes end. | [Repository](https://github.com/zarubinvibe/lynceuz) · [ZIP](https://github.com/zarubinvibe/lynceuz/archive/refs/heads/main.zip) |
 <!-- pantheon-family:end -->
 
 ## License
 
-Themis Community Licence 1.0: free for an individual lawyer, including private practice. Organisations need a commercial licence. See [LICENSE](LICENSE) and [LICENSE.ru.md](LICENSE.ru.md).
+Themiz Community Licence 1.0: free for an individual lawyer, including private practice. Organisations need a commercial licence. See [LICENSE](LICENSE) and [LICENSE.ru.md](LICENSE.ru.md).

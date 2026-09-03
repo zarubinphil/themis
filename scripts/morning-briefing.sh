@@ -81,8 +81,8 @@ osascript -e "display notification \"$(echo -e "$BODY")\" with title \"$MSG\" so
 # имена доверителей и номера дел остаются в локальном уведомлении выше.
 # Секрет читается из $HOME/.secrets и в лог не попадает. Бот выключен либо секрета
 # нет — молча пропускаем: система от бота не зависит.
-BOT="$ROOT/scripts/themis_bot.py"
-BOT_SECRET="$HOME/.secrets/themis-telegram.env"
+BOT="$ROOT/scripts/themiz_bot.py"
+BOT_SECRET="$HOME/.secrets/themiz-telegram.env"
 if [[ -f "$BOT_SECRET" ]]; then
     set -a; . "$BOT_SECRET"; set +a
     if "$PY" "$BOT" --check >/dev/null 2>&1; then

@@ -23,7 +23,7 @@ DEFAULT_REGISTRY = HERE / "cli_registry.json"
 # Харнесс и то, что делает его харнессом. Оверлей вправе подкрутить model/effort
 # claude, но не вправе пересадить его на другой бинарник: pd-роль кончается
 # claude, подмена харнесса запрещена (инвариант этапа 7). Иначе строка
-# `{"claude": {"invoke": [...]}}` в ~/.themis/ уводит адвокатскую тайну на чужой
+# `{"claude": {"invoke": [...]}}` в ~/.themiz/ уводит адвокатскую тайну на чужой
 # бинарник — доказано пробой скептика 19.08.2026.
 HARNESS = "claude"
 HARNESS_LOCKED = ("invoke", "probe", "data_classes")
@@ -118,7 +118,7 @@ def load_registry(path: Path) -> dict:
         base = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
         raise ValueError(f"реестр не прочитан: {e}") from e
-    overlay = Path.home() / ".themis" / "cli_registry.json"
+    overlay = Path.home() / ".themiz" / "cli_registry.json"
     try:
         extra = json.loads(overlay.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -242,7 +242,7 @@ def selftest() -> int:
     assert role_class("text") == "text", "класс данных, названный ролью, не распознан"
     assert role_class("infra") == "infra" and role_class("public") == "public"
 
-    # Оверлей ~/.themis/ не пересаживает харнесс: invoke и классы claude берутся
+    # Оверлей ~/.themiz/ не пересаживает харнесс: invoke и классы claude берутся
     # из эталонного реестра рядом со скриптом, проба — из реестра, что бы ни
     # лежало в пользовательском слое (пробы скептика 19.08.2026, круг 4).
     with tempfile.TemporaryDirectory() as td:
@@ -253,8 +253,8 @@ def selftest() -> int:
             "model": "opus", "effort": "max",
             "data_classes": ["pd", "text", "public", "infra"]}}), encoding="utf-8")
         home = td / "home"
-        (home / ".themis").mkdir(parents=True)
-        (home / ".themis" / "cli_registry.json").write_text(json.dumps({
+        (home / ".themiz").mkdir(parents=True)
+        (home / ".themiz" / "cli_registry.json").write_text(json.dumps({
             "claude": {"invoke": ["evil"], "probe": ["evil"], "effort": "low"}}),
             encoding="utf-8")
         old = os.environ.get("HOME")
@@ -277,7 +277,7 @@ def selftest() -> int:
         assert "pd" in reg["claude"]["data_classes"], "оверлей понизил data_classes харнесса"
 
         # Двойник харнесса по регистру и гомоглифу в реестр не принимается.
-        (home / ".themis" / "cli_registry.json").write_text(json.dumps({
+        (home / ".themiz" / "cli_registry.json").write_text(json.dumps({
             "Claude": {"probe": ["z"], "invoke": ["z"], "model": "z", "effort": "max",
                        "data_classes": ["text"]},
             "clаude": {"probe": ["z"], "invoke": ["z"], "model": "z", "effort": "max",
@@ -290,7 +290,7 @@ def selftest() -> int:
         # Хвостовой пробел, знак нулевой ширины и диакритика — тот же двойник,
         # в журнале он неотличим от «claude» вернее гомоглифа. Двойник класса pd
         # исполнял бы чужой invoke под именем харнесса (проба скептика, круг 4).
-        (home / ".themis" / "cli_registry.json").write_text(json.dumps({
+        (home / ".themiz" / "cli_registry.json").write_text(json.dumps({
             "claude ": {"probe": ["z"], "invoke": ["z"], "model": "z", "effort": "max",
                         "data_classes": ["pd", "text"]},
             "cla\u200bude": {"probe": ["z"], "invoke": ["z"], "model": "z", "effort": "max",
@@ -309,7 +309,7 @@ def selftest() -> int:
 
         # Имя с не-ASCII символом (греческая «α») — отказ по классу имени, а не по
         # таблице подмен: гомоглиф-двойник харнесса не попадает в реестр вовсе.
-        (home / ".themis" / "cli_registry.json").write_text(json.dumps({
+        (home / ".themiz" / "cli_registry.json").write_text(json.dumps({
             "clαude": {"probe": ["z"], "invoke": ["z"], "model": "z", "effort": "max",
                             "data_classes": ["text"]}}, ensure_ascii=False), encoding="utf-8")
         reg = load_registry(base)
@@ -318,7 +318,7 @@ def selftest() -> int:
         assert _ASCII_NAME_RE.match("claude-fast") and not _ASCII_NAME_RE.match("clαude"), \
             "класс имени судит не по ASCII"
 
-        (home / ".themis" / "cli_registry.json").write_text(json.dumps({
+        (home / ".themiz" / "cli_registry.json").write_text(json.dumps({
             "zloy": {"probe": ["z"], "invoke": ["z"], "model": "z", "effort": "max",
                      "data_classes": ["pd"]}}), encoding="utf-8")
         reg = load_registry(base)
@@ -334,11 +334,11 @@ def selftest() -> int:
         # Реестр БЕЗ claude валиден: харнесс не привносится в реестр, который его
         # не называл; pd-роль тогда остается без исполнителя (fail-closed), а не-pd
         # идут на объявленных провайдерах. HOME ведем к пустому оверлею явно —
-        # иначе читался бы боевой ~/.themis.
+        # иначе читался бы боевой ~/.themiz.
         base.write_text(json.dumps({"alpha": {
             "probe": ["a"], "invoke": ["a"], "model": "a", "effort": "max",
             "data_classes": ["text"]}}), encoding="utf-8")
-        (home / ".themis" / "cli_registry.json").write_text("{}", encoding="utf-8")
+        (home / ".themiz" / "cli_registry.json").write_text("{}", encoding="utf-8")
         old = os.environ.get("HOME")
         os.environ["HOME"] = str(home)
         try:
@@ -346,7 +346,7 @@ def selftest() -> int:
             assert "claude" not in reg, "claude привнесен в реестр, где его не объявляли"
             assert "alpha" in reg, "провайдер без claude потерян"
             # Оверлей НЕ вправе объявить харнесс, когда база его не определяет.
-            (home / ".themis" / "cli_registry.json").write_text(json.dumps({"claude": {
+            (home / ".themiz" / "cli_registry.json").write_text(json.dumps({"claude": {
                 "probe": ["evil"], "invoke": ["evil"], "model": "c", "effort": "max",
                 "data_classes": ["pd"]}}), encoding="utf-8")
             try:

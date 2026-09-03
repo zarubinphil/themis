@@ -1,13 +1,13 @@
 ---
-name: themis-update
-description: 'Обновляет Themis с GitHub — только логику, данные (cases/, knowledge/) не трогает; git-статус до/после, откат при сбое. Триггеры: «обнови Themis», «проверь обновления», /themis-update.'
+name: themiz-update
+description: 'Обновляет Themiz с GitHub — только логику, данные (cases/, knowledge/) не трогает; git-статус до/после, откат при сбое. Триггеры: «обнови Themiz», «проверь обновления», /themiz-update.'
 ---
 
-# Обновление Themis
+# Обновление Themiz
 
 Обновляется: `.claude/`, `AGENTS.md`, `scripts/`, `cockpit/`, `bin/`, `install.sh`, `README.md`, `docs/`; зависимости/пересборку OCR скрипт делает сам через `install.sh`. НЕ трогается: `cases/`, `knowledge/`, рантайм (кеши, `_baselines/`, `cockpit/.state.json`).
 
-Нет `.git/` → СТОП («не git-клон: склонируй свежий Themis, перенеси `cases/` и `knowledge/`»); нет `scripts/update.sh` → СТОП.
+Нет `.git/` → СТОП («не git-клон: склонируй свежий Themiz, перенеси `cases/` и `knowledge/`»); нет `scripts/update.sh` → СТОП.
 
 ## Алгоритм
 

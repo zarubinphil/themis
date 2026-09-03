@@ -1178,7 +1178,7 @@ class DocBuilder:
             p = subprocess.run(
                 ["bash", str(scan), "-"], input=self._document_text(),
                 capture_output=True, text=True, timeout=60,
-                env={**os.environ, "THEMIS_PROJECT_ROOT":
+                env={**os.environ, "THEMIZ_PROJECT_ROOT":
                      os.path.dirname(os.path.dirname(os.path.abspath(__file__)))})
         except (OSError, subprocess.SubprocessError) as e:
             return [f"humanizer-legal не отработал ({e}) — не проверен, fail-closed"]
@@ -1429,7 +1429,7 @@ def _verdict_gate_checks(tmp):
     import case_paths as _cp
     import verdict as _v
     # Ключ подписи вердикта — из env, чтобы селфтест не трогал каталог секретов (D03).
-    os.environ.setdefault("THEMIS_VERDICT_KEY", "selftest-key-do-not-use-in-prod")
+    os.environ.setdefault("THEMIZ_VERDICT_KEY", "selftest-key-do-not-use-in-prod")
 
     case = _P(tmp) / "cases" / "ivanov-ivan" / "delo-2026"
     _cp.drafts(case).mkdir(parents=True)

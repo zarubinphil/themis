@@ -108,10 +108,10 @@ def check_smoke(root=ROOT):
     if not os.path.isdir(case):
         return [("smoke:case", f"нет синтетического дела {SMOKE_CASE} — smoke невозможен")]
 
-    code, out = run([sys.executable, os.path.join(root, "scripts", "themis_status.py"),
+    code, out = run([sys.executable, os.path.join(root, "scripts", "themiz_status.py"),
                      SMOKE_CASE, "--brief"], cwd=root)
     if code != 0:
-        fails.append(("smoke:status", f"themis_status на {SMOKE_CASE} вернул {code}: {out.strip()[:300]}"))
+        fails.append(("smoke:status", f"themiz_status на {SMOKE_CASE} вернул {code}: {out.strip()[:300]}"))
 
     # Сторож обязан отбивать запись в 00_intake. Если он молча пропустил — сторожа нет.
     hook = json.dumps({"tool_name": "Write", "tool_input": {
@@ -661,8 +661,9 @@ def _selftest():
             "служебный stderr смешан с путем успешной git-команды"
         os.makedirs(os.path.join(tmp, "scripts"))
         os.makedirs(os.path.join(tmp, SMOKE_CASE))
-        shutil.copy(os.path.join(SCRIPTS, "themis_status.py"), os.path.join(tmp, "scripts"))
+        shutil.copy(os.path.join(SCRIPTS, "themiz_status.py"), os.path.join(tmp, "scripts"))
         shutil.copy(os.path.join(SCRIPTS, "claude_guard.py"), os.path.join(tmp, "scripts"))
+        shutil.copy(os.path.join(SCRIPTS, "sreda.py"), os.path.join(tmp, "scripts"))
         shutil.copy(os.path.join(SCRIPTS, "pd_guard.py"), os.path.join(tmp, "scripts"))
         good = os.path.join(tmp, "scripts", "pribor_ok.py")
         with open(good, "w", encoding="utf-8") as f:

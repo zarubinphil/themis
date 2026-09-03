@@ -2,18 +2,18 @@
 
 This walkthrough assumes you are a lawyer, not an engineer, and that you have never installed anything from a terminal. Every step says what to do and what you should see afterwards.
 
-The short path is the guided one: open the project in Claude Code and run `/themis-setup`. Themis introduces herself, asks about your practice one question at a time, explains why each question matters, and installs nothing without your yes. Below is the same road on foot.
+The short path is the guided one: open the project in Claude Code and run `/themiz-setup`. Themiz introduces herself, asks about your practice one question at a time, explains why each question matters, and installs nothing without your yes. Below is the same road on foot.
 
 You need a Mac for local recognition of scans, Python 3.11 or newer, Xcode Command Line Tools, and Claude Code.
 
 1. **Get the project.**
 
    ```bash
-   git clone https://github.com/zarubinvibe/themis.git
-   cd themis
+   git clone https://github.com/zarubinvibe/themiz.git
+   cd themiz
    ```
 
-   You see a `themis` folder and your prompt inside it.
+   You see a `themiz` folder and your prompt inside it.
 
 2. **Open Claude Code in that folder.**
 
@@ -23,9 +23,9 @@ You need a Mac for local recognition of scans, Python 3.11 or newer, Xcode Comma
 
    You see the agent start inside the project.
 
-3. **Run the guided setup.** Type `/themis-setup`.
+3. **Run the guided setup.** Type `/themiz-setup`.
 
-   You see Themis introduce herself, then ask about your practice: what cases you run most, your region, your courts, where incoming material lands, whether you use an electronic signature, whether you want Telegram reminders. One question at a time, each with the reason and an example answer.
+   You see Themiz introduce herself, then ask about your practice: what cases you run most, your region, your courts, where incoming material lands, whether you use an electronic signature, whether you want Telegram reminders. One question at a time, each with the reason and an example answer.
 
 4. **Let her check the machine before installing.**
 
@@ -55,12 +55,12 @@ You need a Mac for local recognition of scans, Python 3.11 or newer, Xcode Comma
 
 ## Keeping it current
 
-Later, when a new version is published, do not clone it again: open the project in Claude Code and run `/themis-update`. It shows what changed first, pulls only fast-forward changes, never touches your case folders, and re-runs the checks afterwards.
+Later, when a new version is published, do not clone it again: open the project in Claude Code and run `/themiz-update`. It shows what changed first, pulls only fast-forward changes, never touches your case folders, and re-runs the checks afterwards.
 
 ## If this helped
 
-If Themis took the mechanics off your desk, give it a star: [https://github.com/zarubinvibe/themis](https://github.com/zarubinvibe/themis). It takes a second and decides whether other lawyers ever find it.
+If Themiz took the mechanics off your desk, give it a star: [https://github.com/zarubinvibe/themiz](https://github.com/zarubinvibe/themiz). It takes a second and decides whether other lawyers ever find it.
 
 You have run it on a real case, which makes you the person who can improve it. The path is short: fork the repository, create a branch, commit your change, push the branch, then open a Pull Request. Do not push directly to `main`; the release gate rejects it.
 
-Found a step that lies? Open an issue at [https://github.com/zarubinvibe/themis/issues](https://github.com/zarubinvibe/themis/issues) and describe it on synthetic data. Never attach real client material to a public issue.
+Found a step that lies? Open an issue at [https://github.com/zarubinvibe/themiz/issues](https://github.com/zarubinvibe/themiz/issues) and describe it on synthetic data. Never attach real client material to a public issue.

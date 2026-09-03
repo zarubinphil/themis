@@ -45,6 +45,7 @@ from importlib import metadata as importlib_metadata
 from pathlib import Path
 
 import _obshee as obs
+import sreda  # noqa: E402,F401  переходный период имен переменных
 
 ROOT = str(obs.dom_proekta())
 REGISTRY = Path(ROOT) / "scripts" / "cli_registry.json"
@@ -145,7 +146,7 @@ def platform_id() -> str:
     Подстановка чужой платформы (--platform) нужна и разбору с владельцем, и приемке:
     доктор, выдающий на Windows тот же ответ, что на Маке, ничего не проверил.
     """
-    forced = (os.environ.get("THEMIS_PLATFORM") or "").strip().lower()
+    forced = (os.environ.get("THEMIZ_PLATFORM") or "").strip().lower()
     if forced:
         return {"macos": "darwin", "mac": "darwin", "osx": "darwin"}.get(forced, forced)
     s = platform.system()
@@ -204,7 +205,7 @@ def check_ocr(plat: str) -> list[dict]:
             "варианта два: (1) вести дела со сканами на macOS; (2) подключить свой "
             "движок OCR — реализовать интерфейс bin/vision-doc (вход: файл, "
             "выход: page_NNN.txt и page_NNN.md с таблицами) и указать путь в "
-            "THEMIS_VISION_DOC. Прежде чем ставить чужую модель, сравнить ее на "
+            "THEMIZ_VISION_DOC. Прежде чем ставить чужую модель, сравнить ее на "
             "реальных сканах дела с текущим движком: PaddleOCR, Surya, MinerU и "
             "Unlimited-OCR уже отклонены по замеру (knowledge/lessons-log.md)")]
     out = []
@@ -400,7 +401,7 @@ def unavailable_on(plat: str) -> list[dict]:
          "replacement": "текстовые PDF, DOCX и XLSX читаются через markitdown полностью; "
                         "сканы — либо вести такие дела на macOS, либо подключить свой движок "
                         "по интерфейсу bin/vision-doc (вход файл, выход page_NNN.txt и "
-                        "page_NNN.md с таблицами) и указать путь в THEMIS_VISION_DOC"},
+                        "page_NNN.md с таблицами) и указать путь в THEMIZ_VISION_DOC"},
         {"what": "расписание фоновых заданий (launchd)",
          "why": "launchd есть только в macOS",
          "replacement": f"{scheduler_of(plat)}: перенести обновление корпуса права "
@@ -852,7 +853,7 @@ def collect(offline: bool = False, quick: bool = False) -> dict:
             "platform": plat,
             "os_version": platform.mac_ver()[0] or platform.release() or platform.version(),
             "arch": platform.machine(),
-            "simulated": bool(os.environ.get("THEMIS_PLATFORM")),
+            "simulated": bool(os.environ.get("THEMIZ_PLATFORM")),
             "cli": probe_cli(),
             "unavailable": unavailable_on(plat),
             "smltlk": smltlk_on(plat),
@@ -899,7 +900,7 @@ def main() -> int:
                          "requirements.txt/NOTICE/THIRD-PARTY-LICENSES")
     a = ap.parse_args()
     if a.platform:
-        os.environ["THEMIS_PLATFORM"] = a.platform
+        os.environ["THEMIZ_PLATFORM"] = a.platform
     if a.selftest:
         return selftest()
     if a.licenses:
@@ -1017,7 +1018,7 @@ def selftest() -> int:
         ("на Linux отсутствие OCR — критично",
          check_ocr("linux")[0]["статус"] == CRIT),
         ("на не-macOS предложен путь замены движка",
-         "THEMIS_VISION_DOC" in check_ocr("linux")[0]["как починить"]),
+         "THEMIZ_VISION_DOC" in check_ocr("linux")[0]["как починить"]),
         ("на не-macOS сказано, что именно перестает работать",
          "СКАНЫ" in check_ocr("windows")[0]["что видно"]),
         ("платформенные особенности непусты на каждой платформе",

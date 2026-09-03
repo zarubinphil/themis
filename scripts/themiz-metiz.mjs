@@ -1,7 +1,7 @@
 // Врезка Метиды в дом Фемиды. Тонкая прослойка, а не второй компрессор.
 //
 // СОСТОЯНИЕ: прослойка врезана в двух точках scripts/markdown_extract.py - в обеих ветках, где
-// дом отдает модели тело, а не превью. Обе зовут один фасад scripts/themis_metiz.py с одним
+// дом отдает модели тело, а не превью. Обе зовут один фасад scripts/themiz_metiz.py с одним
 // профилем; врезки и откат выписаны построчно в его же docstring, второй копии тут не заводим.
 //
 // Почему именно эти две ветки. markdown_extract.py - роутер извлечения текста, и по умолчанию он
@@ -68,7 +68,7 @@
 // openSharedStore(projectId): каждый projectId получает СВОЙ каталог CCR, и own() каталога
 // одного дела физически не видит файлы другого (metiz/src/state/ccr.ts:176). Второй такой
 // механизм здесь не сочиняется - используется этот. projectId дома Фемиды устроен как
-// "themis:cases/<клиент>/<дело>".
+// "themiz:cases/<клиент>/<дело>".
 //
 // Отсюда fail-closed В ДАННЫХ: дело из пути не вывелось - НЕ СЖИМАЕМ ВОВСЕ. Дело нужно и для
 // каталога хранилища, и для замера в журнале; без него единственный оставшийся вариант - общий
@@ -84,7 +84,7 @@
 // Доктрина 3 (нет замера - нет цифры): каждый проход пишет строку в журнал дома, включая проход
 // с выключенным сжатием. Своего журнала замеров у Фемиды нет (token_ledger.py читает чужие
 // session-jsonl Claude Code, а audit.log - человекочитаемая лента брифингов), поэтому журнал
-// заведен по образцу Гелиоза: $THEMIS_HOME/state/squeeze.jsonl, каталог 0700, файл 0600.
+// заведен по образцу Гелиоза: $THEMIZ_HOME/state/squeeze.jsonl, каталог 0700, файл 0600.
 //
 // I7: Authorization не разбирается, не хранится, не логируется - заголовков этот слой не видит
 // вовсе. В журнал не попадает ни текста, ни имени клиента, ни пути дела: дело представлено
@@ -110,18 +110,32 @@ import { homedir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
+
+// Переходный период имени: новое имя читается первым, прежнее принимается
+// запасным и предупреждает. Прежний префикс получается заменой буквы, а не
+// литералом — массовая замена имени не должна съесть запасной путь.
+const PREZHNIJ_PREFIKS = 'THEMIZ_'.replace('Z_', 'S_')
+function sreda (imya) {
+  if (process.env[imya] !== undefined) return process.env[imya]
+  const prezhnee = PREZHNIJ_PREFIKS + imya.slice('THEMIZ_'.length)
+  const znachenie = process.env[prezhnee]
+  if (znachenie !== undefined) {
+    console.error(`предупреждение: ${prezhnee} — прежнее имя, теперь ${imya}`)
+  }
+  return znachenie
+}
 const SELF = fileURLToPath(import.meta.url)
 
-// Дом состояния Фемиды. Конфиг дома уже живет в ~/.themis (scripts/themis_config.py), журнал
+// Дом состояния Фемиды. Конфиг дома уже живет в ~/.themiz (scripts/themiz_config.py), журнал
 // замеров ложится туда же, а не в репозиторий: репозиторий уезжает в бэкапы и в чужие руки.
-const THEMIS_HOME = process.env.THEMIS_HOME || path.join(homedir(), '.themis')
-const JOURNAL = path.join(THEMIS_HOME, 'state', 'squeeze.jsonl')
+const THEMIZ_HOME = sreda('THEMIZ_HOME') || path.join(homedir(), '.themiz')
+const JOURNAL = path.join(THEMIZ_HOME, 'state', 'squeeze.jsonl')
 
 // Каталог ИСХОДНИКОВ Метиды. Отдельная переменная, а не METIZ_HOME, СОЗНАТЕЛЬНО: METIZ_HOME по
 // контракту самой Метиды (metiz/src/state/ccr.ts, metizHome()) означает дом СОСТОЯНИЯ (~/.metiz),
 // и подсунуть в него путь к исходникам значит увести хранилище оригиналов в каталог репозитория.
 const CANDIDATES = [
-  process.env.THEMIS_METIZ_DIR,
+  sreda('THEMIZ_METIZ_DIR'),
   path.join(path.dirname(path.dirname(HERE)), 'metiz'),
 ].filter(Boolean)
 
@@ -129,7 +143,7 @@ const METIZ = CANDIDATES.find(d => existsSync(path.join(d, 'src', 'router', 'pip
 let squeeze = null
 let openSharedStore = null
 let offReason = METIZ ? null
-  : `дома Метиды нет (искали: ${CANDIDATES.join(', ')}), назови его через THEMIS_METIZ_DIR`
+  : `дома Метиды нет (искали: ${CANDIDATES.join(', ')}), назови его через THEMIZ_METIZ_DIR`
 if (METIZ) {
   try {
     // pathToFileURL, а не голый путь: в пути живет кириллица, и спецификатор-строка ее не обещает.
@@ -202,7 +216,12 @@ export function caseFromPath(p) {
 }
 
 /** Ключ изоляции. Дом назван в ключе, чтобы дело Фемиды не схлопнулось с одноименным чужим. */
-const projectId = (caseId) => 'themis:' + caseId
+// Ключ хранилища заморожен на ПРЕЖНЕМ написании имени: по нему на диске уже
+// лежат оригиналы. Переименуешь ключ — прежние оригиналы перестанут находиться,
+// и отказ будет молчаливым. Прежнее написание берется заменой буквы, чтобы
+// массовая замена имени не разморозила ключ обратно.
+const KLUCH_HRANILISHCHA = 'themiz'.replace(/z$/, 's')
+const projectId = (caseId) => KLUCH_HRANILISHCHA + ':' + caseId
 
 /** Хранилище ЭТОГО дела и только его. Общего каталога на всех клиентов не существует. */
 const storeFor = (caseId) => openSharedStore(projectId(caseId))
@@ -271,11 +290,20 @@ function ensurePrivateDir(dir) {
  * это ловит сторож персональных данных дома (scripts/pd_guard.py, публикационная гигиена).
  * Собирается он в коде ниже из домашнего каталога, родится при первом обращении, читается при
  * старте процесса. Путь подменяем
- * переменной окружения - тем же швом, что и THEMIS_HOME, и ровно для того же: чтобы проба считала
+ * переменной окружения - тем же швом, что и THEMIZ_HOME, и ровно для того же: чтобы проба считала
  * слоты на СВОЕМ ключе и не трогала ключ живых дел.
  */
-const SLOT_KEY_DEFAULT = path.join(homedir(), '.secrets', 'themis-metiz-slot.key')
-const SLOT_KEY_FILE = process.env.THEMIS_SLOT_KEY_FILE || SLOT_KEY_DEFAULT
+const SLOT_KEY_DEFAULT = (() => {
+  const novyj = path.join(homedir(), '.secrets', 'themiz-metiz-slot.key')
+  if (existsSync(novyj)) return novyj
+  const prezhnij = novyj.replace('themiz-', 'themiz-'.replace(/z-/, 's-'))
+  if (existsSync(prezhnij)) {
+    console.error(`предупреждение: ключ слотов лежит под прежним именем ${prezhnij}`)
+    return prezhnij
+  }
+  return novyj
+})()
+const SLOT_KEY_FILE = sreda('THEMIZ_SLOT_KEY_FILE') || SLOT_KEY_DEFAULT
 
 /** Имя схемы в записи журнала. Стоит полем, чтобы шов между старыми и новыми слотами был виден
  *  машинно, а не угадывался по дате: старые записи этого поля не несут вовсе. */
@@ -450,11 +478,11 @@ export async function squeezeText(text, opts = {}) {
   // `дело cases/<клиент>/<дело>` вместе с командой restore --case, а маркер ложится в ТЕКСТ,
   // который читает модель. Имя доверителя - персональные данные, и текст уходит за границу
   // процесса: любой проход, на котором рождается ccr-результат, выносил бы имя наружу.
-  // Живой прогон через собственный шов дома (THEMIS_METIZ_DIR) это показал дословно.
+  // Живой прогон через собственный шов дома (THEMIZ_METIZ_DIR) это показал дословно.
   //
   // Заглушка стоит потому, что текст с этим маркером наружу не уходит НИКОГДА: ниже
   // ccr-результат отвергается целиком. Генератор все равно обязан быть - конвейер зовет его сам.
-  const ccrMarker = () => '[themis:ccr]'
+  const ccrMarker = () => '[themiz:ccr]'
 
   let r
   try {
@@ -561,7 +589,7 @@ function arg(argv, name) {
  * ГРАНИЦА ЧЕСТНОСТИ, ее надо знать вслух. Слой отвечает за СВОЙ argv и только за него. Кто
  * наполняет дескриптор - отвечает за свой: `printf 'cases/…' | node … --case-fd 0` кладет имя
  * доверителя в argv самого printf, и ps увидит его там. Закрыть это изнутри слоя нечем.
- * Фасад дома (scripts/themis_metiz.py) делает правильно: os.pipe() и os.write() внутри своего
+ * Фасад дома (scripts/themiz_metiz.py) делает правильно: os.pipe() и os.write() внутри своего
  * процесса, без единого стороннего argv, - на него и равняться вызывающим.
  */
 function readClosedFd(nomer) {
@@ -603,7 +631,7 @@ function writeOut(fd, data) {
 // равно постоит в его argv и в ps - то есть утечка сохранилась бы, а сигнала о ней не было бы
 // ни одного. Отказ на входе останавливает процесс раньше любой работы.
 //
-// Единственный боевой потребитель CLI - scripts/themis_metiz.py, и он зовет только
+// Единственный боевой потребитель CLI - scripts/themiz_metiz.py, и он зовет только
 // `squeeze --path-fd N --label МЕТКА` с телом на stdin: снятие ни одного из этих флагов его не
 // касается. Других вызовов в доме нет (`--case` из quality_gate.py - чужой прибор и чужой флаг).
 const SNYATY = {
@@ -658,7 +686,7 @@ async function cli(argv) {
     return 0
   }
   writeOut(2, [
-    'themis-metiz - врезка Метиды в дом Фемиды (профиль audit, изоляция по делу)',
+    'themiz-metiz - врезка Метиды в дом Фемиды (профиль audit, изоляция по делу)',
     '',
     'Дело записано как cases/<клиент>/<дело>, то есть САМ путь дела - имя доверителя. Поэтому ни',
     'путь, ни дело в argv не подаются: argv виден любому процессу владельца через ps. Оба',
@@ -671,7 +699,7 @@ async function cli(argv) {
     '',
     'Наполнять дескриптор внутри своего процесса (os.pipe + os.write), а не через стороннюю',
     'команду: `printf cases/… | …` вернет имя доверителя в ps через argv самого printf.',
-    'Образец правильного вызова - scripts/themis_metiz.py.',
+    'Образец правильного вызова - scripts/themiz_metiz.py.',
     '',
     `журнал: ${JOURNAL}`,
     `Метида: ${METIZ || 'НЕ НАЙДЕНА (' + offReason + ')'}`,
@@ -713,7 +741,7 @@ export async function selftest() {
   const ok = (v, msg) => { if (!v) throw new Error(msg) }
   const same = (buf, msg) => ok(Buffer.compare(Buffer.from(buf), Buffer.from(SAMPLE, 'utf8')) === 0, msg)
 
-  const tmp = mkdtempSync(path.join(os.tmpdir(), 'themis-metiz-'))
+  const tmp = mkdtempSync(path.join(os.tmpdir(), 'themiz-metiz-'))
   const CASE_A = 'cases/ivanov-ai/dolg-2026'
   const CASE_B = 'cases/petrov-vs/spor-2026'
   const sample = path.join(tmp, 'sample.json')
@@ -743,7 +771,7 @@ export async function selftest() {
       `console.log(JSON.stringify({ kind: r.kind, before: r.before, after: r.after, id: r.id ?? null, note: r.note ?? null }))`,
     ].join('\n'))
     const p = spawnSync(process.execPath, [runner],
-      { encoding: 'utf8', env: { ...process.env, THEMIS_SLOT_KEY_FILE: probeKey, ...env } })
+      { encoding: 'utf8', env: { ...process.env, THEMIZ_SLOT_KEY_FILE: probeKey, ...env } })
     return { p, out: p.stdout ? p.stdout.trim() : '', text: existsSync(outText) ? rf(outText, 'utf8') : '' }
   }
   const rows = home => {
@@ -752,13 +780,13 @@ export async function selftest() {
   }
 
   // --- (а) без дома Метиды импорт НЕ бросает и дом работает -----------------------------------
-  // Копия слоя живет в /tmp, соседа-Метиды рядом нет, THEMIS_METIZ_DIR указан в пустоту.
+  // Копия слоя живет в /tmp, соседа-Метиды рядом нет, THEMIZ_METIZ_DIR указан в пустоту.
   const fbDir = path.join(tmp, 'fallback', 'root', 'scripts')
   mkd(fbDir, { recursive: true })
-  copyFileSync(SELF, path.join(fbDir, 'themis-metiz.mjs'))
+  copyFileSync(SELF, path.join(fbDir, 'themiz-metiz.mjs'))
   const fbHome = path.join(tmp, 'home-fallback')
-  const a = run('fallback', path.join(fbDir, 'themis-metiz.mjs'),
-    { THEMIS_HOME: fbHome, THEMIS_METIZ_DIR: path.join(tmp, 'metiz-absent'), METIZ_HOME: metizState }, CASE_A)
+  const a = run('fallback', path.join(fbDir, 'themiz-metiz.mjs'),
+    { THEMIZ_HOME: fbHome, THEMIZ_METIZ_DIR: path.join(tmp, 'metiz-absent'), METIZ_HOME: metizState }, CASE_A)
 
   check('(а) без Метиды импорт не бросает, дом работает без сжатия и говорит об этом вслух', () => {
     eq(a.p.status, 0, 'код выхода (stderr: ' + (a.p.stderr || '').slice(0, 400) + ')')
@@ -792,7 +820,7 @@ function METIZ_PRISUTSTVUET(zapusk) {
 
   // --- (б) замер ложится в журнал -------------------------------------------------------------
   const mzHome = path.join(tmp, 'home-metiz')
-  const b = run('metiz', SELF, { THEMIS_HOME: mzHome, METIZ_HOME: metizState }, CASE_A)
+  const b = run('metiz', SELF, { THEMIZ_HOME: mzHome, METIZ_HOME: metizState }, CASE_A)
 
   // Метида — ОТДЕЛЬНЫЙ проект и НЕОБЯЗАТЕЛЬНАЯ часть Фемиды: установщик спрашивает
   // про нее отдельно, и отказ ставить ее — законный ответ. Поэтому проверка журнала
@@ -899,7 +927,7 @@ function METIZ_PRISUTSTVUET(zapusk) {
     const m = /\[metiz:fold v\d+ [^\]]*оригинал: ([^\]]+)\]/.exec(b.text)
     ok(m, 'маркера [metiz:fold ...] в выдаче нет: развернуть свертку нечем')
     const p = spawnSync('/bin/sh', ['-c', m[1]], { input: Buffer.from(b.text, 'utf8'),
-      maxBuffer: 64 * 1024 * 1024, env: { ...process.env, THEMIS_HOME: mzHome, METIZ_HOME: metizState } })
+      maxBuffer: 64 * 1024 * 1024, env: { ...process.env, THEMIZ_HOME: mzHome, METIZ_HOME: metizState } })
     eq(p.status, 0, 'команда разворота вернула не ноль: ' + String(p.stderr).slice(0, 300))
     same(p.stdout || Buffer.alloc(0), 'развернутый текст не равен оригиналу побайтно')
   })
@@ -923,7 +951,7 @@ function METIZ_PRISUTSTVUET(zapusk) {
     ].join('\n'))
     // Свой дом состояния: проба (г) проверяет, что обратимый проход НЕ завел хранилища, и делить
     // с ней каталог значило бы ломать ее чужой записью.
-    const env = { ...process.env, THEMIS_HOME: mzHome, THEMIS_SLOT_KEY_FILE: probeKey,
+    const env = { ...process.env, THEMIZ_HOME: mzHome, THEMIZ_SLOT_KEY_FILE: probeKey,
       METIZ_HOME: path.join(tmp, 'metiz-state-iso') }
     const s = spawnSync(process.execPath, [put], { encoding: 'utf8', env })
     eq(s.status, 0, 'оригинал не лег под свое дело: ' + (s.stderr || '').slice(0, 300))
@@ -961,7 +989,7 @@ function METIZ_PRISUTSTVUET(zapusk) {
     // Тихое игнорирование сняло бы утечку только на словах: имя доверителя все равно постояло бы
     // в argv старого вызова, а сигнала не было бы ни одного. Отказ бьет до всякой работы.
     const p = spawnSync(process.execPath, [SELF, 'restore', '--case', CASE_A, '--id', 'deadbeefcafe0001'],
-      { encoding: 'utf8', env: { ...process.env, THEMIS_SLOT_KEY_FILE: probeKey } })
+      { encoding: 'utf8', env: { ...process.env, THEMIZ_SLOT_KEY_FILE: probeKey } })
     ok(p.status !== 0, 'снятый флаг --case принят к исполнению')
     eq((p.stdout || '').length, 0, 'на снятом флаге что-то ушло в stdout - в поток для модели')
     ok(/--case снят/.test(p.stderr || ''), 'отказ не назвал снятый флаг: ' + (p.stderr || '').slice(0, 200))
@@ -970,7 +998,7 @@ function METIZ_PRISUTSTVUET(zapusk) {
     }
   })
   check('(д) без дела не сжимаем вовсе: нет изоляции - нет сжатия', () => {
-    const noCase = run('nocase', SELF, { THEMIS_HOME: path.join(tmp, 'home-nocase'), METIZ_HOME: metizState }, null)
+    const noCase = run('nocase', SELF, { THEMIZ_HOME: path.join(tmp, 'home-nocase'), METIZ_HOME: metizState }, null)
     eq(noCase.p.status, 0, 'код выхода')
     const r = JSON.parse(noCase.out)
     eq(r.kind, 'skip', 'без дела текст все равно сжали')
@@ -984,7 +1012,7 @@ function METIZ_PRISUTSTVUET(zapusk) {
   // не доказала.
   check('(е) подставной путь с сегментом cases делом не признается', () => {
     const proj = path.join(tmp, 'proj')
-    const layer = path.join(proj, 'scripts', 'themis-metiz.mjs')
+    const layer = path.join(proj, 'scripts', 'themiz-metiz.mjs')
     mkd(path.dirname(layer), { recursive: true })
     copyFileSync(SELF, layer)
 
@@ -1043,7 +1071,7 @@ function METIZ_PRISUTSTVUET(zapusk) {
 
   // --- (ж) вынос в хранилище под audit отвергается, имя доверителя в текст не уходит ----------
   // Профиль audit выноса не порождает (allowLossy: false снимает необратимый шаг), поэтому
-  // граница Метиды подменяется через СОБСТВЕННЫЙ шов дома - THEMIS_METIZ_DIR. Код слоя при этом
+  // граница Метиды подменяется через СОБСТВЕННЫЙ шов дома - THEMIZ_METIZ_DIR. Код слоя при этом
   // настоящий и неправленый: подменен только сотрудник за границей.
   checkM('(ж) ccr-результат отвергается: вход возвращается байт в байт, имя дела наружу не идет', () => {
     const zaglushka = path.join(tmp, 'metiz-zaglushka')
@@ -1073,7 +1101,7 @@ function METIZ_PRISUTSTVUET(zapusk) {
 
     const ccrHome = path.join(tmp, 'home-ccr')
     const ccrState = path.join(tmp, 'metiz-state-ccr')
-    const c = run('ccr', SELF, { THEMIS_HOME: ccrHome, THEMIS_METIZ_DIR: zaglushka, METIZ_HOME: ccrState }, CASE_A)
+    const c = run('ccr', SELF, { THEMIZ_HOME: ccrHome, THEMIZ_METIZ_DIR: zaglushka, METIZ_HOME: ccrState }, CASE_A)
     eq(c.p.status, 0, 'код выхода (stderr: ' + (c.p.stderr || '').slice(0, 400) + ')')
     const r = JSON.parse(c.out)
     eq(r.kind, 'skip', 'вынос принят: сжатое выдано там, где профиль его не допускает')
@@ -1101,7 +1129,7 @@ function METIZ_PRISUTSTVUET(zapusk) {
     // трогать биты владельца: снимать он вправе только чужие. Урок дома, повторенный дословно.
     chmodSync(zhurnal, 0o700)
     chmodSync(path.dirname(zhurnal), 0o500)
-    const z = run('strogiy', SELF, { THEMIS_HOME: strogiy, METIZ_HOME: metizState }, CASE_A)
+    const z = run('strogiy', SELF, { THEMIZ_HOME: strogiy, METIZ_HOME: metizState }, CASE_A)
     eq(z.p.status, 0, 'код выхода (stderr: ' + (z.p.stderr || '').slice(0, 400) + ')')
     eq(statSync(path.dirname(zhurnal)).mode & 0o777, 0o500,
       'ПРАВА КАТАЛОГА РАСШИРЕНЫ: владелец закрыл его на 500, а прибор вернул право записи')
@@ -1126,7 +1154,7 @@ function METIZ_PRISUTSTVUET(zapusk) {
     const podstava = 'cases/podstavnoy-klient/delo-2026'
     for (const flag of Object.keys(SNYATY)) {
       const p = spawnSync(process.execPath, [SELF, 'squeeze', `--${flag}=${podstava}`, '--label', 'proba'],
-        { encoding: 'utf8', input: 'proba', env: { ...process.env, THEMIS_SLOT_KEY_FILE: probeKey } })
+        { encoding: 'utf8', input: 'proba', env: { ...process.env, THEMIZ_SLOT_KEY_FILE: probeKey } })
       ok(p.status !== 0,
         `ФОРМА --${flag}= ПРИНЯТА К ИСПОЛНЕНИЮ: путь дела постоял в argv, а сторож промолчал`)
       eq((p.stdout || '').length, 0, `на снятом флаге --${flag}= что-то ушло в stdout - в поток для модели`)
@@ -1138,7 +1166,7 @@ function METIZ_PRISUTSTVUET(zapusk) {
     }
     // Точная форма обязана остаться отвергнутой: правка расширяет сторожа, а не переносит его.
     const t = spawnSync(process.execPath, [SELF, 'squeeze', '--file', podstava],
-      { encoding: 'utf8', input: 'proba', env: { ...process.env, THEMIS_SLOT_KEY_FILE: probeKey } })
+      { encoding: 'utf8', input: 'proba', env: { ...process.env, THEMIZ_SLOT_KEY_FILE: probeKey } })
     ok(t.status !== 0, 'точная форма снятого флага перестала отвергаться')
   })
 
@@ -1158,7 +1186,7 @@ function METIZ_PRISUTSTVUET(zapusk) {
     const keyB = path.join(tmp, 'secrets', 'slot-b.key')
     const zapis = (tag, keyFile) => {
       const home = path.join(tmp, 'home-' + tag)
-      const r = run(tag, SELF, { THEMIS_HOME: home, METIZ_HOME: metizState, THEMIS_SLOT_KEY_FILE: keyFile }, CASE_A)
+      const r = run(tag, SELF, { THEMIZ_HOME: home, METIZ_HOME: metizState, THEMIZ_SLOT_KEY_FILE: keyFile }, CASE_A)
       eq(r.p.status, 0, 'код выхода (stderr: ' + (r.p.stderr || '').slice(0, 300) + ')')
       const rs = rows(home)
       eq(rs.length, 1, 'строк в журнале')
@@ -1176,7 +1204,7 @@ function METIZ_PRISUTSTVUET(zapusk) {
     eq(a1.rec.slot_scheme, 'hmac-v2', 'схема слота в записи не названа: шов со старыми записями невиден')
 
     // Словарный перебор одной строкой - ровно та формула, которой аудитор прошел все дерево дел.
-    const slovarnyy = createHash('sha256').update('themis:' + CASE_A, 'utf8').digest('hex').slice(0, 16)
+    const slovarnyy = createHash('sha256').update('themiz:' + CASE_A, 'utf8').digest('hex').slice(0, 16)
     ok(a1.rec.case_slot !== slovarnyy,
       'СЛОТ ВЫВОДИТСЯ ИЗ СТРОКИ ДЕЛА БЕЗ КЛЮЧА: словарь дел с диска раскрывает журнал за миллисекунды')
 
@@ -1196,16 +1224,16 @@ function METIZ_PRISUTSTVUET(zapusk) {
   })
 
   // --- питонский фасад: та самая одна строка врезки -------------------------------------------
-  check('фасад дома (themis_metiz.py) зеленый и без Метиды не бросает', () => {
-    const py = path.join(HERE, 'themis_metiz.py')
+  check('фасад дома (themiz_metiz.py) зеленый и без Метиды не бросает', () => {
+    const py = path.join(HERE, 'themiz_metiz.py')
     ok(existsSync(py), 'фасада нет: врезка одной строкой невозможна')
     const p = spawnSync('python3', [py, '--selftest'], { encoding: 'utf8',
-      env: { ...process.env, THEMIS_HOME: path.join(tmp, 'home-py'), METIZ_HOME: metizState,
-        THEMIS_SLOT_KEY_FILE: probeKey } })
+      env: { ...process.env, THEMIZ_HOME: path.join(tmp, 'home-py'), METIZ_HOME: metizState,
+        THEMIZ_SLOT_KEY_FILE: probeKey } })
     eq(p.status, 0, 'селфтест фасада красный: ' + (p.stdout || '') + (p.stderr || ''))
   })
 
-  console.log(bad ? `themis-metiz: КРАСНЫЙ, провалов ${bad}, следы в ${tmp}` : 'themis-metiz: зеленый')
+  console.log(bad ? `themiz-metiz: КРАСНЫЙ, провалов ${bad}, следы в ${tmp}` : 'themiz-metiz: зеленый')
   if (!bad) rmSync(tmp, { recursive: true, force: true })
   return bad ? 1 : 0
 }

@@ -27,12 +27,13 @@ import os
 import re
 import sys
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+import sreda  # noqa: E402,F401  переходный период имен переменных
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Путь переопределяем: без этого копия скрипта вне проекта (мутационная проверка,
 # разбор в песочнице) не находит корпус, молча пропускает сквозные проверки и
 # selftest зеленеет на сломанном коде.
-CORPUS = os.environ.get("THEMIS_NK_CORPUS") or os.path.join(
+CORPUS = os.environ.get("THEMIZ_NK_CORPUS") or os.path.join(
     ROOT, "knowledge", "kodeksy", "nk-rf-gosposhlina.md")
 
 
@@ -366,7 +367,7 @@ def main() -> int:
 def _cli_total(args: list[str]) -> int | None:
     """Прогнать сам скрипт как CLI и вернуть сумму «К УПЛАТЕ». None — отказ считать."""
     import subprocess
-    env = dict(os.environ, THEMIS_NK_CORPUS=CORPUS)
+    env = dict(os.environ, THEMIZ_NK_CORPUS=CORPUS)
     r = subprocess.run([sys.executable, os.path.abspath(__file__)] + args,
                        capture_output=True, text=True, env=env)
     if r.returncode != 0:
@@ -379,7 +380,7 @@ def _cli_refuses(args: list[str], word: str) -> bool:
     """Отказ должен быть ОСМЫСЛЕННЫМ, а не падением: иначе мутация, убравшая
     требование статуса, выглядит как корректный отказ."""
     import subprocess
-    env = dict(os.environ, THEMIS_NK_CORPUS=CORPUS)
+    env = dict(os.environ, THEMIZ_NK_CORPUS=CORPUS)
     r = subprocess.run([sys.executable, os.path.abspath(__file__)] + args,
                        capture_output=True, text=True, env=env)
     return r.returncode != 0 and word in r.stderr and "Traceback" not in r.stderr

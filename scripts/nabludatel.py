@@ -495,7 +495,7 @@ def selftest() -> int:
         {"toolUseResult": {"exitCode": 1, "stderr":
             f"БЛОК: запись в cases/{familia.lower()}-as/razvod-2026 запрещена. "
             f"Истец {familia} Мария Петровна, ИНН 771234567890. "
-            f"Рендер /tmp/{familia.lower()}-as/page_001 в {HOME}/Проекты/themis."}},
+            f"Рендер /tmp/{familia.lower()}-as/page_001 в {HOME}/Проекты/themiz."}},
         {"message": {"content": [{"type": "tool_use", "name": "WebSearch", "input": {}}]},
          "toolUseResult": {"exitCode": 1, "stderr": "usage: tool [-h]"}},
         {"message": {"content": [{"type": "tool_use", "name": n, "input": {}}

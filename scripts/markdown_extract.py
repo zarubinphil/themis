@@ -44,6 +44,7 @@ markdown_extract.py — роутер извлечения текста (экон
 Флаги размера: --preview N (символов превью, 800), --max-chars N (лимит --inline).
 """
 import sys, os, argparse, hashlib, json, re
+import sreda  # noqa: E402,F401  переходный период имен переменных
 
 OFFICE = {"docx", "xlsx", "xls", "pptx", "ppt", "html", "htm", "csv", "json", "xml", "rtf", "epub", "odt"}
 IMAGE = {"png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp", "gif", "heic"}
@@ -57,19 +58,19 @@ DPI = 300               # рендер сканов для OCR (мелкий ю�
 # в одном экспертном заключении (119 стр.) таблицы остатков счетов стоят
 # на стр. 82-83, то есть ЗА порогом. С переходом на структурный vision-doc
 # (1,33 с/стр) 119 страниц стоят 2,6 минуты — держать низкий потолок незачем.
-MAXP = int(os.environ.get("THEMIS_MAX_PAGES", "500"))
+MAXP = int(os.environ.get("THEMIZ_MAX_PAGES", "500"))
 # Замер 02.08.2026 на M3 (4P+4E): 4w — 0,60 с/стр, 6w — 0,55, 8w — 0,52,
 # 12w и 16w — те же 0,52-0,53. Плато на 8: упираемся в Neural Engine, а не в
 # число процессов. 119-страничный скан = 62 с.
-OCR_WORKERS = int(os.environ.get("THEMIS_OCR_WORKERS", "8"))
+OCR_WORKERS = int(os.environ.get("THEMIZ_OCR_WORKERS", "8"))
 # Apple Vision OCR — локально, $0, русский точно. НЕ облачный vision, НЕ ollama/llava.
-# Путь: env THEMIS_VISION_OCR → repo bin/vision-ocr (собирается install.sh) → fallback.
-OCR_BIN = os.environ.get("THEMIS_VISION_OCR") or os.path.join(
+# Путь: env THEMIZ_VISION_OCR → repo bin/vision-ocr (собирается install.sh) → fallback.
+OCR_BIN = os.environ.get("THEMIZ_VISION_OCR") or os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "vision-ocr")
 # Структурный движок (macOS 26+): дает таблицы с ячейками. Основной путь для сканов;
 # при его отсутствии роутер молча НЕ деградирует — падает на строковый vision-ocr и
 # помечает, что структуры таблиц в артефактах нет.
-DOC_BIN = os.environ.get("THEMIS_VISION_DOC") or os.path.join(
+DOC_BIN = os.environ.get("THEMIZ_VISION_DOC") or os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "vision-doc")
 # Сигнал отсутствия движка: отличить «движок не собран» от «скан реально пустой».
 # Инвариант CLAUDE.md: движок OCR недоступен → СТОП, не деградировать молча на облако.
@@ -962,7 +963,7 @@ def main():
         # жмутся 692 727 -> 209 168 байт (69,8%), с номерами - 0,0%. Значит врезка стоит здесь
         # страховкой, а не экономией: ниже порога профиля вход возвращается байт в байт
         # (доктрина 4), а выдача без потолка символов больше не проходит мимо прибора.
-        print(__import__("themis_metiz").squeeze_text("\n".join(hits[:400]), p, "grep"))
+        print(__import__("themiz_metiz").squeeze_text("\n".join(hits[:400]), p, "grep"))
         return
 
     if a.inline:
@@ -971,7 +972,7 @@ def main():
         # Режется уже обрезанный кусок, а не целый документ, намеренно: хвост за max_chars дом
         # терял и до врезки, о чем честно печатает ниже, а сжатие целого документа с последующей
         # обрезкой разрубило бы маркер разворота и сделало текст невосстановимым.
-        out = __import__("themis_metiz").squeeze_text(body[: a.max_chars], p, "inline")
+        out = __import__("themiz_metiz").squeeze_text(body[: a.max_chars], p, "inline")
         print(out)
         if len(body) > a.max_chars:
             print(f"\n[...обрезано, всего {nchars} симв.; остальное в MD...]")

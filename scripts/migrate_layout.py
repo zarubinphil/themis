@@ -558,7 +558,7 @@ def main():
                     help="выданные .docx из черновиков → GOTOVO/ (второй шаг переезда)")
     ap.add_argument("--manifest", metavar="FILE", help="куда положить манифест ДО")
     ap.add_argument("--backup-dir", default=os.path.join(
-        os.path.expanduser("~"), "Хранилище", "themis-layout-backup"),
+        os.path.expanduser("~"), "Хранилище", "themiz-layout-backup"),
         help="куда копировать переезжающие каталоги до переезда")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()

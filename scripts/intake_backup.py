@@ -31,7 +31,7 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CASES = os.path.join(ROOT, "cases")
-DEFAULT_DEST = os.path.join(os.path.expanduser("~"), "Хранилище", "themis-intake-backup")
+DEFAULT_DEST = os.path.join(os.path.expanduser("~"), "Хранилище", "themiz-intake-backup")
 MANIFEST = "MANIFEST.json"
 CHUNK = 1 << 20
 # ponytail: markdown_extract сам решает маршрут по расширению; берем то, что он точно умеет
@@ -170,7 +170,7 @@ def restore_test(dest, quiet=False, seed=None):
         return [f"{case}: нет ни одного файла, который умеет читать markdown_extract"]
     sample = rnd.choice(sorted(picked))
     errors = []
-    with tempfile.TemporaryDirectory(prefix="themis-restore-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="themiz-restore-") as tmp:
         for rel in cases[case]:
             src, dst = os.path.join(dest, rel), os.path.join(tmp, rel)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
@@ -193,7 +193,7 @@ def restore_test(dest, quiet=False, seed=None):
 
 def selftest():
     """Синтетическое дерево во временном каталоге: копия, порча файла, обнаружение порчи."""
-    with tempfile.TemporaryDirectory(prefix="themis-backup-selftest-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="themiz-backup-selftest-") as tmp:
         src = os.path.join(tmp, "cases", "ivanov-ivan", "delo-2026", "00_intake")
         os.makedirs(src)
         with open(os.path.join(src, "material.txt"), "w", encoding="utf-8") as f:

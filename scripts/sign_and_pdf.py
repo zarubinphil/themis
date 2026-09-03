@@ -39,7 +39,7 @@ def docx_to_pdf_via_word(docx_path: str, pdf_path: str) -> bool:
     word_docs = os.path.expanduser(
         "~/Library/Containers/com.microsoft.Word/Data/Documents")
     os.makedirs(word_docs, exist_ok=True)
-    tmp_dir = tempfile.mkdtemp(prefix="themis_pdf_", dir=word_docs)
+    tmp_dir = tempfile.mkdtemp(prefix="themiz_pdf_", dir=word_docs)
     tmp_docx = os.path.join(tmp_dir, "_conv_" + os.path.basename(docx_abs))
     tmp_pdf = os.path.splitext(tmp_docx)[0] + ".pdf"
     shutil.copy2(docx_abs, tmp_docx)

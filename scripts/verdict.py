@@ -25,7 +25,7 @@ append-only. Раньше он лежал в `_working/` — а эту папк�
 Целостность записи держат два рубежа помимо переезда:
   · обязательный источник (`source`) — атрибуция; self-record (сам составитель)
     отклоняется, но строка не заменяет аутентификацию ОС-процесса;
-  · внеполосная подпись HMAC-SHA256 — ключ вне журнала (env `THEMIS_VERDICT_KEY`
+  · внеполосная подпись HMAC-SHA256 — ключ вне журнала (env `THEMIZ_VERDICT_KEY`
     либо файл ключа в каталоге секретов), проверка при чтении. Запись без
     проверяемой подписи для сборки НЕ считается вердиктом — отказ, не предупреждение.
 
@@ -43,6 +43,7 @@ import tempfile
 import time
 from datetime import date, datetime
 from pathlib import Path
+import sreda  # noqa: E402,F401  переходный период имен переменных
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _obshee as obs  # noqa: E402
@@ -85,7 +86,7 @@ class RoundConfigError(Exception):
 
 def round_limit(today=None):
     """Потолок из case_paths; конфиг хранит только временное послабление."""
-    path = Path(os.environ.get("THEMIS_VERDICT_CONFIG", ROUND_CONFIG))
+    path = Path(os.environ.get("THEMIZ_VERDICT_CONFIG", ROUND_CONFIG))
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
@@ -129,23 +130,23 @@ REVIEW_SOURCES = frozenset({
     "doc-reviewer", "кони", "reviewer", "coordinator", "координатор",
 })
 # Источник нельзя молча назначать рецензентом: отсутствие атрибуции — отказ.
-DEFAULT_SOURCE = os.environ.get("THEMIS_ACTOR")
+DEFAULT_SOURCE = os.environ.get("THEMIZ_ACTOR")
 # Поля, которые подписываются. `sig` в подпись не входит (это она сама).
 SIGNED_FIELDS = ("document", "path", "round", "verdict", "sha256", "at", "source")
 PREFLIGHT_SIGNED_FIELDS = (
     "kind", "document", "path", "sha256", "context_sha256", "at", "source", "green", "checks",
 )
-_KEYFILE_DEFAULT = Path.home() / ".secrets" / "themis-verdict.key"
+_KEYFILE_DEFAULT = Path.home() / ".secrets" / "themiz-verdict.key"
 
 
 def _sign_key():
-    """Ключ подписи ВНЕ журнала: env THEMIS_VERDICT_KEY либо файл ключа.
+    """Ключ подписи ВНЕ журнала: env THEMIZ_VERDICT_KEY либо файл ключа.
     Файла нет — генерируем один раз (каталог 700, файл 600). Секрет в git/логи не
     уходит — только в каталог секретов (санкция rules/structure.md)."""
-    k = os.environ.get("THEMIS_VERDICT_KEY")
+    k = os.environ.get("THEMIZ_VERDICT_KEY")
     if k:
         return k.encode()
-    kf = Path(os.environ.get("THEMIS_VERDICT_KEYFILE", _KEYFILE_DEFAULT))
+    kf = Path(os.environ.get("THEMIZ_VERDICT_KEYFILE", _KEYFILE_DEFAULT))
     if kf.is_file():
         return kf.read_bytes().strip()
     kf.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -272,7 +273,7 @@ def scan(md):
         return None
     try:
         env = os.environ.copy()
-        env["THEMIS_PROJECT_ROOT"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        env["THEMIZ_PROJECT_ROOT"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         p = subprocess.run(["bash", str(SCAN), str(md)], capture_output=True,
                            text=True, timeout=300, stdin=subprocess.DEVNULL, env=env)
     except (OSError, subprocess.TimeoutExpired) as e:
@@ -691,7 +692,7 @@ def preflight(md):
     case = _case_for_draft(md)
     scripts = Path(__file__).resolve().parent
     env = os.environ.copy()
-    env["THEMIS_PROJECT_ROOT"] = str(scripts.parent)
+    env["THEMIZ_PROJECT_ROOT"] = str(scripts.parent)
     work = (_drafts_dir(md) / cp.WORKING) if case is not None else md.parent
     try:
         work.mkdir(parents=True, exist_ok=True)
@@ -975,7 +976,7 @@ def selftest():
     from contextlib import redirect_stderr
     import io
     # Ключ подписи — из env, чтобы селфтест был герметичен и не трогал каталог секретов.
-    os.environ["THEMIS_VERDICT_KEY"] = "selftest-key-do-not-use-in-prod"
+    os.environ["THEMIZ_VERDICT_KEY"] = "selftest-key-do-not-use-in-prod"
 
     def approve(md, green=True):
         return _write_preflight(md, sha(md), green, [{
@@ -992,7 +993,7 @@ def selftest():
     with tempfile.TemporaryDirectory(prefix="verdict-selftest-") as tmp:
         cfg = Path(tmp) / "verdict.json"
         cfg.write_text(json.dumps({"override": None}), encoding="utf-8")
-        os.environ["THEMIS_VERDICT_CONFIG"] = str(cfg)
+        os.environ["THEMIZ_VERDICT_CONFIG"] = str(cfg)
         d = Path(tmp) / "cases" / "ivanov-ivan" / "delo-2026" / cp.AGENT_DIR / "drafts"
         d.mkdir(parents=True)
         case = d.parent.parent
@@ -1432,7 +1433,7 @@ def main():
     ap.add_argument("--verdict", help="текст вердикта (с --record)")
     ap.add_argument("--source", default=DEFAULT_SOURCE,
                     help="кто выписал вердикт (с --record); обязателен явно либо через "
-                         "env THEMIS_ACTOR. Источник-составитель отклоняется")
+                         "env THEMIZ_ACTOR. Источник-составитель отклоняется")
     ap.add_argument("-r", "--round", type=int, default=None,
                     help="проверочное ожидание номера; номер всегда считает машина")
     ap.add_argument("--check", action="store_true", help="можно ли собирать .docx")

@@ -30,7 +30,7 @@ description: 'Шаг 0 протокола — переработка задач�
 ### 3. Preflight — три команды, до плана
 
 ```bash
-python3 scripts/themis_status.py cases/{клиент}/{дело} --brief   # сводка старта + состояние + валидность frontmatter
+python3 scripts/themiz_status.py cases/{клиент}/{дело} --brief   # сводка старта + состояние + валидность frontmatter
 python3 scripts/preflight_search.py                       # каналы поиска
 ls $HOME/Desktop/inbox/                                       # новые материалы
 ```
