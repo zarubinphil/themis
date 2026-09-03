@@ -12,7 +12,7 @@
   },
   "quality": "highest",
   "generation_id": "pantheon-stage-series-themis-2026-08-29",
-  "generated_at": "2026-09-03T12:39:11Z",
+  "generated_at": "2026-09-03T17:54:40Z",
   "capability_snapshot": {
     "checked_at": "2026-08-29T20:07:37Z",
     "routes": [
@@ -45,15 +45,15 @@
     },
     {
       "role": "character-sheet",
-      "sha256": "e6edf0b8857c23bb673aec8e519162060a3b053cb949e3e36a783f89ea4eef06"
+      "sha256": "711148b3fda406aa7d93cf85f4406fd23496dda8e6c50e3d3eb31267dc60b871"
     },
     {
       "role": "prop-sheet",
-      "sha256": "b53d5a9928b9fd097e8cb1abf81326f6b358233d1a3265c7609e76c13d777123"
+      "sha256": "21062daf12fa5b0ad5086c0d61e473754600290a444546ac4b13b929de64ddfc"
     },
     {
       "role": "jurist-sheet",
-      "sha256": "7e60f92607966c5c966ef54c08948baee8e69b4232d99e90bb02dc32b7c3f8e2"
+      "sha256": "f22443fc8f38f918feaf9fdfa405262f111c29fdad0efddfc613ad940bf0ec0b"
     }
   ],
   "candidates": [
@@ -69,38 +69,38 @@
       "outputs": [
         {
           "role": "stage-01-intake",
-          "source_sha256": "ff1777db05564719d37e6464c5582d66d225ccc7b916d8206bdff6da2a1875ab",
-          "published_sha256": "ff1777db05564719d37e6464c5582d66d225ccc7b916d8206bdff6da2a1875ab"
+          "source_sha256": "8a9b0025d7ea709aa8af9801200d4040702fa066e854d4358894adb09735e53f",
+          "published_sha256": "8a9b0025d7ea709aa8af9801200d4040702fa066e854d4358894adb09735e53f"
         },
         {
           "role": "stage-02-extract",
-          "source_sha256": "f1e6b2e75b7713da03a8c0c64a792bf6e236b442b166588c391241e3ec748272",
-          "published_sha256": "f1e6b2e75b7713da03a8c0c64a792bf6e236b442b166588c391241e3ec748272"
+          "source_sha256": "0e16df6ec840ba3aa6efe1ff02b680243445045ffc9d2980d02716470e2ac899",
+          "published_sha256": "0e16df6ec840ba3aa6efe1ff02b680243445045ffc9d2980d02716470e2ac899"
         },
         {
           "role": "stage-03-case-map",
-          "source_sha256": "2635050dae59cc455b41c5ff5cf348ffcb71a45249017aee52dd59fc2a2a297a",
-          "published_sha256": "2635050dae59cc455b41c5ff5cf348ffcb71a45249017aee52dd59fc2a2a297a"
+          "source_sha256": "6d87cffd12aee6b56f6c1365aae9b361829145561f92c4eb004b59917d07306f",
+          "published_sha256": "6d87cffd12aee6b56f6c1365aae9b361829145561f92c4eb004b59917d07306f"
         },
         {
           "role": "stage-04-research",
-          "source_sha256": "3b83d70abc605db7770c7801c89223ae9bec5e2a1d60c99699b5b7b60eb4909b",
-          "published_sha256": "3b83d70abc605db7770c7801c89223ae9bec5e2a1d60c99699b5b7b60eb4909b"
+          "source_sha256": "38ff6a2798c9e22d39eb59297a5a559d5e7501b4fd93ab395fe712838e94daf5",
+          "published_sha256": "38ff6a2798c9e22d39eb59297a5a559d5e7501b4fd93ab395fe712838e94daf5"
         },
         {
           "role": "stage-05-council",
-          "source_sha256": "ad26a563ee71828d4253c97a9d0134dd925a1c311fcd014bb3d923ad35260168",
-          "published_sha256": "ad26a563ee71828d4253c97a9d0134dd925a1c311fcd014bb3d923ad35260168"
+          "source_sha256": "cff87dfc6f85b02b11f2de866a65ea0c5af584302f58ab79ae2bed04c7877781",
+          "published_sha256": "cff87dfc6f85b02b11f2de866a65ea0c5af584302f58ab79ae2bed04c7877781"
         },
         {
           "role": "stage-06-draft",
-          "source_sha256": "716055bf24311213cd189d224c7fbe2236071ffe185216e7bc599367df425e2e",
-          "published_sha256": "716055bf24311213cd189d224c7fbe2236071ffe185216e7bc599367df425e2e"
+          "source_sha256": "b1310675ce2a793bc16062cf7df2512c1c8ddc7bd10059b395ed0190dc62d80b",
+          "published_sha256": "b1310675ce2a793bc16062cf7df2512c1c8ddc7bd10059b395ed0190dc62d80b"
         },
         {
           "role": "stage-07-hearing",
-          "source_sha256": "fc5535394c24e9d61ca834e12f4c4af6c3673fd53e48217f2405bd0c5090e87b",
-          "published_sha256": "fc5535394c24e9d61ca834e12f4c4af6c3673fd53e48217f2405bd0c5090e87b"
+          "source_sha256": "c44336ac5d81fa6918b0ad09328a78d4e8a4991bd58d47b31fbc409444cdccac",
+          "published_sha256": "c44336ac5d81fa6918b0ad09328a78d4e8a4991bd58d47b31fbc409444cdccac"
         }
       ]
     }
@@ -140,6 +140,20 @@
         "stage-07-hearing"
       ],
       "at": "2026-09-03T12:39:11Z",
+      "reason": "серия снята заново по своду проекта: прежние кадры делались до карты персонажа и карты реквизита, поэтому в каждом кадре менялись прическа, материал меча и форма папки доверителя",
+      "route_id": "codex:image_gen:managed-frontier"
+    },
+    {
+      "roles": [
+        "stage-01-intake",
+        "stage-02-extract",
+        "stage-03-case-map",
+        "stage-04-research",
+        "stage-05-council",
+        "stage-06-draft",
+        "stage-07-hearing"
+      ],
+      "at": "2026-09-03T17:54:40Z",
       "reason": "серия снята заново по своду проекта: прежние кадры делались до карты персонажа и карты реквизита, поэтому в каждом кадре менялись прическа, материал меча и форма папки доверителя",
       "route_id": "codex:image_gen:managed-frontier"
     }

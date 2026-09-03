@@ -39,9 +39,9 @@
         "title_zh": "把案件材料交过来",
         "diagram_zh": "接收",
         "source_path": "docs/assets/pantheon/workflow/01-intake.png",
-        "source_sha256": "ff1777db05564719d37e6464c5582d66d225ccc7b916d8206bdff6da2a1875ab",
+        "source_sha256": "8a9b0025d7ea709aa8af9801200d4040702fa066e854d4358894adb09735e53f",
         "published_path": "docs/assets/pantheon/workflow/01-intake.png",
-        "published_sha256": "ff1777db05564719d37e6464c5582d66d225ccc7b916d8206bdff6da2a1875ab"
+        "published_sha256": "8a9b0025d7ea709aa8af9801200d4040702fa066e854d4358894adb09735e53f"
       },
       {
         "id": "extract",
@@ -52,9 +52,9 @@
         "title_zh": "扫描件在你的 Mac 上被读出来",
         "diagram_zh": "读取",
         "source_path": "docs/assets/pantheon/workflow/02-extract.png",
-        "source_sha256": "f1e6b2e75b7713da03a8c0c64a792bf6e236b442b166588c391241e3ec748272",
+        "source_sha256": "0e16df6ec840ba3aa6efe1ff02b680243445045ffc9d2980d02716470e2ac899",
         "published_path": "docs/assets/pantheon/workflow/02-extract.png",
-        "published_sha256": "f1e6b2e75b7713da03a8c0c64a792bf6e236b442b166588c391241e3ec748272"
+        "published_sha256": "0e16df6ec840ba3aa6efe1ff02b680243445045ffc9d2980d02716470e2ac899"
       },
       {
         "id": "case-map",
@@ -65,9 +65,9 @@
         "title_zh": "搭起案件地图",
         "diagram_zh": "地图",
         "source_path": "docs/assets/pantheon/workflow/03-case-map.png",
-        "source_sha256": "2635050dae59cc455b41c5ff5cf348ffcb71a45249017aee52dd59fc2a2a297a",
+        "source_sha256": "6d87cffd12aee6b56f6c1365aae9b361829145561f92c4eb004b59917d07306f",
         "published_path": "docs/assets/pantheon/workflow/03-case-map.png",
-        "published_sha256": "2635050dae59cc455b41c5ff5cf348ffcb71a45249017aee52dd59fc2a2a297a"
+        "published_sha256": "6d87cffd12aee6b56f6c1365aae9b361829145561f92c4eb004b59917d07306f"
       },
       {
         "id": "research",
@@ -78,9 +78,9 @@
         "title_zh": "正反两面的判例",
         "diagram_zh": "判例",
         "source_path": "docs/assets/pantheon/workflow/04-research.png",
-        "source_sha256": "3b83d70abc605db7770c7801c89223ae9bec5e2a1d60c99699b5b7b60eb4909b",
+        "source_sha256": "38ff6a2798c9e22d39eb59297a5a559d5e7501b4fd93ab395fe712838e94daf5",
         "published_path": "docs/assets/pantheon/workflow/04-research.png",
-        "published_sha256": "3b83d70abc605db7770c7801c89223ae9bec5e2a1d60c99699b5b7b60eb4909b"
+        "published_sha256": "38ff6a2798c9e22d39eb59297a5a559d5e7501b4fd93ab395fe712838e94daf5"
       },
       {
         "id": "council",
@@ -91,9 +91,9 @@
         "title_zh": "五位法学家争论",
         "diagram_zh": "合议",
         "source_path": "docs/assets/pantheon/workflow/05-council.png",
-        "source_sha256": "ad26a563ee71828d4253c97a9d0134dd925a1c311fcd014bb3d923ad35260168",
+        "source_sha256": "cff87dfc6f85b02b11f2de866a65ea0c5af584302f58ab79ae2bed04c7877781",
         "published_path": "docs/assets/pantheon/workflow/05-council.png",
-        "published_sha256": "ad26a563ee71828d4253c97a9d0134dd925a1c311fcd014bb3d923ad35260168"
+        "published_sha256": "cff87dfc6f85b02b11f2de866a65ea0c5af584302f58ab79ae2bed04c7877781"
       },
       {
         "id": "draft",
@@ -104,9 +104,9 @@
         "title_zh": "一个写，另一个查",
         "diagram_zh": "文书",
         "source_path": "docs/assets/pantheon/workflow/06-draft.png",
-        "source_sha256": "716055bf24311213cd189d224c7fbe2236071ffe185216e7bc599367df425e2e",
+        "source_sha256": "b1310675ce2a793bc16062cf7df2512c1c8ddc7bd10059b395ed0190dc62d80b",
         "published_path": "docs/assets/pantheon/workflow/06-draft.png",
-        "published_sha256": "716055bf24311213cd189d224c7fbe2236071ffe185216e7bc599367df425e2e"
+        "published_sha256": "b1310675ce2a793bc16062cf7df2512c1c8ddc7bd10059b395ed0190dc62d80b"
       },
       {
         "id": "hearing",
@@ -117,29 +117,29 @@
         "title_zh": "开庭准备与提醒",
         "diagram_zh": "开庭",
         "source_path": "docs/assets/pantheon/workflow/07-hearing.png",
-        "source_sha256": "fc5535394c24e9d61ca834e12f4c4af6c3673fd53e48217f2405bd0c5090e87b",
+        "source_sha256": "c44336ac5d81fa6918b0ad09328a78d4e8a4991bd58d47b31fbc409444cdccac",
         "published_path": "docs/assets/pantheon/workflow/07-hearing.png",
-        "published_sha256": "fc5535394c24e9d61ca834e12f4c4af6c3673fd53e48217f2405bd0c5090e87b"
+        "published_sha256": "c44336ac5d81fa6918b0ad09328a78d4e8a4991bd58d47b31fbc409444cdccac"
       }
     ],
     "takt": {
       "source_path": "docs/assets/pantheon/takt-source.png",
-      "source_sha256": "9fadf5f5852a23ca9929b3bdcc90eed76e16c0df9320194a2e9df30ce90f24bf",
+      "source_sha256": "17f2095e4850b0e602f77cb992e223d0132dd424d8b124c294453c26f65c974e",
       "plate_geometry": ".github/pantheon/takt-plity.json",
       "languages": {
         "en": {
           "published_path": "docs/assets/pantheon/takt-en.png",
-          "published_sha256": "618048c9aa11d8eb1d8c76461918eb610818da223bac40d9722e2001406a7f22",
+          "published_sha256": "5adb345e99492f0f5a1938ece503ce1709b445e1dfb5b1b98834fa46033390c3",
           "alt": "Themis workflow in one wide Pantheon marble scene: seven labelled steps from Intake to Hearing, linked by blue threads beside the classical column"
         },
         "ru": {
           "published_path": "docs/assets/pantheon/takt-ru.png",
-          "published_sha256": "7b0854397a97e79f26a20512b8a48fd82ee3044c54ccf9943606835c332a1c39",
+          "published_sha256": "3c95f186d9acc59690cf63bd5d2e44934bcad0996061e1c73f498af24c749a19",
           "alt": "Такт Фемиды одной широкой мраморной сценой Pantheon: семь подписанных шагов от Приема до Заседания, связаны голубой нитью у классической колонны"
         },
         "zh": {
           "published_path": "docs/assets/pantheon/takt-zh.png",
-          "published_sha256": "18c3d82e58eb25d5007712112f2b76e1719f32ec0c4278c22d924c17febdfe96",
+          "published_sha256": "75b3a6f1a8d7c2a09c1e6632cb81013ad5277f180ac960fa82b92fce958124db",
           "alt": "Pantheon 宽幅大理石场景中的忒弥斯工作流程：从接收到开庭的七个带标注步骤，由蓝色丝线串起，旁边是古典石柱"
         }
       },
@@ -149,19 +149,19 @@
     "bible": {
       "character_sheet": {
         "published_path": "docs/assets/pantheon/bible-character.png",
-        "published_sha256": "e6edf0b8857c23bb673aec8e519162060a3b053cb949e3e36a783f89ea4eef06",
+        "published_sha256": "711148b3fda406aa7d93cf85f4406fd23496dda8e6c50e3d3eb31267dc60b871",
         "prompt_path": ".github/pantheon/bible-character-prompt.txt",
         "alt": "Themis reference sheet: four views of the same marble figure with the blindfold, braided crown, balanced gold scales and lowered marble-blade sword, plus isolated studies of the sword, the scales and the head"
       },
       "prop_sheet": {
         "published_path": "docs/assets/pantheon/bible-props.png",
-        "published_sha256": "b53d5a9928b9fd097e8cb1abf81326f6b358233d1a3265c7609e76c13d777123",
+        "published_sha256": "21062daf12fa5b0ad5086c0d61e473754600290a444546ac4b13b929de64ddfc",
         "prompt_path": ".github/pantheon/bible-props-prompt.txt",
         "alt": "Prop reference sheet: the gold client folder closed and with a blank sheet half drawn out, a blank sheet, a blank marble plaque, the blue flow thread, a frosted glass plate, a marble seat and the family column"
       },
       "jurist_sheet": {
         "published_path": "docs/assets/pantheon/bible-jurists.png",
-        "published_sha256": "7e60f92607966c5c966ef54c08948baee8e69b4232d99e90bb02dc32b7c3f8e2",
+        "published_sha256": "f22443fc8f38f918feaf9fdfa405262f111c29fdad0efddfc613ad940bf0ec0b",
         "prompt_path": ".github/pantheon/bible-jurists-prompt.txt",
         "alt": "Reference sheet of the five reviewing jurists: five white-marble busts, each recognizable by his own moustache, beard or spectacles, with the monumental marble seat they take in the council frame"
       }
@@ -189,7 +189,69 @@
           "zh": "CONTRIBUTING.zh.md"
         }
       }
-    }
+    },
+    "doc_pages": [
+      {
+        "path": "docs/DETAILS.md",
+        "frames": [
+          "assets/pantheon/hero.png",
+          "assets/pantheon/workflow/03-case-map.png",
+          "assets/pantheon/takt-en.png",
+          "assets/pantheon/workflow/01-intake.png",
+          "assets/pantheon/workflow/06-draft.png",
+          "assets/pantheon/security.png",
+          "assets/pantheon/workflow/07-hearing.png"
+        ]
+      },
+      {
+        "path": "docs/DETAILS.ru.md",
+        "frames": [
+          "assets/pantheon/hero.png",
+          "assets/pantheon/workflow/03-case-map.png",
+          "assets/pantheon/takt-ru.png",
+          "assets/pantheon/workflow/01-intake.png",
+          "assets/pantheon/workflow/06-draft.png",
+          "assets/pantheon/security.png",
+          "assets/pantheon/workflow/07-hearing.png"
+        ]
+      },
+      {
+        "path": "docs/DETAILS.zh.md",
+        "frames": [
+          "assets/pantheon/hero.png",
+          "assets/pantheon/workflow/03-case-map.png",
+          "assets/pantheon/takt-zh.png",
+          "assets/pantheon/workflow/01-intake.png",
+          "assets/pantheon/workflow/06-draft.png",
+          "assets/pantheon/security.png",
+          "assets/pantheon/workflow/07-hearing.png"
+        ]
+      },
+      {
+        "path": "docs/HOW-IT-WORKS.ru.md",
+        "frames": [
+          "assets/pantheon/workflow/01-intake.png",
+          "assets/pantheon/workflow/02-extract.png",
+          "assets/pantheon/workflow/03-case-map.png",
+          "assets/pantheon/workflow/04-research.png",
+          "assets/pantheon/workflow/05-council.png",
+          "assets/pantheon/workflow/06-draft.png",
+          "assets/pantheon/workflow/07-hearing.png"
+        ]
+      },
+      {
+        "path": "docs/HOW-IT-WORKS.en.md",
+        "frames": [
+          "assets/pantheon/workflow/01-intake.png",
+          "assets/pantheon/workflow/02-extract.png",
+          "assets/pantheon/workflow/03-case-map.png",
+          "assets/pantheon/workflow/04-research.png",
+          "assets/pantheon/workflow/05-council.png",
+          "assets/pantheon/workflow/06-draft.png",
+          "assets/pantheon/workflow/07-hearing.png"
+        ]
+      }
+    ]
   },
   "receipts": {
     "generation_path": ".github/pantheon/generation-receipt.json",

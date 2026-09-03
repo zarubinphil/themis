@@ -19,6 +19,8 @@ transliterated.
 
 ## 1. What happens when you hand it a case
 
+<p align="center"><img src="assets/pantheon/workflow/01-intake.png" alt="Intake: the closed gold client folder under Themis's hand, the blue thread of outside sources stopping at the table edge" width="100%"></p>
+
 A case is a folder. It has two faces: one turned toward you, one toward the machine.
 
 ```
@@ -86,6 +88,8 @@ iron rule here is enforced by code, not by good intentions.
 ---
 
 ## 2. How the material gets read, and why it costs nothing
+
+<p align="center"><img src="assets/pantheon/workflow/02-extract.png" alt="Extract: sheets pass under a marble lens and come out as clean glowing plates" width="100%"></p>
 
 All extraction happens on your machine. Nobody is billed for reading a scan and
 nothing is uploaded to read it.
@@ -169,6 +173,8 @@ went down.
 
 ## 3. Why there are thirteen agents rather than one
 
+<p align="center"><img src="assets/pantheon/workflow/03-case-map.png" alt="Case map: the plates laid into one connected map, blue threads joining parties, dates and claims" width="100%"></p>
+
 An agent here is a narrow role with its own tools. There are thirteen of them
 (`ls .claude/agents/` returns exactly thirteen), and the split is functional.
 
@@ -210,6 +216,8 @@ what was learned so the next similar case does not start from zero.
 ---
 
 ## 4. Where the system checks itself
+
+<p align="center"><img src="assets/pantheon/workflow/04-research.png" alt="Research: equally sharp arguments fly in from both sides, the scales level between them" width="100%"></p>
 
 This is the least familiar part. Most AI tools answer and stop. Here there are
 several guards standing between the answer and you, and each one is code rather
@@ -302,6 +310,8 @@ result more often means the search failed than that there was nothing to find.
 ---
 
 ## 5. Why it is cheap to run
+
+<p align="center"><img src="assets/pantheon/workflow/05-council.png" alt="Council: five jurists seated in marble chairs, each with his own plate, one document taken apart in the middle" width="100%"></p>
 
 Not because the model is cheap. Because it gets called less.
 
@@ -398,6 +408,8 @@ again on every following call.
 
 ## 6. What it does not do, and where you are still required
 
+<p align="center"><img src="assets/pantheon/workflow/06-draft.png" alt="Draft: one desk writes, another checks, a marble screen and a gold lock between them" width="100%"></p>
+
 Without this section everything above would be advertising.
 
 **It does not replace a lawyer and it decides nothing about your case.** It reads,
@@ -458,6 +470,8 @@ caught by a lawyer.
 ---
 
 ## 7. Privacy
+
+<p align="center"><img src="assets/pantheon/workflow/07-hearing.png" alt="Hearing: the finished document in a gold sleeve at the table edge, the scales balanced" width="100%"></p>
 
 **Case material never leaves your machine.** Client folders are excluded from
 publication at the repository level; what goes up is templates and one synthetic
